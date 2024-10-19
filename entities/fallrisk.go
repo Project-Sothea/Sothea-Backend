@@ -8,7 +8,7 @@ type FallRisk struct {
 	PastYearFall            *bool   `json:"pastYearFall" binding:"required"`
 	UnsteadyStandingFalling *bool   `json:"unsteadyStandingFalling" binding:"required"`
 	FallWorries             *bool   `json:"fallWorries" binding:"required"`
-	Others                  *string `json:"others" binding:"required"`
+	Others                  *string `json:"others"`
 	FurtherReferral         *bool   `json:"furtherReferral" binding:"required"`
 	//AdminID      uint    `gorm:"uniqueIndex;not null"` // Foreign key referencing Admin's ID
 	//Admin        Admin
