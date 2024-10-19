@@ -80,6 +80,13 @@ var visualacuity = entities.VisualAcuity{
 	REyeVision:             entities.PtrTo(int32(20)),
 	AdditionalIntervention: entities.PtrTo("VISUAL FIELD TEST REQUIRED"),
 }
+var fallrisk = entities.FallRisk{
+	PastYearFall:            entities.PtrTo(true),
+	UnsteadyStandingFalling: entities.PtrTo(false),
+	FallWorries:             entities.PtrTo(true),
+	Others:                  entities.PtrTo("NONE"),
+	FurtherReferral:         entities.PtrTo(false),
+}
 var doctorsconsultation = entities.DoctorsConsultation{
 	Healthy:           entities.PtrTo(true),
 	Msk:               entities.PtrTo(false),
@@ -178,6 +185,7 @@ func TestPostgresPatientRepository_GetPatientVisit(t *testing.T) {
 	assert.NotNil(t, p.VitalStatistics)
 	assert.NotNil(t, p.HeightAndWeight)
 	assert.NotNil(t, p.VisualAcuity)
+	assert.NotNil(t, p.FallRisk)
 	assert.NotNil(t, p.DoctorsConsultation)
 
 	// Get patient that doesn't exist
@@ -274,6 +282,7 @@ func TestPostgresPatientRepository_UpdatePatientVisit(t *testing.T) {
 	vitalstatistics.ID = id
 	heightandweight.ID = id
 	visualacuity.ID = id
+	fallrisk.ID = id
 	doctorsconsultation.ID = id
 	admin.VID = vid
 	pastmedicalhistory.VID = vid
@@ -281,6 +290,7 @@ func TestPostgresPatientRepository_UpdatePatientVisit(t *testing.T) {
 	vitalstatistics.VID = vid
 	heightandweight.VID = vid
 	visualacuity.VID = vid
+	fallrisk.VID = vid
 	doctorsconsultation.VID = vid
 
 	updatePatient := entities.Patient{
@@ -290,6 +300,7 @@ func TestPostgresPatientRepository_UpdatePatientVisit(t *testing.T) {
 		VitalStatistics:     &vitalstatistics,
 		HeightAndWeight:     &heightandweight,
 		VisualAcuity:        &visualacuity,
+		FallRisk:            &fallrisk,
 		DoctorsConsultation: nil,
 	}
 
@@ -306,6 +317,7 @@ func TestPostgresPatientRepository_UpdatePatientVisit(t *testing.T) {
 		VitalStatistics:     &vitalstatistics,
 		HeightAndWeight:     &heightandweight,
 		VisualAcuity:        &visualacuity,
+		FallRisk:            &fallrisk,
 		DoctorsConsultation: nil,
 	}
 
@@ -315,6 +327,7 @@ func TestPostgresPatientRepository_UpdatePatientVisit(t *testing.T) {
 	assert.Equal(t, p.VitalStatistics, expectedPatient.VitalStatistics)
 	assert.Equal(t, p.HeightAndWeight, expectedPatient.HeightAndWeight)
 	assert.Equal(t, p.VisualAcuity, expectedPatient.VisualAcuity)
+	assert.Equal(t, p.FallRisk, expectedPatient.FallRisk)
 	assert.Nil(t, p.DoctorsConsultation)
 
 	// Update patient that doesn't exist

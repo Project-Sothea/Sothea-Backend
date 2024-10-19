@@ -6,6 +6,7 @@ DROP TABLE IF EXISTS socialhistory;
 DROP TABLE IF EXISTS vitalstatistics;
 DROP TABLE IF EXISTS heightandweight;
 DROP TABLE IF EXISTS visualacuity;
+DROP TABLE IF EXISTS fallrisk;
 DROP TABLE IF EXISTS doctorsconsultation;
 DROP TABLE IF EXISTS admin;
 DROP TABLE IF EXISTS users;
@@ -113,6 +114,19 @@ CREATE TABLE IF NOT EXISTS visualacuity
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
 );
 
+CREATE TABLE IF NOT EXISTS fallrisk
+(
+    id                          INTEGER NOT NULL,                            -- Use INTEGER to match the id type from admin
+    vid                         INTEGER NOT NULL,                            -- Add vid to match the vid type from admin
+    past_year_fall              BOOLEAN NOT NULL,
+    unsteady_standing_walking   BOOLEAN NOT NULL,
+    fall_worries                BOOLEAN NOT NULL,
+    others                      TEXT,
+    further_referral            BOOLEAN NOT NULL,
+    PRIMARY KEY (id, vid),                                               -- Composite primary key
+    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
+);
+
 CREATE TABLE IF NOT EXISTS doctorsconsultation
 (
     id                 INTEGER NOT NULL,                                 -- Use INTEGER to match the id type from admin
@@ -216,6 +230,11 @@ INSERT INTO visualacuity (id, vid, l_eye_vision, r_eye_vision, additional_interv
 VALUES (1, 1, 20, 20, 'VISUAL FIELD TEST REQUIRED'),
        (2, 1, 15, 20, 'REFERRED TO BOC');
 
+INSERT INTO fallrisk (id, vid, past_year_fall, unsteady_standing_walking, fall_worries, others, further_referral)
+VALUES
+    (1, 1, TRUE, TRUE, FALSE, 'Patient uses walking aid occasionally', TRUE),
+    (2, 1, FALSE, FALSE, FALSE, NULL, FALSE);
+
 INSERT INTO doctorsconsultation (id, vid, healthy, msk, cvs, respi, gu, git, eye, derm, others,
                                  consultation_notes, diagnosis, treatment, referral_needed,
                                  referral_loc, remarks)
@@ -224,7 +243,7 @@ VALUES (1, 1, TRUE, FALSE, FALSE, TRUE, TRUE, FALSE, TRUE, FALSE, 'LEUKAEMIA',
         'REST, HYDRATION, COUGH SYRUP', FALSE, NULL, 'MONITOR FOR RESOLUTION');
 
 /*******************
-    Add additional entries for patient 1 and 2
+    Add additional admin entries for patient 1 and 2
  */
 INSERT INTO admin (id, family_group, reg_date, queue_no, name, khmer_name, dob, age, gender, village, contact_no,
                    pregnant, last_menstrual_period, drug_allergies, sent_to_id, photo)
@@ -279,16 +298,17 @@ INSERT INTO visualacuity (id, vid, l_eye_vision, r_eye_vision, additional_interv
 VALUES (1, 2, 20, 20, 'VISUAL FIELD TEST REQUIRED'),
        (2, 2, 15, 20, 'REFERRED TO BOC');
 
+INSERT INTO fallrisk (id, vid, past_year_fall, unsteady_standing_walking, fall_worries, others, further_referral)
+VALUES (1, 2, FALSE, TRUE, TRUE, 'Feels unsteady sometimes, but no falls in the past year', TRUE),
+        (2, 2, TRUE, TRUE, FALSE, 'Uses a walking aid, had a fall last year', TRUE);
+
 INSERT INTO doctorsconsultation (id, vid, healthy, msk, cvs, respi, gu, git, eye, derm, others,
                                  consultation_notes, diagnosis, treatment, referral_needed,
                                  referral_loc, remarks)
 VALUES (1, 2, TRUE, FALSE, FALSE, TRUE, TRUE, FALSE, TRUE, FALSE, 'LEUKAEMIA',
         'CHEST PAIN, SHORTNESS OF BREATH, COUGH', 'ACUTE BRONCHITIS',
-        'REST, HYDRATION, COUGH SYRUP', FALSE, NULL, 'MONITOR FOR RESOLUTION');
-INSERT INTO doctorsconsultation (id, vid, healthy, msk, cvs, respi, gu, git, eye, derm, others,
-                                 consultation_notes, diagnosis, treatment, referral_needed,
-                                 referral_loc, remarks)
-VALUES (2, 2, TRUE, FALSE, FALSE, TRUE, TRUE, FALSE, TRUE, FALSE, 'LEUKAEMIA',
+        'REST, HYDRATION, COUGH SYRUP', FALSE, NULL, 'MONITOR FOR RESOLUTION'),
+        (2, 2, TRUE, FALSE, FALSE, TRUE, TRUE, FALSE, TRUE, FALSE, 'LEUKAEMIA',
         'CHEST PAIN, SHORTNESS OF BREATH, COUGH', 'ACUTE BRONCHITIS',
         'REST, HYDRATION, COUGH SYRUP', FALSE, NULL, 'MONITOR FOR RESOLUTION');
 

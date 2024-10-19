@@ -13,6 +13,7 @@ type Patient struct {
 	VitalStatistics     *VitalStatistics     `json:"vitalstatistics"`
 	HeightAndWeight     *HeightAndWeight     `json:"heightandweight"`
 	VisualAcuity        *VisualAcuity        `json:"visualacuity"`
+	FallRisk            *FallRisk            `json:"fallrisk"`
 	DoctorsConsultation *DoctorsConsultation `json:"doctorsconsultation"`
 }
 
