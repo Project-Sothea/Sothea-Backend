@@ -1,5 +1,5 @@
 # Project Sothea Backend
-### Last Updated: August 29, 2024
+### Last Updated: 20 Oct, 2024
 ## Overview
 
 This is the backend for the patient management system for Project Sothea, and is to be set up in conjunction with the frontend.  
@@ -89,14 +89,16 @@ GET /patient/:id/:vid
 
 If successful, returns `200` and the following response attributes:
 
-| Attribute            | Type   | Description          |
-|----------------------|--------|----------------------|
-| `admin`              | object | Guaranteed to exist. |
-| `pastmedicalhistory` | object | May not exist.       |
-| `socialhistory`      | object | May not exist.       |
-| `vitalstatistics`    | object | May not exist.       |
-| `heightandweight`    | object | May not exist.       |
-| `visualacuity`       | object | May not exist.       |
+| Attribute             | Type   | Description          |
+|-----------------------|--------|----------------------|
+| `admin`               | object | Guaranteed to exist. |
+| `pastmedicalhistory`  | object | May not exist.       |
+| `socialhistory`       | object | May not exist.       |
+| `vitalstatistics`     | object | May not exist.       |
+| `heightandweight`     | object | May not exist.       |
+| `visualacuity`        | object | May not exist.       |
+| `fallrisk`            | object | May not exist.       |
+| `doctorsconsultation` | object | May not exist.       |
 
 Unsuccessful responses include:  
 `404` - Patient not found.  
@@ -190,6 +192,15 @@ Example response:
   "rEyeVision": 20,
   "additionalIntervention": "VISUAL FIELD TEST REQUIRED"
  },
+  "fallrisk": {
+    "id": 2,
+    "vid": 2,
+    "pastYearFall": true,
+    "unsteadyStandingFalling": true,
+    "fallWorries": false,
+    "others": "Uses a walking aid, had a fall last year",
+    "furtherReferral": true
+  },
  "doctorsconsultation": {
   "id": 1,
   "vid": 1,
@@ -433,6 +444,13 @@ curl --location --request PATCH 'http://localhost:9090/patient/1/1' \
         "rEyeVision": 20,
         "additionalIntervention": "VISUAL FIELD TEST REQUIRED"
     },
+    "fallrisk": {
+        "pastYearFall": true,
+        "unsteadyStandingFalling": true,
+        "fallWorries": false,
+        "others": "Uses a walking aid, had a fall last year",
+        "furtherReferral": true
+    },
     "doctorsConsultation": {
         "healthy": true,
         "msk": false,
@@ -623,10 +641,12 @@ Example response:
 ```
 
 #### Export Patients
-Export all patient data to a CSV file.
+Export all patient data to a CSV file. Takes a query parameter `includePhoto` that defaults to false to include the patient's photos in the CSV file.
 
 ```plaintext
 GET /export-db
+
+GET /export-db?includePhoto=true
 ```
 
 #### Is Valid Token
