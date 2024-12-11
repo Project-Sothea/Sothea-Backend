@@ -41,6 +41,7 @@ To facilitate easy setup of the patients database with preloaded data, we've opt
 
 Running with a volume:
 In this project's root directory, run the Postgres database container with `docker run --name sothea-db -d -p 5432:5432 -v $(pwd)/data:/var/lib/postgresql/data sothea-db`
+For Windows Powershell: `docker run --name sothea-db -d -p 5432:5432 -v ${PWD}/data:/var/lib/postgresql/data sothea-db`
 
 ### Modes of Operation
 When running the Go binary, you can specify the mode of operation using the `--mode` flag. The available modes are:  
