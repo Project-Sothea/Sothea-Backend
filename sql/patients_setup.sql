@@ -262,6 +262,4 @@ CREATE TABLE users
 
 -- Insert the users
 INSERT INTO users (username, password_hash)
-VALUES ('admin', '$2a$10$Y/FMxVZsuiPcVutd0O3kfuWEyWyqZUb4HC5yXF7.xVxNCt9GUfOPe');
-INSERT INTO users (username, password_hash)
 VALUES ('user', '$2a$10$cqFdRzsZVwGF6fI4N.YEYOOEZL7B/93RmEZRkVPVHHqyBMfNwy48i');
