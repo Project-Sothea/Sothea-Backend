@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 
@@ -151,8 +150,7 @@ func (h *PharmacyHandler) ListBatches(c *gin.Context) {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 		return
 	}
-	fmt.Println("hello")
-	fmt.Println(batches)
+
 	c.JSON(http.StatusOK, batches)
 }
 

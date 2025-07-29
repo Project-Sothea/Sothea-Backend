@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 
@@ -92,7 +91,6 @@ func (h *PrescriptionHandler) GetPrescription(c *gin.Context) {
 		return
 	}
 
-	fmt.Println("HEHEHEHHE")
 	ctx := c.Request.Context()
 	prescription, err := h.Usecase.GetPrescriptionByID(ctx, id)
 	if err != nil {
