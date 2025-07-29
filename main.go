@@ -4,14 +4,15 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
+	"log"
+	"time"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	_httpDelivery "github.com/jieqiboh/sothea_backend/controllers"
 	_patientPostgresRepository "github.com/jieqiboh/sothea_backend/repository/postgres"
 	_useCase "github.com/jieqiboh/sothea_backend/usecases"
 	"github.com/spf13/viper"
-	"log"
-	"time"
 )
 
 func main() {
@@ -86,6 +87,14 @@ func main() {
 	// Set up patient routes
 	patientUseCase := _useCase.NewPatientUsecase(patientRepo, 2*time.Second)
 	_httpDelivery.NewPatientHandler(router, patientUseCase, secretKey)
+
+	pharmacyRepo := _patientPostgresRepository.NewPostgresPharmacyRepository(db)
+	pharmacyUseCase := _useCase.NewPharmacyUsecase(pharmacyRepo, 2*time.Second)
+	_httpDelivery.NewPharmacyHandler(router, pharmacyUseCase, secretKey)
+
+	prescriptionRepo := _patientPostgresRepository.NewPostgresPrescriptionRepository(db)
+	prescriptionUseCase := _useCase.NewPrescriptionUsecase(prescriptionRepo, 2*time.Second)
+	_httpDelivery.NewPrescriptionHandler(router, prescriptionUseCase, secretKey)
 
 	router.Run(address)
 }
