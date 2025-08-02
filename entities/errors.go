@@ -9,4 +9,6 @@ var (
 	ErrMissingAdminCategory = errors.New("Missing Admin field")
 	ErrAuthenticationFailed = errors.New("Not Authenticated")
 	ErrLoginFailed          = errors.New("Login Failed")
+
+	ErrDrugNameTaken = errors.New("A drug with that name already exists")
 )
