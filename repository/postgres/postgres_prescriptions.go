@@ -245,28 +245,86 @@ func (r *postgresPrescriptionRepository) UpdatePrescription(ctx context.Context,
 	}
 	defer tx.Rollback()
 
-	// Step 1: Load existing prescription with drug + batch info
-	existing, err := r.GetPrescriptionByID(ctx, p.ID)
+	// --- Step 1: Load existing per-batch totals INSIDE this txn ---
+	oldTotals := make(map[int64]int64)
+	rows, err := tx.QueryContext(ctx, `
+		SELECT pbi.drug_batch_id, COALESCE(SUM(pbi.quantity), 0)
+		FROM drug_prescriptions dp
+		JOIN prescription_batch_items pbi ON pbi.drug_prescription_id = dp.id
+		WHERE dp.prescription_id = $1
+		GROUP BY pbi.drug_batch_id
+	`, p.ID)
 	if err != nil {
 		return nil, err
 	}
+	for rows.Next() {
+		var batchID, qty int64
+		if err := rows.Scan(&batchID, &qty); err != nil {
+			return nil, err
+		}
+		oldTotals[batchID] = qty
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
 
-	// Step 2: Restore stock for existing batch items
-	for _, d := range existing.PrescribedDrugs {
-		for _, b := range d.Batches {
-			_, err := tx.ExecContext(ctx, `
+	// --- Step 2: Build new per-batch totals from payload ---
+	newTotals := make(map[int64]int64)
+	for i := range p.PrescribedDrugs {
+		for j := range p.PrescribedDrugs[i].Batches {
+			b := p.PrescribedDrugs[i].Batches[j]
+			newTotals[b.BatchId] += int64(b.Quantity)
+		}
+	}
+
+	// --- Step 3: Apply per-batch delta (new - old). Positive = take stock; Negative = return stock ---
+	keys := map[int64]struct{}{}
+	for k := range oldTotals {
+		keys[k] = struct{}{}
+	}
+	for k := range newTotals {
+		keys[k] = struct{}{}
+	}
+
+	for batchID := range keys {
+		oldQ := oldTotals[batchID]
+		newQ := newTotals[batchID]
+		delta := newQ - oldQ
+		if delta == 0 {
+			continue
+		}
+
+		if delta > 0 {
+			// Need more from this batch
+			res, err := tx.ExecContext(ctx, `
+				UPDATE drug_batches
+				SET quantity = quantity - $1
+				WHERE id = $2 AND quantity >= $1
+			`, delta, batchID)
+			if err != nil {
+				return nil, err
+			}
+			if rows, _ := res.RowsAffected(); rows == 0 {
+				return nil, fmt.Errorf("insufficient stock in batch %d", batchID)
+			}
+		} else {
+			// Return surplus to this batch
+			if _, err := tx.ExecContext(ctx, `
 				UPDATE drug_batches
 				SET quantity = quantity + $1
 				WHERE id = $2
-			`, b.Quantity, b.BatchId)
-			if err != nil {
+			`, -delta, batchID); err != nil {
 				return nil, err
 			}
 		}
 	}
 
-	// Step 3: Delete old batch items and drug prescriptions
-	_, err = tx.ExecContext(ctx, `DELETE FROM prescription_batch_items WHERE drug_prescription_id IN (SELECT id FROM drug_prescriptions WHERE prescription_id = $1)`, p.ID)
+	// --- Step 4: Delete old batch items and drug prescriptions (no stock math here) ---
+	_, err = tx.ExecContext(ctx, `
+		DELETE FROM prescription_batch_items
+		WHERE drug_prescription_id IN (SELECT id FROM drug_prescriptions WHERE prescription_id = $1)
+	`, p.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +333,7 @@ func (r *postgresPrescriptionRepository) UpdatePrescription(ctx context.Context,
 		return nil, err
 	}
 
-	// Step 4: Update prescription metadata
+	// --- Step 5: Update prescription metadata ---
 	_, err = tx.ExecContext(ctx, `
 		UPDATE prescriptions
 		SET patient_id = $2, vid = $3, staff_id = $4, notes = $5, updated_at = now()
@@ -285,7 +343,7 @@ func (r *postgresPrescriptionRepository) UpdatePrescription(ctx context.Context,
 		return nil, err
 	}
 
-	// Step 5: Insert new prescribed drugs and batch items
+	// --- Step 6: Insert new prescribed drugs and batch items (DO NOT touch stock here) ---
 	for i := range p.PrescribedDrugs {
 		d := &p.PrescribedDrugs[i]
 
@@ -311,24 +369,10 @@ func (r *postgresPrescriptionRepository) UpdatePrescription(ctx context.Context,
 			if err != nil {
 				return nil, err
 			}
-
-			// Step 6: Subtract new batch quantities
-			res, err := tx.ExecContext(ctx, `
-				UPDATE drug_batches
-				SET quantity = quantity - $1
-				WHERE id = $2 AND quantity >= $1
-			`, b.Quantity, b.BatchId)
-			if err != nil {
-				return nil, err
-			}
-			rows, _ := res.RowsAffected()
-			if rows == 0 {
-				return nil, fmt.Errorf("insufficient stock in batch %d", b.BatchId)
-			}
 		}
 	}
 
-	// Step 7: Commit
+	// --- Step 7: Commit ---
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -337,13 +381,80 @@ func (r *postgresPrescriptionRepository) UpdatePrescription(ctx context.Context,
 }
 
 func (r *postgresPrescriptionRepository) DeletePrescription(ctx context.Context, id int64) error {
-	res, err := r.Conn.ExecContext(ctx, `DELETE FROM prescriptions WHERE id = $1`, id)
+	tx, err := r.Conn.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	rows, _ := res.RowsAffected()
-	if rows == 0 {
+	defer tx.Rollback()
+
+	// 1) Collect current allocations (per batch) INSIDE this txn
+	type alloc struct {
+		batchID int64
+		qty     int64
+	}
+	var allocs []alloc
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT pbi.drug_batch_id, COALESCE(SUM(pbi.quantity), 0) AS qty
+		FROM drug_prescriptions dp
+		JOIN prescription_batch_items pbi ON pbi.drug_prescription_id = dp.id
+		WHERE dp.prescription_id = $1
+		GROUP BY pbi.drug_batch_id
+	`, id)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var a alloc
+		if err := rows.Scan(&a.batchID, &a.qty); err != nil {
+			return err
+		}
+		allocs = append(allocs, a)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+
+	// 2) Restock batches
+	for _, a := range allocs {
+		if a.qty == 0 {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE drug_batches
+			SET quantity = quantity + $1
+			WHERE id = $2
+		`, a.qty, a.batchID); err != nil {
+			return err
+		}
+	}
+
+	// 3) Delete children, then parent
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM prescription_batch_items
+		WHERE drug_prescription_id IN (
+			SELECT id FROM drug_prescriptions WHERE prescription_id = $1
+		)
+	`, id); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM drug_prescriptions
+		WHERE prescription_id = $1
+	`, id); err != nil {
+		return err
+	}
+
+	res, err := tx.ExecContext(ctx, `DELETE FROM prescriptions WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
 		return errors.New("prescription not found")
 	}
-	return nil
+
+	// 4) Commit
+	return tx.Commit()
 }
