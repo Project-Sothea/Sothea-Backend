@@ -2,15 +2,16 @@ package controllers
 
 import (
 	"context"
-	"github.com/gin-gonic/gin"
-	entities "github.com/jieqiboh/sothea_backend/entities"
-	"github.com/jieqiboh/sothea_backend/mocks"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	entities "github.com/jieqiboh/sothea_backend/entities"
+	"github.com/jieqiboh/sothea_backend/mocks"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -109,7 +110,7 @@ func newTestPatientHandler(e *gin.Engine, us entities.PatientUseCase) {
 		Usecase: us,
 	}
 
-	e.GET("/patient/:id/visit/:vid", handler.GetPatientVisit)
+	e.GET("/patient/:id/:vid", handler.GetPatientVisit)
 	e.POST("/patient", handler.CreatePatient)
 	e.POST("/patient/:id", handler.CreatePatientVisit)
 	e.DELETE("/patient/:id/:vid", handler.DeletePatientVisit)
@@ -131,7 +132,7 @@ func TestGetPatientVisit_Success(t *testing.T) {
 	newTestPatientHandler(router, &mockUsecase)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/patient/1/visit/1", nil)
+	req, _ := http.NewRequest("GET", "/patient/1/1", nil)
 
 	router.ServeHTTP(w, req)
 
@@ -154,13 +155,13 @@ func TestGetPatientVisit_BadRequest(t *testing.T) {
 
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, 404, w.Code)
+	assert.Equal(t, 400, w.Code)
 
 	req, _ = http.NewRequest("GET", "/patient/"+wrongId+"/1", nil)
 
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, 404, w.Code)
+	assert.Equal(t, 400, w.Code)
 }
 
 func TestGetPatientVisit_NotFound(t *testing.T) {

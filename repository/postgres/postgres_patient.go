@@ -5,13 +5,14 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"log"
+	"os"
+	"time"
+
 	"github.com/jieqiboh/sothea_backend/entities"
 	"github.com/jieqiboh/sothea_backend/util"
 	"github.com/joho/sqltocsv"
 	_ "github.com/lib/pq"
-	"log"
-	"os"
-	"time"
 )
 
 type postgresPatientRepository struct {
@@ -77,7 +78,7 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 		&pastmedicalhistory.SpecifiedSTDs,
 		&pastmedicalhistory.Others,
 	)
-	if errors.Is(sql.ErrNoRows, err) { // no pastmedicalhistory found
+	if errors.Is(err, sql.ErrNoRows) { // no pastmedicalhistory found
 		pastmedicalhistory = nil
 	} else if err != nil { // unknown error
 		return nil, err
@@ -95,7 +96,7 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 		&socialhistory.AlcoholHistory,
 		&socialhistory.HowRegular,
 	)
-	if errors.Is(sql.ErrNoRows, err) { // no socialhistory found
+	if errors.Is(err, sql.ErrNoRows) { // no socialhistory found
 		socialhistory = nil
 	} else if err != nil { // unknown error
 		return nil, err
@@ -119,7 +120,7 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 		&vitalstatistics.AverageHR,
 		&vitalstatistics.RandomBloodGlucoseMmolL,
 	)
-	if errors.Is(sql.ErrNoRows, err) { // no vitalstatistics found
+	if errors.Is(err, sql.ErrNoRows) { // no vitalstatistics found
 		vitalstatistics = nil
 	} else if err != nil { // unknown error
 		return nil, err
@@ -137,7 +138,7 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 		&heightandweight.PaedsHeight,
 		&heightandweight.PaedsWeight,
 	)
-	if errors.Is(sql.ErrNoRows, err) { // no heightandweight found
+	if errors.Is(err, sql.ErrNoRows) { // no heightandweight found
 		heightandweight = nil
 	} else if err != nil { // unknown error
 		return nil, err
@@ -152,7 +153,7 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 		&visualacuity.REyeVision,
 		&visualacuity.AdditionalIntervention,
 	)
-	if errors.Is(sql.ErrNoRows, err) { // no visualacuity found
+	if errors.Is(err, sql.ErrNoRows) { // no visualacuity found
 		visualacuity = nil
 	} else if err != nil { // unknown error
 		return nil, err
@@ -171,7 +172,7 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 		&fallrisk.Unsteadiness,
 		&fallrisk.FallRiskScore,
 	)
-	if errors.Is(sql.ErrNoRows, err) { // no fallrisk found
+	if errors.Is(err, sql.ErrNoRows) { // no fallrisk found
 		fallrisk = nil
 	} else if err != nil { // unknown error
 		return nil, err
@@ -223,7 +224,7 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 		&dental.Tooth47,
 		&dental.Tooth48,
 	)
-	if errors.Is(sql.ErrNoRows, err) { // no dental found
+	if errors.Is(err, sql.ErrNoRows) { // no dental found
 		dental = nil
 	} else if err != nil { // unknown error
 		return nil, err
@@ -244,7 +245,7 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 		&physiotherapy.AnxiousLowMood,
 		&physiotherapy.MedicationManageSymptoms,
 	)
-	if errors.Is(sql.ErrNoRows, err) { // no physiotherapy found
+	if errors.Is(err, sql.ErrNoRows) { // no physiotherapy found
 		physiotherapy = nil
 	} else if err != nil { // unknown error
 		return nil, err
@@ -271,7 +272,7 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 		&doctorsconsultation.ReferralLoc,
 		&doctorsconsultation.Remarks,
 	)
-	if errors.Is(sql.ErrNoRows, err) { // no doctorsconsultation found
+	if errors.Is(err, sql.ErrNoRows) { // no doctorsconsultation found
 		doctorsconsultation = nil
 	} else if err != nil { // unknown error
 		return nil, err
@@ -347,7 +348,7 @@ func (p *postgresPatientRepository) CreatePatientVisit(ctx context.Context, id i
 	doesPatientExist, err := p.checkPatientExists(ctx, id)
 	if err != nil { // query error
 		return -1, err
-	} else if doesPatientExist == false { // no query error, and patient doesn't exist
+	} else if !doesPatientExist { // no query error, and patient doesn't exist
 		return -1, entities.ErrPatientNotFound
 	}
 
@@ -414,6 +415,10 @@ func (p *postgresPatientRepository) DeletePatientVisit(ctx context.Context, id i
 	if err != nil {
 		return err
 	}
+	_, err = tx.Exec("DELETE FROM prescriptions WHERE prescriptions.id = $1 AND prescriptions.vid = $2;", id, vid)
+	if err != nil {
+		return err
+	}
 	_, err = tx.Exec("DELETE FROM admin WHERE id = $1 AND vid = $2", id, vid)
 	if err != nil {
 		return err
@@ -442,7 +447,7 @@ func (p *postgresPatientRepository) UpdatePatientVisit(ctx context.Context, id i
 	doesPatientVisitExist, err := p.checkPatientVisitExists(ctx, id, vid)
 	if err != nil {
 		return err
-	} else if doesPatientVisitExist == false {
+	} else if !doesPatientVisitExist {
 		return entities.ErrPatientVisitNotFound
 	}
 
@@ -630,6 +635,10 @@ func (p *postgresPatientRepository) UpdatePatientVisit(ctx context.Context, id i
 			tooth_47 = $41,
 			tooth_48 = $42
 		`, id, vid, d.CleanTeethFreq, d.SugarConsumeFreq, d.PastYearDecay, d.BrushTeethPain, d.DrinkOtherWater, d.DentalNotes, d.ReferralNeeded, d.ReferralLoc, d.Tooth11, d.Tooth12, d.Tooth13, d.Tooth14, d.Tooth15, d.Tooth16, d.Tooth17, d.Tooth18, d.Tooth21, d.Tooth22, d.Tooth23, d.Tooth24, d.Tooth25, d.Tooth26, d.Tooth27, d.Tooth28, d.Tooth31, d.Tooth32, d.Tooth33, d.Tooth34, d.Tooth35, d.Tooth36, d.Tooth37, d.Tooth38, d.Tooth41, d.Tooth42, d.Tooth43, d.Tooth44, d.Tooth45, d.Tooth46, d.Tooth47, d.Tooth48)
+
+		if err != nil {
+			return err
+		}
 	}
 	if phy != nil {
 		_, err = tx.ExecContext(ctx, `
@@ -694,7 +703,7 @@ func (p *postgresPatientRepository) GetPatientMeta(ctx context.Context, id int32
 	doesPatientExist, err := p.checkPatientExists(ctx, id)
 	if err != nil { // query error
 		return nil, err
-	} else if doesPatientExist == false { // no query error, and patient doesn't exist
+	} else if !doesPatientExist { // no query error, and patient doesn't exist
 		return nil, entities.ErrPatientNotFound
 	}
 

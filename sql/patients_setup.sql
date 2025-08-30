@@ -340,22 +340,22 @@ VALUES (1, 'Family 1', '2025-07-01', 'Q123', 'John Doe', 'ខេមរ', '1990-0
 
 INSERT INTO admin (id, family_group, reg_date, queue_no, name, khmer_name, dob, age, gender, village, contact_no,
                    pregnant, last_menstrual_period, drug_allergies, sent_to_id, photo)
-VALUES (1, 'Family 2', '2024-12-02', 'Q124', 'Jane Doe', 'ចន ឌូ', '1990-01-011', 34, 'F', 'Village 2', '987654321',
+VALUES (1, 'Family 2', '2024-12-02', 'Q124', 'Jane Doe', 'ចន ឌូ', '1990-01-11', 34, 'F', 'Village 2', '987654321',
         true, '2023-06-15', 'Penicillin', true, NULL);
 
 INSERT INTO admin (id, family_group, reg_date, queue_no, name, khmer_name, dob, age, gender, village, contact_no,
                    pregnant, last_menstrual_period, drug_allergies, sent_to_id, photo)
-VALUES (1, 'Family 1', '2023-07-03', 'Q125', 'Alice Doe', 'អាលីស ស្ម៊ីត', '1990-01-010', 35, 'F', 'Village 1',
+VALUES (1, 'Family 1', '2023-07-03', 'Q125', 'Alice Doe', 'អាលីស ស្ម៊ីត', '1990-01-01', 35, 'F', 'Village 1',
         '555666777', false, '2023-05-01', 'None', false, NULL);
 
 INSERT INTO admin (id, family_group, reg_date, queue_no, name, khmer_name, dob, age, gender, village, contact_no,
                    pregnant, last_menstrual_period, drug_allergies, sent_to_id, photo)
-VALUES (2, 'B009', '2024-12-03', 'Q125', 'Walter White', 'អាលីស ស្ម៊ីត', '1990-01-010', 52, 'M', 'ABQ',
+VALUES (2, 'B009', '2024-12-03', 'Q125', 'Walter White', 'អាលីស ស្ម៊ីត', '1990-01-01', 52, 'M', 'ABQ',
         '555666777', false, '2023-05-01', 'None', false, NULL);
 
 INSERT INTO admin (id, family_group, reg_date, queue_no, name, khmer_name, dob, age, gender, village, contact_no,
                    pregnant, last_menstrual_period, drug_allergies, sent_to_id, photo)
-VALUES (2, 'B009', '2023-10-03', 'Q125', 'Walter White', 'អាលីស ស្ម៊ីត', '1990-01-010', 52, 'M', 'ABQ',
+VALUES (2, 'B009', '2023-10-03', 'Q125', 'Walter White', 'អាលីស ស្ម៊ីត', '1990-01-01', 52, 'M', 'ABQ',
         '555666777', false, '2023-05-01', 'None', false, NULL);
 
 /*******************

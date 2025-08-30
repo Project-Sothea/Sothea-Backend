@@ -14,6 +14,7 @@ type Prescription struct {
 	CreatedAt       time.Time          `json:"createdAt"`
 	UpdatedAt       time.Time          `json:"updatedAt"`
 	PrescribedDrugs []DrugPrescription `json:"prescribedDrugs"`
+	IsPacked        bool               `json:"isPacked"`
 }
 
 type DrugPrescription struct {

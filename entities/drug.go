@@ -20,7 +20,7 @@ type DrugBatch struct {
 	ID          int64      `json:"id"`
 	DrugID      int64      `json:"drug_id"`
 	BatchNumber string     `json:"batch_no"`
-	Location    *string    `json:"location,omitempty"`
+	Location    string     `json:"location,omitempty"`
 	Quantity    int        `json:"quantity"`
 	ExpiryDate  time.Time  `json:"expiry_date"`
 	Supplier    *string    `json:"supplier,omitempty"`

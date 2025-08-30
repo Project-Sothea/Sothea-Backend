@@ -27,9 +27,6 @@ func (r *postgresPrescriptionRepository) CreatePrescription(ctx context.Context,
 		return nil, err
 	}
 	defer tx.Rollback()
-	fmt.Println("HELLO")
-	fmt.Println(p.PatientID)
-	fmt.Println(p.VID)
 
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO prescriptions (patient_id, vid, staff_id, notes)
@@ -92,19 +89,14 @@ func (r *postgresPrescriptionRepository) CreatePrescription(ctx context.Context,
 func (r *postgresPrescriptionRepository) GetPrescriptionByID(ctx context.Context, id int64) (*entities.Prescription, error) {
 	var p entities.Prescription
 
-	fmt.Println("HELLO1")
-	fmt.Println(p.PrescribedDrugs)
 	err := r.Conn.QueryRowContext(ctx, `
-		SELECT id, patient_id, vid, staff_id, notes, created_at, updated_at
+		SELECT id, patient_id, vid, staff_id, notes, created_at, updated_at, is_packed
 		FROM prescriptions
 		WHERE id = $1
-	`, id).Scan(&p.ID, &p.PatientID, &p.VID, &p.StaffID, &p.Notes, &p.CreatedAt, &p.UpdatedAt)
+	`, id).Scan(&p.ID, &p.PatientID, &p.VID, &p.StaffID, &p.Notes, &p.CreatedAt, &p.UpdatedAt, &p.IsPacked)
 	if err != nil {
 		return nil, err
 	}
-
-	fmt.Println("HELLO")
-	fmt.Println(p.PrescribedDrugs)
 
 	drugRows, err := r.Conn.QueryContext(ctx, `
 		SELECT id, prescription_id, drug_id, quantity, remarks, created_at, updated_at
@@ -151,7 +143,7 @@ func (r *postgresPrescriptionRepository) GetPrescriptionByID(ctx context.Context
 
 func (r *postgresPrescriptionRepository) ListPrescriptions(ctx context.Context, patientID *int64, vid *int32) ([]*entities.Prescription, error) {
 	query := `
-		SELECT id, patient_id, vid, staff_id, notes, created_at, updated_at
+		SELECT id, patient_id, vid, staff_id, notes, created_at, updated_at, is_packed
 		FROM prescriptions`
 
 	var rows *sql.Rows
@@ -176,7 +168,7 @@ func (r *postgresPrescriptionRepository) ListPrescriptions(ctx context.Context, 
 	var result []*entities.Prescription
 	for rows.Next() {
 		var p entities.Prescription
-		err := rows.Scan(&p.ID, &p.PatientID, &p.VID, &p.StaffID, &p.Notes, &p.CreatedAt, &p.UpdatedAt)
+		err := rows.Scan(&p.ID, &p.PatientID, &p.VID, &p.StaffID, &p.Notes, &p.CreatedAt, &p.UpdatedAt, &p.IsPacked)
 		if err != nil {
 			return nil, err
 		}
@@ -336,9 +328,9 @@ func (r *postgresPrescriptionRepository) UpdatePrescription(ctx context.Context,
 	// --- Step 5: Update prescription metadata ---
 	_, err = tx.ExecContext(ctx, `
 		UPDATE prescriptions
-		SET patient_id = $2, vid = $3, staff_id = $4, notes = $5, updated_at = now()
+		SET patient_id = $2, vid = $3, staff_id = $4, notes = $5, updated_at = now(), is_packed=$6
 		WHERE id = $1
-	`, p.ID, p.PatientID, p.VID, p.StaffID, p.Notes)
+	`, p.ID, p.PatientID, p.VID, p.StaffID, p.Notes, p.IsPacked)
 	if err != nil {
 		return nil, err
 	}

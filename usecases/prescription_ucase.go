@@ -2,7 +2,6 @@ package usecases
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/jieqiboh/sothea_backend/entities"
@@ -35,7 +34,6 @@ func (u *prescriptionUsecase) CreatePrescription(ctx context.Context, p *entitie
 }
 
 func (u *prescriptionUsecase) GetPrescriptionByID(ctx context.Context, id int64) (*entities.Prescription, error) {
-	fmt.Print("TOEOEOEOEO")
 	ctx, cancel := context.WithTimeout(ctx, u.contextTimeout)
 	defer cancel()
 	return u.repo.GetPrescriptionByID(ctx, id)

@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 
@@ -107,7 +106,7 @@ func (h *PharmacyHandler) UpdateDrug(c *gin.Context) {
 	d.ID = id // ensure path param wins
 
 	ctx := c.Request.Context()
-	drug, err := h.Usecase.CreateDrug(ctx, &d)
+	drug, err := h.Usecase.UpdateDrug(ctx, &d)
 	if err != nil {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 		return
@@ -151,8 +150,6 @@ func (h *PharmacyHandler) ListBatches(c *gin.Context) {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 		return
 	}
-	fmt.Println("hello")
-	fmt.Println(batches)
 	c.JSON(http.StatusOK, batches)
 }
 
