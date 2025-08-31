@@ -21,7 +21,6 @@ type DrugPrescription struct {
 	ID             int64                   `json:"id"`
 	PrescriptionID int64                   `json:"prescriptionId"`
 	DrugID         int64                   `json:"drugId"`
-	Quantity       int                     `json:"quantity"`
 	Remarks        *string                 `json:"remarks"` // aka instructions
 	CreatedAt      time.Time               `json:"createdAt"`
 	UpdatedAt      time.Time               `json:"updatedAt"`
@@ -31,7 +30,7 @@ type DrugPrescription struct {
 type PrescriptionBatchItem struct {
 	ID                 int64     `json:"id"`
 	DrugPrescriptionID int64     `json:"drugPrescriptionId"`
-	BatchId            int64     `json:"batchId"`
+	BatchLocationId    int64     `json:"batchLocationId"`
 	Quantity           int       `json:"quantity"`
 	CreatedAt          time.Time `json:"createdAt"`
 	UpdatedAt          time.Time `json:"updatedAt"`

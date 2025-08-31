@@ -63,27 +63,34 @@ func mustCreateDrug(t *testing.T, name string) *entities.Drug {
 	return d
 }
 
-func mustCreateBatch(t *testing.T, drugID int64, batchNo string, qty int, expiry time.Time) int64 {
+// Creates a batch row and a location row with quantity, returns (batchID, locationID)
+func mustCreateBatchAndLocation(t *testing.T, drugID int64, batchNo string, qty int, expiry time.Time, location string) (int64, int64) {
 	t.Helper()
 	ctx := context.Background()
-	ph := NewPostgresPharmacyRepository(db).(*postgresPharmacyRepository)
 
-	id, err := ph.CreateBatch(ctx, &entities.DrugBatch{
-		DrugID:      drugID,
-		BatchNumber: batchNo,
-		Location:    "Main",
-		Quantity:    qty,
-		ExpiryDate:  expiry,
-		Supplier:    entities.PtrTo("ACME"),
-	})
+	var batchID int64
+	err := db.QueryRowContext(ctx, `
+		INSERT INTO drug_batches (drug_id, batch_number, expiry_date, supplier)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, drugID, batchNo, expiry, "ACME").Scan(&batchID)
 	assert.Nil(t, err)
-	return id
+
+	var locID int64
+	err = db.QueryRowContext(ctx, `
+		INSERT INTO batch_locations (batch_id, location, quantity)
+		VALUES ($1, $2, $3)
+		RETURNING id
+	`, batchID, location, qty).Scan(&locID)
+	assert.Nil(t, err)
+
+	return batchID, locID
 }
 
-func getBatchQty(t *testing.T, batchID int64) int64 {
+func getLocationQty(t *testing.T, locationID int64) int64 {
 	t.Helper()
 	var q int64
-	err := db.QueryRow(`SELECT quantity FROM drug_batches WHERE id=$1`, batchID).Scan(&q)
+	err := db.QueryRow(`SELECT quantity FROM batch_locations WHERE id=$1`, locationID).Scan(&q)
 	assert.Nil(t, err)
 	return q
 }
@@ -96,11 +103,11 @@ func TestPrescription_CreateAndGet_ReducesStockAndHydrates(t *testing.T) {
 
 	// stock
 	drug := mustCreateDrug(t, unique("Paracetamol"))
-	b1 := mustCreateBatch(t, drug.ID, "P-B1", 100, time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC))
-	b2 := mustCreateBatch(t, drug.ID, "P-B2", 50, time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC))
+	_, loc1 := mustCreateBatchAndLocation(t, drug.ID, "P-B1", 100, time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC), "Main")
+	_, loc2 := mustCreateBatchAndLocation(t, drug.ID, "P-B2", 50, time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC), "Main")
 
-	before1 := getBatchQty(t, b1)
-	before2 := getBatchQty(t, b2)
+	before1 := getLocationQty(t, loc1)
+	before2 := getLocationQty(t, loc2)
 
 	repo := NewPostgresPrescriptionRepository(db).(*postgresPrescriptionRepository)
 
@@ -110,12 +117,11 @@ func TestPrescription_CreateAndGet_ReducesStockAndHydrates(t *testing.T) {
 		Notes:     entities.PtrTo("Take after meals"),
 		PrescribedDrugs: []entities.DrugPrescription{
 			{
-				DrugID:   drug.ID,
-				Quantity: 70,
-				Remarks:  entities.PtrTo("q8h"),
+				DrugID:  drug.ID,
+				Remarks: entities.PtrTo("q8h"),
 				Batches: []entities.PrescriptionBatchItem{
-					{BatchId: b1, Quantity: 40},
-					{BatchId: b2, Quantity: 30},
+					{BatchLocationId: loc1, Quantity: 40},
+					{BatchLocationId: loc2, Quantity: 30},
 				},
 			},
 		},
@@ -130,8 +136,8 @@ func TestPrescription_CreateAndGet_ReducesStockAndHydrates(t *testing.T) {
 	assert.Equal(t, 2, len(created.PrescribedDrugs[0].Batches))
 
 	// stock reduced
-	after1 := getBatchQty(t, b1)
-	after2 := getBatchQty(t, b2)
+	after1 := getLocationQty(t, loc1)
+	after2 := getLocationQty(t, loc2)
 	assert.Equal(t, before1-40, after1)
 	assert.Equal(t, before2-30, after2)
 
@@ -149,7 +155,7 @@ func TestPrescription_Create_FailsWhenInsufficientStock(t *testing.T) {
 	id, vid := mustCreatePatientAndVisit(t)
 
 	drug := mustCreateDrug(t, unique("Amoxicillin"))
-	b := mustCreateBatch(t, drug.ID, "A-B1", 5, time.Now().AddDate(0, 6, 0))
+	_, loc := mustCreateBatchAndLocation(t, drug.ID, "A-B1", 5, time.Now().AddDate(0, 6, 0), "Main")
 
 	repo := NewPostgresPrescriptionRepository(db).(*postgresPrescriptionRepository)
 	_, err := repo.CreatePrescription(ctx, &entities.Prescription{
@@ -158,15 +164,14 @@ func TestPrescription_Create_FailsWhenInsufficientStock(t *testing.T) {
 		Notes:     entities.PtrTo("Too much"),
 		PrescribedDrugs: []entities.DrugPrescription{
 			{
-				DrugID:   drug.ID,
-				Quantity: 10,
-				Remarks:  nil,
-				Batches:  []entities.PrescriptionBatchItem{{BatchId: b, Quantity: 10}}, // exceeds 5
+				DrugID:  drug.ID,
+				Remarks: nil,
+				Batches: []entities.PrescriptionBatchItem{{BatchLocationId: loc, Quantity: 10}}, // exceeds 5
 			},
 		},
 	})
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "insufficient stock in batch")
+	assert.Contains(t, err.Error(), "insufficient stock in batch-location")
 }
 
 func TestPrescription_List_WithFiltersAndOrder(t *testing.T) {
@@ -174,7 +179,7 @@ func TestPrescription_List_WithFiltersAndOrder(t *testing.T) {
 	id, vid := mustCreatePatientAndVisit(t)
 
 	drug := mustCreateDrug(t, unique("Ibuprofen"))
-	b := mustCreateBatch(t, drug.ID, "I-B1", 100, time.Now().AddDate(0, 12, 0))
+	_, loc := mustCreateBatchAndLocation(t, drug.ID, "I-B1", 100, time.Now().AddDate(0, 12, 0), "Main")
 
 	repo := NewPostgresPrescriptionRepository(db).(*postgresPrescriptionRepository)
 
@@ -185,7 +190,7 @@ func TestPrescription_List_WithFiltersAndOrder(t *testing.T) {
 			VID:       vid,
 			Notes:     &note,
 			PrescribedDrugs: []entities.DrugPrescription{
-				{DrugID: drug.ID, Quantity: q, Remarks: nil, Batches: []entities.PrescriptionBatchItem{{BatchId: b, Quantity: q}}},
+				{DrugID: drug.ID, Remarks: nil, Batches: []entities.PrescriptionBatchItem{{BatchLocationId: loc, Quantity: q}}},
 			},
 		})
 		assert.Nil(t, err)
@@ -216,8 +221,8 @@ func TestPrescription_Update_CanMarkPacked(t *testing.T) {
 	id, vid := mustCreatePatientAndVisit(t)
 
 	drug := mustCreateDrug(t, unique("Metformin"))
-	a := mustCreateBatch(t, drug.ID, "M-A", 100, time.Now().AddDate(0, 6, 0))
-	b := mustCreateBatch(t, drug.ID, "M-B", 100, time.Now().AddDate(0, 9, 0))
+	_, locA := mustCreateBatchAndLocation(t, drug.ID, "M-A", 100, time.Now().AddDate(0, 6, 0), "Main")
+	_, locB := mustCreateBatchAndLocation(t, drug.ID, "M-B", 100, time.Now().AddDate(0, 9, 0), "Main")
 
 	repo := NewPostgresPrescriptionRepository(db).(*postgresPrescriptionRepository)
 
@@ -226,9 +231,9 @@ func TestPrescription_Update_CanMarkPacked(t *testing.T) {
 		VID:       vid,
 		Notes:     entities.PtrTo("init"),
 		PrescribedDrugs: []entities.DrugPrescription{
-			{DrugID: drug.ID, Quantity: 50, Remarks: nil, Batches: []entities.PrescriptionBatchItem{
-				{BatchId: a, Quantity: 30},
-				{BatchId: b, Quantity: 20},
+			{DrugID: drug.ID, Remarks: nil, Batches: []entities.PrescriptionBatchItem{
+				{BatchLocationId: locA, Quantity: 30},
+				{BatchLocationId: locB, Quantity: 20},
 			}},
 		},
 	})
@@ -247,8 +252,8 @@ func TestPrescription_Update_AppliesBatchDeltas(t *testing.T) {
 	id, vid := mustCreatePatientAndVisit(t)
 
 	drug := mustCreateDrug(t, unique("Metformin"))
-	a := mustCreateBatch(t, drug.ID, "M-A", 100, time.Now().AddDate(0, 6, 0))
-	b := mustCreateBatch(t, drug.ID, "M-B", 100, time.Now().AddDate(0, 9, 0))
+	_, locA := mustCreateBatchAndLocation(t, drug.ID, "M-A", 100, time.Now().AddDate(0, 6, 0), "Main")
+	_, locB := mustCreateBatchAndLocation(t, drug.ID, "M-B", 100, time.Now().AddDate(0, 9, 0), "Main")
 
 	repo := NewPostgresPrescriptionRepository(db).(*postgresPrescriptionRepository)
 
@@ -258,23 +263,23 @@ func TestPrescription_Update_AppliesBatchDeltas(t *testing.T) {
 		VID:       vid,
 		Notes:     entities.PtrTo("init"),
 		PrescribedDrugs: []entities.DrugPrescription{
-			{DrugID: drug.ID, Quantity: 50, Remarks: nil, Batches: []entities.PrescriptionBatchItem{
-				{BatchId: a, Quantity: 30},
-				{BatchId: b, Quantity: 20},
+			{DrugID: drug.ID, Remarks: nil, Batches: []entities.PrescriptionBatchItem{
+				{BatchLocationId: locA, Quantity: 30},
+				{BatchLocationId: locB, Quantity: 20},
 			}},
 		},
 	})
 	assert.Nil(t, err)
 
-	aAfterCreate := getBatchQty(t, a) // expect 70
-	bAfterCreate := getBatchQty(t, b) // expect 80
+	aAfterCreate := getLocationQty(t, locA) // expect 70
+	bAfterCreate := getLocationQty(t, locB) // expect 80
 
 	// update: A=10, B=50  → delta A = -20 (return 20), delta B = +30 (take 30)
 	p.Notes = entities.PtrTo("updated")
 	p.PrescribedDrugs = []entities.DrugPrescription{
-		{DrugID: drug.ID, Quantity: 60, Remarks: entities.PtrTo("new"), Batches: []entities.PrescriptionBatchItem{
-			{BatchId: a, Quantity: 10},
-			{BatchId: b, Quantity: 50},
+		{DrugID: drug.ID, Remarks: entities.PtrTo("new"), Batches: []entities.PrescriptionBatchItem{
+			{BatchLocationId: locA, Quantity: 10},
+			{BatchLocationId: locB, Quantity: 50},
 		}},
 	}
 	upd, err := repo.UpdatePrescription(ctx, p)
@@ -284,8 +289,8 @@ func TestPrescription_Update_AppliesBatchDeltas(t *testing.T) {
 	assert.Equal(t, 2, len(upd.PrescribedDrugs[0].Batches))
 
 	// verify deltas applied
-	aFinal := getBatchQty(t, a)
-	bFinal := getBatchQty(t, b)
+	aFinal := getLocationQty(t, locA)
+	bFinal := getLocationQty(t, locB)
 	assert.Equal(t, aAfterCreate+20, aFinal) // 70 + 20 = 90
 	assert.Equal(t, bAfterCreate-30, bFinal) // 80 - 30 = 50
 }
@@ -295,9 +300,9 @@ func TestPrescription_Delete_RestoresStockAndRemovesRows(t *testing.T) {
 	id, vid := mustCreatePatientAndVisit(t)
 
 	drug := mustCreateDrug(t, unique("Loratadine"))
-	batch := mustCreateBatch(t, drug.ID, "L-B1", 40, time.Now().AddDate(0, 4, 0))
+	_, loc := mustCreateBatchAndLocation(t, drug.ID, "L-B1", 40, time.Now().AddDate(0, 4, 0), "Main")
 
-	before := getBatchQty(t, batch)
+	before := getLocationQty(t, loc)
 
 	repo := NewPostgresPrescriptionRepository(db).(*postgresPrescriptionRepository)
 	p, err := repo.CreatePrescription(ctx, &entities.Prescription{
@@ -305,14 +310,14 @@ func TestPrescription_Delete_RestoresStockAndRemovesRows(t *testing.T) {
 		VID:       vid,
 		Notes:     entities.PtrTo("to-delete"),
 		PrescribedDrugs: []entities.DrugPrescription{
-			{DrugID: drug.ID, Quantity: 30, Remarks: nil, Batches: []entities.PrescriptionBatchItem{
-				{BatchId: batch, Quantity: 30},
+			{DrugID: drug.ID, Remarks: nil, Batches: []entities.PrescriptionBatchItem{
+				{BatchLocationId: loc, Quantity: 30},
 			}},
 		},
 	})
 	assert.Nil(t, err)
 
-	mid := getBatchQty(t, batch)
+	mid := getLocationQty(t, loc)
 	assert.Equal(t, before-30, mid)
 
 	// delete
@@ -320,7 +325,7 @@ func TestPrescription_Delete_RestoresStockAndRemovesRows(t *testing.T) {
 	assert.Nil(t, err)
 
 	// stock restored
-	after := getBatchQty(t, batch)
+	after := getLocationQty(t, loc)
 	assert.Equal(t, before, after)
 
 	// deleting again → not found

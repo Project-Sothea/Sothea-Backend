@@ -18,37 +18,65 @@ import (
 	"github.com/jieqiboh/sothea_backend/mocks"
 )
 
+func init() { gin.SetMode(gin.TestMode) }
+
 // -----------------------------------------------------------------------------
-// Test router without auth middleware (matches production routes exactly)
+// Router (no auth) mirroring production routes (with corrected locations paths)
 // -----------------------------------------------------------------------------
 func newTestPharmacyHandlerNoAuth(r *gin.Engine, uc entities.PharmacyUseCase) {
 	h := &PharmacyHandler{Usecase: uc}
-	g := r.Group("/pharmacy")
+	grp := r.Group("/pharmacy")
 	{
-		// DRUGS
-		g.GET("/drugs", h.ListDrugs)
-		g.POST("/drugs", h.CreateDrug)
-		g.GET("/drugs/:id", h.GetDrug)
-		g.PATCH("/drugs/:id", h.UpdateDrug)
-		g.DELETE("/drugs/:id", h.DeleteDrug)
+		// DRUG CATALOG
+		grp.GET("/drugs", h.ListDrugs)
+		grp.POST("/drugs", h.CreateDrug)
+		grp.GET("/drugs/:drugId", h.GetDrug)
+		grp.PATCH("/drugs/:drugId", h.UpdateDrug)
+		grp.DELETE("/drugs/:drugId", h.DeleteDrug)
 
 		// BATCHES
-		g.GET("/batches", h.ListBatches)
-		g.POST("/batches", h.CreateBatch)
-		g.PATCH("/batches/:id", h.UpdateBatch)
-		g.DELETE("/batches/:id", h.DeleteBatch)
+		grp.GET("/batches", h.ListBatches)
+		grp.POST("/batches", h.CreateBatch)
+		grp.PATCH("/batches/:batchId", h.UpdateBatch)
+		grp.DELETE("/batches/:batchId", h.DeleteBatch)
+
+		// BATCH LOCATIONS
+		grp.POST("/batches/:batchId/locations", h.CreateBatchLocation)
+		grp.PATCH("/batches/:batchId/locations/:locationId", h.UpdateBatchLocation)
+		grp.DELETE("/batches/:batchId/locations/:locationId", h.DeleteBatchLocation)
 	}
 }
 
-func init() { gin.SetMode(gin.TestMode) }
+// -----------------------------------------------------------------------------
+// JSON helpers that match your current entity tags
+// -----------------------------------------------------------------------------
+const validDrugJSON = `{"name":"Paracetamol","unit":"tablet","defaultSize":1,"notes":"pain relief"}`
+const badTypeDrugJSON = `{"name":123}`
 
-// Minimal JSON helpers (adjust field names/types to your entities if needed)
-const validDrugJSON = `{"name":"Paracetamol","form":"tablet","strengthMg":500}`
-const badTypeDrugJSON = `{"name":123}` // forces JSON bind/type error for ShouldBindJSON
+const validBatchCreateJSON = `
+{
+  "drugId": 1,
+  "batchNumber": "B-001",
+  "expiryDate": "2025-12-31T00:00:00Z",
+  "supplier": "ACME",
+  "batchLocations": [
+    {"location": "Main", "quantity": 10},
+    {"location": "Cabinet A", "quantity": 5}
+  ]
+}`
 
-// For DrugBatch, adjust keys to your struct tags (e.g., drugId, quantity, expiryDate)
-const validBatchJSON = `{"drugId":1,"quantity":50,"expiryDate":"2025-12-31T00:00:00Z"}`
-const badTypeBatchJSON = `{"drugId":"oops","quantity":50}`
+const validBatchUpdateJSON = `
+{
+  "drugId": 1,
+  "batchNumber": "B-001-UPDATED",
+  "expiryDate": "2026-01-01T00:00:00Z",
+  "supplier": "NewCo"
+}`
+
+const badTypeBatchJSON = `{"drugId":"oops","batchNumber":"B-001"}`
+
+const locCreateJSON_ConflictingBodyBatchID = `{"batchId":999,"location":"Main","quantity":10}`
+const locUpdateJSON = `{"batchId":999,"location":"Main","quantity":30}`
 
 // -----------------------------------------------------------------------------
 // DRUGS
@@ -88,10 +116,8 @@ func TestListDrugs_InternalError(t *testing.T) {
 
 func TestCreateDrug_Success(t *testing.T) {
 	var uc mocks.PharmacyUseCase
-	created := &entities.Drug{ID: 10, Name: "Paracetamol"}
-	uc.
-		On("CreateDrug", mock.Anything, mock.AnythingOfType("*entities.Drug")).
-		Return(created, nil)
+	created := &entities.Drug{ID: 10, Name: "Paracetamol", Unit: "tablet"}
+	uc.On("CreateDrug", mock.Anything, mock.AnythingOfType("*entities.Drug")).Return(created, nil)
 
 	r := gin.Default()
 	newTestPharmacyHandlerNoAuth(r, &uc)
@@ -136,8 +162,7 @@ func TestGetDrug_Success(t *testing.T) {
 	uc.On("GetDrug", mock.Anything, int64(7)).
 		Return(&entities.DrugDetail{
 			Drug: entities.Drug{
-				ID:   7,
-				Name: "Aspirin",
+				ID: 7, Name: "Aspirin",
 			},
 		}, nil)
 
@@ -180,16 +205,13 @@ func TestGetDrug_InternalError(t *testing.T) {
 
 func TestUpdateDrug_Success(t *testing.T) {
 	var uc mocks.PharmacyUseCase
-	updated := &entities.Drug{ID: 5, Name: "Paracetamol Updated"}
-	// If you haven't fixed the handler bug yet, change "UpdateDrug" to "CreateDrug" below.
-	uc.
-		On("UpdateDrug", mock.Anything, mock.AnythingOfType("*entities.Drug")).
-		Return(updated, nil)
+	updated := &entities.Drug{ID: 5, Name: "Paracetamol Updated", Unit: "tablet"}
+	uc.On("UpdateDrug", mock.Anything, mock.AnythingOfType("*entities.Drug")).Return(updated, nil)
 
 	r := gin.Default()
 	newTestPharmacyHandlerNoAuth(r, &uc)
 
-	body := `{"name":"Paracetamol Updated"}`
+	body := `{"name":"Paracetamol Updated","unit":"tablet"}`
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("PATCH", "/pharmacy/drugs/5", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -197,7 +219,7 @@ func TestUpdateDrug_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	uc.AssertCalled(t, "UpdateDrug", mock.Anything, mock.MatchedBy(func(d *entities.Drug) bool {
-		return d != nil && d.ID == 5 && d.Name == "Paracetamol Updated"
+		return d != nil && d.ID == 5 && d.Name == "Paracetamol Updated" && d.Unit == "tablet"
 	}))
 }
 
@@ -260,8 +282,9 @@ func TestDeleteDrug_BadID(t *testing.T) {
 
 func TestListBatches_Success_NoFilter(t *testing.T) {
 	var uc mocks.PharmacyUseCase
-	uc.On("ListBatches", mock.Anything, (*int64)(nil)).Return([]entities.DrugBatch{
-		{ID: 1, DrugID: 5}, {ID: 2, DrugID: 6},
+	uc.On("ListBatches", mock.Anything, (*int64)(nil)).Return([]entities.BatchDetail{
+		{DrugBatch: entities.DrugBatch{ID: 1, DrugID: 5}},
+		{DrugBatch: entities.DrugBatch{ID: 2, DrugID: 6}},
 	}, nil)
 
 	r := gin.Default()
@@ -278,8 +301,8 @@ func TestListBatches_Success_NoFilter(t *testing.T) {
 func TestListBatches_Success_WithFilter(t *testing.T) {
 	var uc mocks.PharmacyUseCase
 	var id int64 = 5
-	uc.On("ListBatches", mock.Anything, &id).Return([]entities.DrugBatch{
-		{ID: 1, DrugID: 5},
+	uc.On("ListBatches", mock.Anything, &id).Return([]entities.BatchDetail{
+		{DrugBatch: entities.DrugBatch{ID: 1, DrugID: 5}},
 	}, nil)
 
 	r := gin.Default()
@@ -307,18 +330,27 @@ func TestListBatches_BadQueryParam(t *testing.T) {
 
 func TestCreateBatch_Success(t *testing.T) {
 	var uc mocks.PharmacyUseCase
-	uc.On("CreateBatch", mock.Anything, mock.AnythingOfType("*entities.DrugBatch")).Return(int64(123), nil)
+	uc.On("CreateBatch", mock.Anything, mock.AnythingOfType("*entities.BatchDetail")).Return(
+		&entities.BatchDetail{
+			DrugBatch: entities.DrugBatch{
+				ID:          123,
+				DrugID:      7,
+				BatchNumber: "BN-001",
+			},
+		},
+		nil,
+	)
 
 	r := gin.Default()
 	newTestPharmacyHandlerNoAuth(r, &uc)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/pharmacy/batches", bytes.NewBufferString(validBatchJSON))
+	req, _ := http.NewRequest("POST", "/pharmacy/batches", bytes.NewBufferString(validBatchCreateJSON))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	uc.AssertCalled(t, "CreateBatch", mock.Anything, mock.AnythingOfType("*entities.DrugBatch"))
+	uc.AssertCalled(t, "CreateBatch", mock.Anything, mock.AnythingOfType("*entities.BatchDetail"))
 }
 
 func TestCreateBatch_EmptyBody(t *testing.T) {
@@ -336,19 +368,21 @@ func TestCreateBatch_EmptyBody(t *testing.T) {
 
 func TestUpdateBatch_Success(t *testing.T) {
 	var uc mocks.PharmacyUseCase
-	uc.On("UpdateBatch", mock.Anything, mock.AnythingOfType("*entities.DrugBatch")).Return(nil)
+	// Handler returns whatever usecase returns; assume *BatchDetail
+	uc.On("UpdateBatch", mock.Anything, mock.AnythingOfType("*entities.DrugBatch")).
+		Return(&entities.BatchDetail{DrugBatch: entities.DrugBatch{ID: 42, BatchNumber: "B-001-UPDATED"}}, nil)
 
 	r := gin.Default()
 	newTestPharmacyHandlerNoAuth(r, &uc)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("PATCH", "/pharmacy/batches/42", bytes.NewBufferString(validBatchJSON))
+	req, _ := http.NewRequest("PATCH", "/pharmacy/batches/42", bytes.NewBufferString(validBatchUpdateJSON))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	uc.AssertCalled(t, "UpdateBatch", mock.Anything, mock.MatchedBy(func(b *entities.DrugBatch) bool {
-		return b != nil && b.ID == 42
+		return b != nil && b.ID == 42 && b.BatchNumber == "B-001-UPDATED"
 	}))
 }
 
@@ -358,7 +392,7 @@ func TestUpdateBatch_BadID(t *testing.T) {
 	newTestPharmacyHandlerNoAuth(r, &uc)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("PATCH", "/pharmacy/batches/xyz", bytes.NewBufferString(validBatchJSON))
+	req, _ := http.NewRequest("PATCH", "/pharmacy/batches/xyz", bytes.NewBufferString(validBatchUpdateJSON))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
@@ -406,7 +440,115 @@ func TestDeleteBatch_BadID(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// Optional: quick smoke for error mapping
+// BATCH LOCATIONS
+// -----------------------------------------------------------------------------
+
+func TestCreateBatchLocation_Success_PathOverridesBody(t *testing.T) {
+	var uc mocks.PharmacyUseCase
+	// Expect BatchID = 123 from path, not 999 from body
+	uc.On("CreateBatchLocation", mock.Anything, mock.MatchedBy(func(loc *entities.DrugBatchLocation) bool {
+		return loc != nil && loc.BatchID == 123 && loc.Location == "Main" && loc.Quantity == 10
+	})).Return(&entities.DrugBatchLocation{ID: 888, BatchID: 321, Location: "Main", Quantity: 30}, nil)
+
+	r := gin.Default()
+	newTestPharmacyHandlerNoAuth(r, &uc)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/pharmacy/batches/123/locations", bytes.NewBufferString(locCreateJSON_ConflictingBodyBatchID))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	uc.AssertCalled(t, "CreateBatchLocation", mock.Anything, mock.AnythingOfType("*entities.DrugBatchLocation"))
+}
+
+func TestCreateBatchLocation_BadBatchID(t *testing.T) {
+	var uc mocks.PharmacyUseCase
+	r := gin.Default()
+	newTestPharmacyHandlerNoAuth(r, &uc)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/pharmacy/batches/notnum/locations", bytes.NewBufferString(locCreateJSON_ConflictingBodyBatchID))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestUpdateBatchLocation_Success_PathOverridesBody(t *testing.T) {
+	var uc mocks.PharmacyUseCase
+	// Expect BatchID from path = 321 and id from path = 888
+	uc.On("UpdateBatchLocation", mock.Anything, mock.MatchedBy(func(loc *entities.DrugBatchLocation) bool {
+		return loc != nil && loc.ID == 888 && loc.BatchID == 321 && loc.Location == "Main" && loc.Quantity == 30
+	})).Return(&entities.DrugBatchLocation{ID: 888, BatchID: 321, Location: "Main", Quantity: 30}, nil)
+
+	r := gin.Default()
+	newTestPharmacyHandlerNoAuth(r, &uc)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PATCH", "/pharmacy/batches/321/locations/888", bytes.NewBufferString(locUpdateJSON))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	uc.AssertCalled(t, "UpdateBatchLocation", mock.Anything, mock.AnythingOfType("*entities.DrugBatchLocation"))
+}
+
+func TestUpdateBatchLocation_BadIDs(t *testing.T) {
+	var uc mocks.PharmacyUseCase
+	r := gin.Default()
+	newTestPharmacyHandlerNoAuth(r, &uc)
+
+	// bad batchId
+	w1 := httptest.NewRecorder()
+	req1, _ := http.NewRequest("PATCH", "/pharmacy/batches/xx/locations/1", bytes.NewBufferString(locUpdateJSON))
+	req1.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w1, req1)
+	assert.Equal(t, http.StatusBadRequest, w1.Code)
+
+	// bad id
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest("PATCH", "/pharmacy/batches/1/locations/yy", bytes.NewBufferString(locUpdateJSON))
+	req2.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
+}
+
+func TestDeleteBatchLocation_Success(t *testing.T) {
+	var uc mocks.PharmacyUseCase
+	uc.On("DeleteBatchLocation", mock.Anything, int64(999)).Return(nil)
+
+	r := gin.Default()
+	newTestPharmacyHandlerNoAuth(r, &uc)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("DELETE", "/pharmacy/batches/100/locations/999", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	uc.AssertCalled(t, "DeleteBatchLocation", mock.Anything, int64(999))
+}
+
+func TestDeleteBatchLocation_BadIDs(t *testing.T) {
+	var uc mocks.PharmacyUseCase
+	r := gin.Default()
+	newTestPharmacyHandlerNoAuth(r, &uc)
+
+	// bad batchId
+	w1 := httptest.NewRecorder()
+	req1, _ := http.NewRequest("DELETE", "/pharmacy/batches/xx/locations/1", nil)
+	r.ServeHTTP(w1, req1)
+	assert.Equal(t, http.StatusBadRequest, w1.Code)
+
+	// bad id
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest("DELETE", "/pharmacy/batches/1/locations/yy", nil)
+	r.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
+}
+
+// -----------------------------------------------------------------------------
+// mapPhErr smoke
 // -----------------------------------------------------------------------------
 func TestMapPhErr_InternalAndConflict(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, mapPhErr(entities.ErrInternalServerError))

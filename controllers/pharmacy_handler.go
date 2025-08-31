@@ -30,15 +30,21 @@ func NewPharmacyHandler(r *gin.Engine, uc entities.PharmacyUseCase, secretKey []
 		// DRUG CATALOG
 		grp.GET("/drugs", h.ListDrugs)
 		grp.POST("/drugs", h.CreateDrug)
-		grp.GET("/drugs/:id", h.GetDrug)
-		grp.PATCH("/drugs/:id", h.UpdateDrug)
-		grp.DELETE("/drugs/:id", h.DeleteDrug)
+		grp.GET("/drugs/:drugId", h.GetDrug)
+		grp.PATCH("/drugs/:drugId", h.UpdateDrug)
+		grp.DELETE("/drugs/:drugId", h.DeleteDrug)
 
 		// BATCHES
 		grp.GET("/batches", h.ListBatches)
 		grp.POST("/batches", h.CreateBatch)
-		grp.PATCH("/batches/:id", h.UpdateBatch)
-		grp.DELETE("/batches/:id", h.DeleteBatch)
+		grp.PATCH("/batches/:batchId", h.UpdateBatch)
+		grp.DELETE("/batches/:batchId", h.DeleteBatch)
+
+		// BATCH LOCATIONS
+		grp.POST("/batches/:batchId/locations", h.CreateBatchLocation)
+		grp.PATCH("/batches/:batchId/locations/:locationId", h.UpdateBatchLocation)
+		grp.DELETE("/batches/:batchId/locations/:locationId", h.DeleteBatchLocation)
+
 	}
 }
 
@@ -75,7 +81,7 @@ func (h *PharmacyHandler) CreateDrug(c *gin.Context) {
 
 func (h *PharmacyHandler) GetDrug(c *gin.Context) {
 	// 1. Parse :id from path
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	id, err := strconv.ParseInt(c.Param("drugId"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
@@ -92,7 +98,7 @@ func (h *PharmacyHandler) GetDrug(c *gin.Context) {
 }
 
 func (h *PharmacyHandler) UpdateDrug(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	id, err := strconv.ParseInt(c.Param("drugId"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
@@ -115,7 +121,7 @@ func (h *PharmacyHandler) UpdateDrug(c *gin.Context) {
 }
 
 func (h *PharmacyHandler) DeleteDrug(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	id, err := strconv.ParseInt(c.Param("drugId"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
@@ -154,23 +160,23 @@ func (h *PharmacyHandler) ListBatches(c *gin.Context) {
 }
 
 func (h *PharmacyHandler) CreateBatch(c *gin.Context) {
-	var b entities.DrugBatch
+	var b entities.BatchDetail
 	if err := c.ShouldBindJSON(&b); err != nil {
 		handleBindErr(c, err)
 		return
 	}
 
 	ctx := c.Request.Context()
-	id, err := h.Usecase.CreateBatch(ctx, &b)
+	batch, err := h.Usecase.CreateBatch(ctx, &b)
 	if err != nil {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"id": id})
+	c.JSON(http.StatusOK, batch)
 }
 
 func (h *PharmacyHandler) UpdateBatch(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	id, err := strconv.ParseInt(c.Param("batchId"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
@@ -184,15 +190,16 @@ func (h *PharmacyHandler) UpdateBatch(c *gin.Context) {
 	b.ID = id
 
 	ctx := c.Request.Context()
-	if err := h.Usecase.UpdateBatch(ctx, &b); err != nil {
+	batch, err := h.Usecase.UpdateBatch(ctx, &b)
+	if err != nil {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 		return
 	}
-	c.Status(http.StatusOK)
+	c.JSON(http.StatusOK, batch)
 }
 
 func (h *PharmacyHandler) DeleteBatch(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	id, err := strconv.ParseInt(c.Param("batchId"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
@@ -200,6 +207,83 @@ func (h *PharmacyHandler) DeleteBatch(c *gin.Context) {
 
 	ctx := c.Request.Context()
 	if err := h.Usecase.DeleteBatch(ctx, id); err != nil {
+		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// -----------------------------------------------------------------------------
+//
+//	Batch Location endpoints
+//
+// -----------------------------------------------------------------------------
+func (h *PharmacyHandler) CreateBatchLocation(c *gin.Context) {
+	batchID, err := strconv.ParseInt(c.Param("batchId"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid batchId"})
+		return
+	}
+
+	var loc entities.DrugBatchLocation
+	if err := c.ShouldBindJSON(&loc); err != nil {
+		handleBindErr(c, err)
+		return
+	}
+	loc.BatchID = batchID
+
+	ctx := c.Request.Context()
+	batchLocation, err := h.Usecase.CreateBatchLocation(ctx, &loc)
+	if err != nil {
+		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, batchLocation)
+}
+
+func (h *PharmacyHandler) UpdateBatchLocation(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("locationId"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	batchID, err := strconv.ParseInt(c.Param("batchId"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid batchId"})
+		return
+	}
+
+	var batchLocation entities.DrugBatchLocation
+	if err := c.ShouldBindJSON(&batchLocation); err != nil {
+		handleBindErr(c, err)
+		return
+	}
+	batchLocation.ID = id
+	batchLocation.BatchID = batchID
+
+	ctx := c.Request.Context()
+	batch, err := h.Usecase.UpdateBatchLocation(ctx, &batchLocation)
+	if err != nil {
+		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, batch)
+}
+
+func (h *PharmacyHandler) DeleteBatchLocation(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("locationId"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	_, err = strconv.ParseInt(c.Param("batchId"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid batchId"})
+		return
+	}
+
+	ctx := c.Request.Context()
+	if err := h.Usecase.DeleteBatchLocation(ctx, id); err != nil {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 		return
 	}

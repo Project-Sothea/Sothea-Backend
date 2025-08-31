@@ -1,28 +1,29 @@
-// postgres_pharmacy_repository_test.go
 package postgres
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
 	"github.com/jieqiboh/sothea_backend/entities"
+	"github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func uniqueName(prefix string) string {
-	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+// ---------- helpers ----------
+func uniq(prefix string) string {
+	return prefix + "-" + time.Now().Format("150405.000000000")
 }
+
+// ---------- DRUGS ----------
 
 func TestPharmacyRepository_CreateAndGetDrug(t *testing.T) {
 	repo := NewPostgresPharmacyRepository(db)
-	ph, ok := repo.(*postgresPharmacyRepository)
-	if !ok {
-		t.Fatal("failed to assert repo")
-	}
+	ph := repo.(*postgresPharmacyRepository)
+	ctx := context.Background()
 
-	name := uniqueName("Paracetamol")
+	name := uniq("Paracetamol")
 	in := &entities.Drug{
 		Name:        name,
 		Unit:        "tablet",
@@ -30,68 +31,72 @@ func TestPharmacyRepository_CreateAndGetDrug(t *testing.T) {
 		Notes:       entities.PtrTo("pain relief"),
 	}
 
-	created, err := ph.CreateDrug(context.Background(), in)
-	assert.Nil(t, err)
-	assert.NotZero(t, created.ID)
+	created, err := ph.CreateDrug(ctx, in)
+	require.NoError(t, err)
+	require.NotZero(t, created.ID)
 	assert.Equal(t, name, created.Name)
 	assert.Equal(t, "tablet", created.Unit)
+	require.NotNil(t, created.DefaultSize)
 	assert.Equal(t, 1, *created.DefaultSize)
+	require.NotNil(t, created.Notes)
 	assert.Equal(t, "pain relief", *created.Notes)
 
-	// Get by id
-	got, err := ph.GetDrug(context.Background(), created.ID)
-	assert.Nil(t, err)
+	got, err := ph.GetDrug(ctx, created.ID)
+	require.NoError(t, err)
 	assert.Equal(t, created, got)
 }
 
 func TestPharmacyRepository_CreateDrug_DuplicateName(t *testing.T) {
 	repo := NewPostgresPharmacyRepository(db)
 	ph := repo.(*postgresPharmacyRepository)
+	ctx := context.Background()
 
-	name := uniqueName("Amoxicillin")
-	in := &entities.Drug{Name: name, Unit: "capsule", DefaultSize: entities.PtrTo(1), Notes: nil}
+	name := uniq("Amoxicillin")
+	in := &entities.Drug{Name: name, Unit: "capsule", DefaultSize: entities.PtrTo(1)}
 
-	_, err := ph.CreateDrug(context.Background(), in)
-	assert.Nil(t, err)
+	_, err := ph.CreateDrug(ctx, in)
+	require.NoError(t, err)
 
-	// Duplicate name → ErrDrugNameTaken
-	_, err = ph.CreateDrug(context.Background(), in)
-	assert.ErrorIs(t, err, entities.ErrDrugNameTaken)
+	// Duplicate name → ErrDrugNameTaken (from ON CONFLICT DO NOTHING + Scan ErrNoRows)
+	_, err = ph.CreateDrug(ctx, in)
+	require.ErrorIs(t, err, entities.ErrDrugNameTaken)
 }
 
 func TestPharmacyRepository_UpdateDrug_SuccessAndNotFound(t *testing.T) {
 	repo := NewPostgresPharmacyRepository(db)
 	ph := repo.(*postgresPharmacyRepository)
+	ctx := context.Background()
 
 	// Create a drug to update
-	name := uniqueName("Ibuprofen")
-	created, err := ph.CreateDrug(context.Background(), &entities.Drug{
-		Name:        name,
+	created, err := ph.CreateDrug(ctx, &entities.Drug{
+		Name:        uniq("Ibuprofen"),
 		Unit:        "tablet",
 		DefaultSize: entities.PtrTo(2),
 		Notes:       entities.PtrTo("anti-inflammatory"),
 	})
-	assert.Nil(t, err)
+	require.NoError(t, err)
 
 	// Update it
 	created.Name = created.Name + "-Updated"
 	created.Unit = "syrup"
 	created.DefaultSize = entities.PtrTo(5)
 	created.Notes = entities.PtrTo("updated notes")
-	updated, err := ph.UpdateDrug(context.Background(), created)
-	assert.Nil(t, err)
+
+	updated, err := ph.UpdateDrug(ctx, created)
+	require.NoError(t, err)
 	assert.Equal(t, created.ID, updated.ID)
 	assert.Equal(t, "syrup", updated.Unit)
+	require.NotNil(t, updated.DefaultSize)
 	assert.Equal(t, 5, *updated.DefaultSize)
+	require.NotNil(t, updated.Notes)
 	assert.Equal(t, "updated notes", *updated.Notes)
 
 	// Update non-existent id
-	_, err = ph.UpdateDrug(context.Background(), &entities.Drug{
+	_, err = ph.UpdateDrug(ctx, &entities.Drug{
 		ID:          9_999_999,
 		Name:        "X",
 		Unit:        "x",
 		DefaultSize: entities.PtrTo(1),
-		Notes:       nil,
 	})
 	assert.EqualError(t, err, "drug not found")
 }
@@ -99,45 +104,43 @@ func TestPharmacyRepository_UpdateDrug_SuccessAndNotFound(t *testing.T) {
 func TestPharmacyRepository_DeleteDrug_SuccessAndNotFound(t *testing.T) {
 	repo := NewPostgresPharmacyRepository(db)
 	ph := repo.(*postgresPharmacyRepository)
+	ctx := context.Background()
 
 	// Create a drug to delete
-	name := uniqueName("Cetrizine")
-	created, err := ph.CreateDrug(context.Background(), &entities.Drug{
-		Name:        name,
+	created, err := ph.CreateDrug(ctx, &entities.Drug{
+		Name:        uniq("Cetirizine"),
 		Unit:        "tablet",
 		DefaultSize: entities.PtrTo(1),
-		Notes:       nil,
 	})
-	assert.Nil(t, err)
+	require.NoError(t, err)
 
 	// Delete it
-	err = ph.DeleteDrug(context.Background(), created.ID)
-	assert.Nil(t, err)
+	err = ph.DeleteDrug(ctx, created.ID)
+	require.NoError(t, err)
 
 	// Ensure it's gone
-	_, err = ph.GetDrug(context.Background(), created.ID)
+	_, err = ph.GetDrug(ctx, created.ID)
 	assert.EqualError(t, err, "drug not found")
 
 	// Delete non-existent id
-	err = ph.DeleteDrug(context.Background(), 9_999_999)
+	err = ph.DeleteDrug(ctx, 9_999_999)
 	assert.EqualError(t, err, "drug not found")
 }
 
 func TestPharmacyRepository_ListDrugs_ContainsCreatedOnes(t *testing.T) {
 	repo := NewPostgresPharmacyRepository(db)
 	ph := repo.(*postgresPharmacyRepository)
+	ctx := context.Background()
 
-	aName := uniqueName("DrugA")
-	bName := uniqueName("DrugB")
-	_, _ = ph.CreateDrug(context.Background(), &entities.Drug{Name: aName, Unit: "tab", DefaultSize: entities.PtrTo(1), Notes: nil})
-	_, _ = ph.CreateDrug(context.Background(), &entities.Drug{Name: bName, Unit: "tab", DefaultSize: entities.PtrTo(1), Notes: nil})
+	aName := uniq("DrugA")
+	bName := uniq("DrugB")
+	_, _ = ph.CreateDrug(ctx, &entities.Drug{Name: aName, Unit: "tab", DefaultSize: entities.PtrTo(1)})
+	_, _ = ph.CreateDrug(ctx, &entities.Drug{Name: bName, Unit: "tab", DefaultSize: entities.PtrTo(1)})
 
-	list, err := ph.ListDrugs(context.Background())
-	assert.Nil(t, err)
+	list, err := ph.ListDrugs(ctx)
+	require.NoError(t, err)
 
-	// Just verify that our two uniques are present (list may contain seeded rows).
-	foundA := false
-	foundB := false
+	foundA, foundB := false, false
 	for _, d := range list {
 		if d.Name == aName {
 			foundA = true
@@ -150,158 +153,424 @@ func TestPharmacyRepository_ListDrugs_ContainsCreatedOnes(t *testing.T) {
 	assert.True(t, foundB, "expected DrugB in list")
 }
 
-func TestPharmacyRepository_BatchCRUDAndList(t *testing.T) {
+// ---------- BATCHES + LOCATIONS ----------
+
+func TestPharmacyRepository_CreateBatch_WithLocations_AtomicAndGet(t *testing.T) {
 	repo := NewPostgresPharmacyRepository(db)
 	ph := repo.(*postgresPharmacyRepository)
+	ctx := context.Background()
 
-	// Create a parent drug
-	name := uniqueName("Metformin")
-	d, err := ph.CreateDrug(context.Background(), &entities.Drug{
-		Name:        name,
+	// Create drug
+	d, err := ph.CreateDrug(ctx, &entities.Drug{
+		Name:        uniq("Metformin"),
 		Unit:        "tablet",
 		DefaultSize: entities.PtrTo(1),
-		Notes:       nil,
 	})
-	assert.Nil(t, err)
+	require.NoError(t, err)
 
-	// Create three batches with different expiries
-	b1 := entities.DrugBatch{
-		DrugID:      d.ID,
-		BatchNumber: "B001",
-		Location:    "Main",
-		Quantity:    100,
-		ExpiryDate:  time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC),
-		Supplier:    entities.PtrTo("ACME"),
+	// Create batch with nested locations in a single tx
+	in := &entities.BatchDetail{
+		DrugBatch: entities.DrugBatch{
+			DrugID:      d.ID,
+			BatchNumber: "MF-001",
+			ExpiryDate:  time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC),
+			Supplier:    entities.PtrTo("ACME"),
+		},
+		BatchLocations: []entities.DrugBatchLocation{
+			{Location: "Main", Quantity: 100},
+			{Location: "Cabinet A", Quantity: 40},
+		},
 	}
-	b2 := entities.DrugBatch{
-		DrugID:      d.ID,
-		BatchNumber: "B002",
-		Location:    "Main",
-		Quantity:    50,
-		ExpiryDate:  time.Date(2024, 12, 1, 0, 0, 0, 0, time.UTC),
-		Supplier:    entities.PtrTo("ACME"),
+	created, err := ph.CreateBatch(ctx, in)
+	require.NoError(t, err)
+	require.NotZero(t, created.DrugBatch.ID)
+	require.Len(t, created.BatchLocations, 2)
+
+	// Get and verify locations persisted
+	got, err := ph.GetBatch(ctx, created.DrugBatch.ID)
+	require.NoError(t, err)
+	assert.Equal(t, created.DrugBatch.BatchNumber, got.DrugBatch.BatchNumber)
+	require.Len(t, got.BatchLocations, 2)
+}
+
+func TestPharmacyRepository_CreateBatch_RollbackOnBadLocation(t *testing.T) {
+	// Negative quantity in nested location should make the whole tx fail and not persist anything
+	repo := NewPostgresPharmacyRepository(db)
+	ph := repo.(*postgresPharmacyRepository)
+	ctx := context.Background()
+
+	d, err := ph.CreateDrug(ctx, &entities.Drug{
+		Name:        uniq("RollbackDrug"),
+		Unit:        "tablet",
+		DefaultSize: entities.PtrTo(1),
+	})
+	require.NoError(t, err)
+
+	// Count batches for this drug before
+	before, err := ph.ListBatchDetails(ctx, &d.ID)
+	require.NoError(t, err)
+	beforeN := len(before)
+
+	_, err = ph.CreateBatch(ctx, &entities.BatchDetail{
+		DrugBatch: entities.DrugBatch{
+			DrugID:      d.ID,
+			BatchNumber: "RB-ERR",
+			ExpiryDate:  time.Now().AddDate(1, 0, 0),
+			Supplier:    entities.PtrTo("S"),
+		},
+		BatchLocations: []entities.DrugBatchLocation{
+			{Location: "Main", Quantity: -5}, // illegal
+		},
+	})
+	require.Error(t, err)
+
+	// Count stays the same → rollback succeeded
+	after, err := ph.ListBatchDetails(ctx, &d.ID)
+	require.NoError(t, err)
+	assert.Equal(t, beforeN, len(after))
+}
+
+func TestPharmacyRepository_ListBatchDetails_FilteringAndOrder(t *testing.T) {
+	repo := NewPostgresPharmacyRepository(db)
+	ph := repo.(*postgresPharmacyRepository)
+	ctx := context.Background()
+
+	// Create two drugs
+	d1, err := ph.CreateDrug(ctx, &entities.Drug{
+		Name:        uniq("Amlodipine"),
+		Unit:        "tablet",
+		DefaultSize: entities.PtrTo(1),
+	})
+	require.NoError(t, err)
+	d2, err := ph.CreateDrug(ctx, &entities.Drug{
+		Name:        uniq("Bisoprolol"),
+		Unit:        "tablet",
+		DefaultSize: entities.PtrTo(1),
+	})
+	require.NoError(t, err)
+
+	// Create batches for both drugs (different expiries for d1 to test order)
+	b1, err := ph.CreateBatch(ctx, &entities.BatchDetail{
+		DrugBatch: entities.DrugBatch{
+			DrugID:      d1.ID,
+			BatchNumber: "D1-B001",
+			ExpiryDate:  time.Date(2024, 12, 1, 0, 0, 0, 0, time.UTC),
+			Supplier:    entities.PtrTo("ACME"),
+		},
+	})
+	require.NoError(t, err)
+	b2, err := ph.CreateBatch(ctx, &entities.BatchDetail{
+		DrugBatch: entities.DrugBatch{
+			DrugID:      d1.ID,
+			BatchNumber: "D1-B002",
+			ExpiryDate:  time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC),
+			Supplier:    entities.PtrTo("ACME"),
+		},
+	})
+	require.NoError(t, err)
+	b3, err := ph.CreateBatch(ctx, &entities.BatchDetail{
+		DrugBatch: entities.DrugBatch{
+			DrugID:      d1.ID,
+			BatchNumber: "D1-B003",
+			ExpiryDate:  time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC),
+			Supplier:    entities.PtrTo("ACME"),
+		},
+	})
+	require.NoError(t, err)
+	bOther, err := ph.CreateBatch(ctx, &entities.BatchDetail{
+		DrugBatch: entities.DrugBatch{
+			DrugID:      d2.ID,
+			BatchNumber: "D2-B100",
+			ExpiryDate:  time.Date(2025, 7, 1, 0, 0, 0, 0, time.UTC),
+			Supplier:    entities.PtrTo("Globex"),
+		},
+	})
+	require.NoError(t, err)
+
+	// Attach locations
+	_, err = ph.CreateBatchLocation(ctx, &entities.DrugBatchLocation{
+		BatchID:  b1.DrugBatch.ID,
+		Location: "Main",
+		Quantity: 100,
+	})
+	require.NoError(t, err)
+	_, err = ph.CreateBatchLocation(ctx, &entities.DrugBatchLocation{
+		BatchID:  b1.DrugBatch.ID,
+		Location: "Cabinet A",
+		Quantity: 40,
+	})
+	require.NoError(t, err)
+	_, err = ph.CreateBatchLocation(ctx, &entities.DrugBatchLocation{
+		BatchID:  b2.DrugBatch.ID,
+		Location: "Main",
+		Quantity: 25,
+	})
+	require.NoError(t, err)
+	_, err = ph.CreateBatchLocation(ctx, &entities.DrugBatchLocation{
+		BatchID:  bOther.DrugBatch.ID,
+		Location: "Overflow",
+		Quantity: 10,
+	})
+	require.NoError(t, err)
+
+	// 1) List all (nil filter)
+	allDetails, err := ph.ListBatchDetails(ctx, nil)
+	require.NoError(t, err)
+	require.True(t, len(allDetails) >= 4)
+
+	// Ensure grouping
+	find := func(id int64) *entities.BatchDetail {
+		for i := range allDetails {
+			if allDetails[i].DrugBatch.ID == id {
+				return &allDetails[i]
+			}
+		}
+		return nil
 	}
-	b3 := entities.DrugBatch{
-		DrugID:      d.ID,
-		BatchNumber: "B003",
-		Location:    "Overflow",
-		Quantity:    200,
-		ExpiryDate:  time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC),
-		Supplier:    entities.PtrTo("ACME"),
+	dB1 := find(b1.DrugBatch.ID)
+	dB2 := find(b2.DrugBatch.ID)
+	dB3 := find(b3.DrugBatch.ID)
+	dOther := find(bOther.DrugBatch.ID)
+	if assert.NotNil(t, dB1) {
+		assert.Len(t, dB1.BatchLocations, 2)
+	}
+	if assert.NotNil(t, dB2) {
+		assert.Len(t, dB2.BatchLocations, 1)
+	}
+	if assert.NotNil(t, dB3) {
+		assert.Len(t, dB3.BatchLocations, 0)
+	}
+	if assert.NotNil(t, dOther) {
+		assert.Len(t, dOther.BatchLocations, 1)
 	}
 
-	var err1, err2, err3 error
-	b1.ID, err1 = ph.CreateBatch(context.Background(), &b1)
-	b2.ID, err2 = ph.CreateBatch(context.Background(), &b2)
-	b3.ID, err3 = ph.CreateBatch(context.Background(), &b3)
-	assert.Nil(t, err1)
-	assert.Nil(t, err2)
-	assert.Nil(t, err3)
+	// 2) Filter by d1.ID → exactly the 3 d1 batches in expiry_date,id order
+	filtered, err := ph.ListBatchDetails(ctx, &d1.ID)
+	require.NoError(t, err)
 
-	// List filtered by drug → should be ordered by expiry_date
-	list, err := ph.ListBatches(context.Background(), &d.ID)
-	assert.Nil(t, err)
-	assert.GreaterOrEqual(t, len(list), 3)
-	// pick the last 3 for order check in case of seeds
-	var last3 []entities.DrugBatch
-	for _, x := range list {
-		if x.DrugID == d.ID {
-			last3 = append(last3, x)
+	var d1Only []entities.DrugBatch
+	for _, bd := range filtered {
+		if bd.DrugBatch.DrugID == d1.ID {
+			d1Only = append(d1Only, bd.DrugBatch)
 		}
 	}
-	assert.Equal(t, 3, len(last3))
-	assert.True(t, last3[0].ExpiryDate.Before(last3[1].ExpiryDate) || last3[0].ExpiryDate.Equal(last3[1].ExpiryDate))
-	assert.True(t, last3[1].ExpiryDate.Before(last3[2].ExpiryDate) || last3[1].ExpiryDate.Equal(last3[2].ExpiryDate))
+	require.Equal(t, 3, len(d1Only), "expected exactly 3 batches for d1")
 
-	// Update a batch
-	b1.Location = "Cabinet A"
-	b1.Quantity = 80
-	err = ph.UpdateBatch(context.Background(), &b1)
-	assert.Nil(t, err)
+	for i := 1; i < len(d1Only); i++ {
+		prev := d1Only[i-1]
+		curr := d1Only[i]
+		if prev.ExpiryDate.Equal(curr.ExpiryDate) {
+			assert.Less(t, prev.ID, curr.ID, "ids should increase when expiries equal")
+		} else {
+			assert.True(t, prev.ExpiryDate.Before(curr.ExpiryDate), "expiry_date should be ascending")
+		}
+	}
+}
 
-	// Update non-existent batch
-	err = ph.UpdateBatch(context.Background(), &entities.DrugBatch{
+func TestPharmacyRepository_UpdateAndDeleteBatch(t *testing.T) {
+	repo := NewPostgresPharmacyRepository(db)
+	ph := repo.(*postgresPharmacyRepository)
+	ctx := context.Background()
+
+	d, err := ph.CreateDrug(ctx, &entities.Drug{
+		Name:        uniq("UpdateDrug"),
+		Unit:        "tablet",
+		DefaultSize: entities.PtrTo(1),
+	})
+	require.NoError(t, err)
+
+	created, err := ph.CreateBatch(ctx, &entities.BatchDetail{
+		DrugBatch: entities.DrugBatch{
+			DrugID:      d.ID,
+			BatchNumber: "UD-001",
+			ExpiryDate:  time.Now().AddDate(1, 0, 0),
+			Supplier:    entities.PtrTo("S1"),
+		},
+	})
+	require.NoError(t, err)
+
+	// Update
+	ub := created.DrugBatch
+	ub.BatchNumber = "UD-001-UPDATED"
+	ub.Supplier = entities.PtrTo("S2")
+	updated, err := ph.UpdateBatch(ctx, &ub)
+	require.NoError(t, err)
+	assert.Equal(t, "UD-001-UPDATED", updated.DrugBatch.BatchNumber)
+	require.NotNil(t, updated.DrugBatch.Supplier)
+	assert.Equal(t, "S2", *updated.DrugBatch.Supplier)
+
+	// Update non-existent
+	_, err = ph.UpdateBatch(ctx, &entities.DrugBatch{
 		ID:          9_999_999,
 		DrugID:      d.ID,
 		BatchNumber: "X",
-		Location:    "X",
-		Quantity:    1,
 		ExpiryDate:  time.Now(),
 		Supplier:    entities.PtrTo("X"),
 	})
 	assert.EqualError(t, err, "batch not found")
 
-	// Delete a batch
-	err = ph.DeleteBatch(context.Background(), b3.ID)
-	assert.Nil(t, err)
+	// Delete
+	err = ph.DeleteBatch(ctx, created.DrugBatch.ID)
+	require.NoError(t, err)
 
-	// Delete non-existent
-	err = ph.DeleteBatch(context.Background(), 9_999_999)
+	// Delete unknown
+	err = ph.DeleteBatch(ctx, 9_999_999)
 	assert.EqualError(t, err, "batch not found")
 }
 
-func TestPharmacyRepository_EarliestBatches_FEFOHelper(t *testing.T) {
+func TestPharmacyRepository_ListBatchLocations_CreateUpdateDelete_NoUpsert(t *testing.T) {
+	// This test reflects insert-only semantics for CreateBatchLocation (no ON CONFLICT)
 	repo := NewPostgresPharmacyRepository(db)
 	ph := repo.(*postgresPharmacyRepository)
+	ctx := context.Background()
 
-	// Create a parent drug
-	name := uniqueName("Loratadine")
-	d, err := ph.CreateDrug(context.Background(), &entities.Drug{
-		Name:        name,
+	// Create a drug + batch
+	d, err := ph.CreateDrug(ctx, &entities.Drug{
+		Name:        uniq("Loratadine"),
 		Unit:        "tablet",
 		DefaultSize: entities.PtrTo(1),
-		Notes:       nil,
 	})
-	assert.Nil(t, err)
+	require.NoError(t, err)
 
-	// Mix of quantities (including zero) and dates
-	bEarly := entities.DrugBatch{
-		DrugID:      d.ID,
-		BatchNumber: "E1",
-		Location:    "Shelf 1",
-		Quantity:    5,
-		ExpiryDate:  time.Date(2024, 12, 1, 0, 0, 0, 0, time.UTC),
-		Supplier:    entities.PtrTo("S"),
-	}
-	bZero := entities.DrugBatch{
-		DrugID:      d.ID,
-		BatchNumber: "Z0",
-		Location:    "Shelf 2",
-		Quantity:    0, // should be filtered out by earliestBatches
-		ExpiryDate:  time.Date(2024, 11, 1, 0, 0, 0, 0, time.UTC),
-		Supplier:    entities.PtrTo("S"),
-	}
-	bLater := entities.DrugBatch{
-		DrugID:      d.ID,
-		BatchNumber: "L2",
-		Location:    "Shelf 3",
-		Quantity:    10,
-		ExpiryDate:  time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC),
-		Supplier:    entities.PtrTo("S"),
-	}
-	var e1, e2, e3 error
-	bEarly.ID, e1 = ph.CreateBatch(context.Background(), &bEarly)
-	bZero.ID, e2 = ph.CreateBatch(context.Background(), &bZero)
-	bLater.ID, e3 = ph.CreateBatch(context.Background(), &bLater)
-	assert.Nil(t, e1)
-	assert.Nil(t, e2)
-	assert.Nil(t, e3)
+	bd, err := ph.CreateBatch(ctx, &entities.BatchDetail{
+		DrugBatch: entities.DrugBatch{
+			DrugID:      d.ID,
+			BatchNumber: "LOT-001",
+			ExpiryDate:  time.Date(2025, 2, 10, 0, 0, 0, 0, time.UTC),
+			Supplier:    entities.PtrTo("SupplierX"),
+		},
+	})
+	require.NoError(t, err)
 
-	// Call the FEFO helper directly (it's in the same package)
-	batches, err := ph.earliestBatches(context.Background(), d.ID)
-	assert.Nil(t, err)
+	// Insert locations
+	locA, err := ph.CreateBatchLocation(ctx, &entities.DrugBatchLocation{
+		BatchID:  bd.DrugBatch.ID,
+		Location: "Main",
+		Quantity: 10,
+	})
+	require.NoError(t, err)
+	require.NotZero(t, locA.ID)
 
-	// Should exclude zero-quantity and be sorted by expiry_date
-	for _, b := range batches {
-		assert.NotEqual(t, 0, b.Quantity, "zero-quantity batch should be excluded")
+	locB, err := ph.CreateBatchLocation(ctx, &entities.DrugBatchLocation{
+		BatchID:  bd.DrugBatch.ID,
+		Location: "Cabinet 1",
+		Quantity: 5,
+	})
+	require.NoError(t, err)
+	require.NotZero(t, locB.ID)
+
+	// Second insert with same (batch_id, location) should fail with duplicate key
+	_, err = ph.CreateBatchLocation(ctx, &entities.DrugBatchLocation{
+		BatchID:  bd.DrugBatch.ID,
+		Location: "Main",
+		Quantity: 25,
+	})
+	require.Error(t, err)
+	var pqErr *pq.Error
+	if assert.ErrorAs(t, err, &pqErr) {
+		assert.Equal(t, "23505", string(pqErr.Code), "should be unique_violation")
 	}
-	// Find our two non-zero entries
-	var seen []entities.DrugBatch
-	for _, b := range batches {
-		if b.BatchNumber == "E1" || b.BatchNumber == "L2" {
-			seen = append(seen, b)
+
+	// Use Update to change quantity
+	locA.Quantity = 25
+	updatedMain, err := ph.UpdateBatchLocation(ctx, locA)
+	require.NoError(t, err)
+	assert.Equal(t, locA.ID, updatedMain.ID)
+	assert.Equal(t, int64(25), updatedMain.Quantity)
+
+	// List locations
+	locs, err := ph.ListBatchLocations(ctx, bd.DrugBatch.ID)
+	require.NoError(t, err)
+	require.Len(t, locs, 2)
+
+	// Verify values
+	var gotMain, gotCab *entities.DrugBatchLocation
+	for i := range locs {
+		if locs[i].Location == "Main" {
+			cp := locs[i]
+			gotMain = &cp
+		}
+		if locs[i].Location == "Cabinet 1" {
+			cp := locs[i]
+			gotCab = &cp
 		}
 	}
-	assert.Equal(t, 2, len(seen))
-	assert.True(t, seen[0].ExpiryDate.Before(seen[1].ExpiryDate) || seen[0].ExpiryDate.Equal(seen[1].ExpiryDate))
+	if assert.NotNil(t, gotMain) {
+		assert.Equal(t, int64(25), gotMain.Quantity)
+	}
+	if assert.NotNil(t, gotCab) {
+		assert.Equal(t, int64(5), gotCab.Quantity)
+	}
+
+	// Delete "Cabinet 1"
+	err = ph.DeleteBatchLocation(ctx, locB.ID)
+	require.NoError(t, err)
+
+	locs2, err := ph.ListBatchLocations(ctx, bd.DrugBatch.ID)
+	require.NoError(t, err)
+	if assert.Len(t, locs2, 1) {
+		assert.Equal(t, "Main", locs2[0].Location)
+		assert.Equal(t, int64(25), locs2[0].Quantity)
+	}
+
+	// Delete unknown location
+	err = ph.DeleteBatchLocation(ctx, 9_999_999)
+	assert.EqualError(t, err, "location not found")
+}
+
+func TestPharmacyRepository_GetBatchLocation_NotFound(t *testing.T) {
+	repo := NewPostgresPharmacyRepository(db)
+	ph := repo.(*postgresPharmacyRepository)
+	ctx := context.Background()
+
+	_, err := ph.GetBatchLocation(ctx, 9_999_999)
+	assert.EqualError(t, err, "batch location not found")
+}
+
+func TestPharmacyRepository_ListBatchDetails_EmptyForDrugWithoutBatches(t *testing.T) {
+	repo := NewPostgresPharmacyRepository(db)
+	ph := repo.(*postgresPharmacyRepository)
+	ctx := context.Background()
+
+	d, err := ph.CreateDrug(ctx, &entities.Drug{
+		Name:        uniq("EmptyDrug"),
+		Unit:        "tablet",
+		DefaultSize: entities.PtrTo(1),
+	})
+	require.NoError(t, err)
+
+	details, err := ph.ListBatchDetails(ctx, &d.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 0, len(details))
+}
+
+// Optional: depending on FK ON DELETE behavior (RESTRICT vs CASCADE)
+func TestPharmacyRepository_DeleteDrug_WithBatches_FKBehavior(t *testing.T) {
+	repo := NewPostgresPharmacyRepository(db)
+	ph := repo.(*postgresPharmacyRepository)
+	ctx := context.Background()
+
+	d, err := ph.CreateDrug(ctx, &entities.Drug{
+		Name:        uniq("FK-Drug"),
+		Unit:        "tablet",
+		DefaultSize: entities.PtrTo(1),
+	})
+	require.NoError(t, err)
+
+	_, err = ph.CreateBatch(ctx, &entities.BatchDetail{
+		DrugBatch: entities.DrugBatch{
+			DrugID:      d.ID,
+			BatchNumber: "FK-B-1",
+			ExpiryDate:  time.Now().AddDate(1, 0, 0),
+			Supplier:    entities.PtrTo("FK-Supplier"),
+		},
+	})
+	require.NoError(t, err)
+
+	err = ph.DeleteDrug(ctx, d.ID)
+	if err == nil {
+		t.Skip("DeleteDrug succeeded (likely ON DELETE CASCADE). If you expect FK violation, enforce RESTRICT and assert specific error.")
+		return
+	}
+	assert.Error(t, err)
 }

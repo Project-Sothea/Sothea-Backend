@@ -42,10 +42,10 @@ func (r *postgresPrescriptionRepository) CreatePrescription(ctx context.Context,
 		d := &p.PrescribedDrugs[i]
 
 		err = tx.QueryRowContext(ctx, `
-			INSERT INTO drug_prescriptions (prescription_id, drug_id, quantity, remarks)
-			VALUES ($1, $2, $3, $4)
+			INSERT INTO drug_prescriptions (prescription_id, drug_id, remarks)
+			VALUES ($1, $2, $3)
 			RETURNING id, created_at, updated_at
-		`, p.ID, d.DrugID, d.Quantity, d.Remarks).
+		`, p.ID, d.DrugID, d.Remarks).
 			Scan(&d.ID, &d.CreatedAt, &d.UpdatedAt)
 		if err != nil {
 			return nil, err
@@ -55,26 +55,26 @@ func (r *postgresPrescriptionRepository) CreatePrescription(ctx context.Context,
 			b := &d.Batches[j]
 
 			err = tx.QueryRowContext(ctx, `
-				INSERT INTO prescription_batch_items (drug_prescription_id, drug_batch_id, quantity)
+				INSERT INTO prescription_batch_items (drug_prescription_id, drug_batch_location_id, quantity)
 				VALUES ($1, $2, $3)
 				RETURNING id, created_at, updated_at
-			`, d.ID, b.BatchId, b.Quantity).
+			`, d.ID, b.BatchLocationId, b.Quantity).
 				Scan(&b.ID, &b.CreatedAt, &b.UpdatedAt)
 			if err != nil {
 				return nil, err
 			}
 
 			res, err := tx.ExecContext(ctx, `
-				UPDATE drug_batches
+				UPDATE batch_locations
 				SET quantity = quantity - $1
 				WHERE id = $2 AND quantity >= $1
-			`, b.Quantity, b.BatchId)
+			`, b.Quantity, b.BatchLocationId)
 			if err != nil {
 				return nil, err
 			}
 			rows, _ := res.RowsAffected()
 			if rows == 0 {
-				return nil, fmt.Errorf("insufficient stock in batch %d", b.BatchId)
+				return nil, fmt.Errorf("insufficient stock in batch-location %d", b.BatchLocationId)
 			}
 		}
 	}
@@ -99,7 +99,7 @@ func (r *postgresPrescriptionRepository) GetPrescriptionByID(ctx context.Context
 	}
 
 	drugRows, err := r.Conn.QueryContext(ctx, `
-		SELECT id, prescription_id, drug_id, quantity, remarks, created_at, updated_at
+		SELECT id, prescription_id, drug_id, remarks, created_at, updated_at
 		FROM drug_prescriptions
 		WHERE prescription_id = $1
 	`, id)
@@ -110,13 +110,13 @@ func (r *postgresPrescriptionRepository) GetPrescriptionByID(ctx context.Context
 
 	for drugRows.Next() {
 		var d entities.DrugPrescription
-		err := drugRows.Scan(&d.ID, &d.PrescriptionID, &d.DrugID, &d.Quantity, &d.Remarks, &d.CreatedAt, &d.UpdatedAt)
+		err := drugRows.Scan(&d.ID, &d.PrescriptionID, &d.DrugID, &d.Remarks, &d.CreatedAt, &d.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
 
 		batchRows, err := r.Conn.QueryContext(ctx, `
-			SELECT id, drug_prescription_id, drug_batch_id, quantity, created_at, updated_at
+			SELECT id, drug_prescription_id, drug_batch_location_id, quantity, created_at, updated_at
 			FROM prescription_batch_items
 			WHERE drug_prescription_id = $1
 		`, d.ID)
@@ -127,12 +127,12 @@ func (r *postgresPrescriptionRepository) GetPrescriptionByID(ctx context.Context
 
 		for batchRows.Next() {
 			var b entities.PrescriptionBatchItem
-			var drugBatchID int64
-			err := batchRows.Scan(&b.ID, &b.DrugPrescriptionID, &drugBatchID, &b.Quantity, &b.CreatedAt, &b.UpdatedAt)
+			var drugBatchLocationID int64
+			err := batchRows.Scan(&b.ID, &b.DrugPrescriptionID, &drugBatchLocationID, &b.Quantity, &b.CreatedAt, &b.UpdatedAt)
 			if err != nil {
 				return nil, err
 			}
-			b.BatchId = drugBatchID
+			b.BatchLocationId = drugBatchLocationID
 			d.Batches = append(d.Batches, b)
 		}
 		p.PrescribedDrugs = append(p.PrescribedDrugs, d)
@@ -175,7 +175,7 @@ func (r *postgresPrescriptionRepository) ListPrescriptions(ctx context.Context, 
 
 		// Hydrate prescribed drugs
 		drugRows, err := r.Conn.QueryContext(ctx, `
-			SELECT id, prescription_id, drug_id, quantity, remarks, created_at, updated_at
+			SELECT id, prescription_id, drug_id, remarks, created_at, updated_at
 			FROM drug_prescriptions
 			WHERE prescription_id = $1
 		`, p.ID)
@@ -186,7 +186,7 @@ func (r *postgresPrescriptionRepository) ListPrescriptions(ctx context.Context, 
 		var prescribedDrugs []entities.DrugPrescription
 		for drugRows.Next() {
 			var d entities.DrugPrescription
-			err = drugRows.Scan(&d.ID, &d.PrescriptionID, &d.DrugID, &d.Quantity, &d.Remarks, &d.CreatedAt, &d.UpdatedAt)
+			err = drugRows.Scan(&d.ID, &d.PrescriptionID, &d.DrugID, &d.Remarks, &d.CreatedAt, &d.UpdatedAt)
 			if err != nil {
 				drugRows.Close()
 				return nil, err
@@ -194,7 +194,7 @@ func (r *postgresPrescriptionRepository) ListPrescriptions(ctx context.Context, 
 
 			// Hydrate prescription batch items
 			batchRows, err := r.Conn.QueryContext(ctx, `
-				SELECT id, drug_prescription_id, drug_batch_id, quantity, created_at, updated_at
+				SELECT id, drug_prescription_id, drug_batch_location_id, quantity, created_at, updated_at
 				FROM prescription_batch_items
 				WHERE drug_prescription_id = $1
 			`, d.ID)
@@ -206,14 +206,14 @@ func (r *postgresPrescriptionRepository) ListPrescriptions(ctx context.Context, 
 			var batches []entities.PrescriptionBatchItem
 			for batchRows.Next() {
 				var b entities.PrescriptionBatchItem
-				var drugBatchID int64
-				err = batchRows.Scan(&b.ID, &b.DrugPrescriptionID, &drugBatchID, &b.Quantity, &b.CreatedAt, &b.UpdatedAt)
+				var drugBatchLocationID int64
+				err = batchRows.Scan(&b.ID, &b.DrugPrescriptionID, &drugBatchLocationID, &b.Quantity, &b.CreatedAt, &b.UpdatedAt)
 				if err != nil {
 					batchRows.Close()
 					drugRows.Close()
 					return nil, err
 				}
-				b.BatchId = drugBatchID
+				b.BatchLocationId = drugBatchLocationID
 				batches = append(batches, b)
 			}
 			batchRows.Close()
@@ -240,33 +240,33 @@ func (r *postgresPrescriptionRepository) UpdatePrescription(ctx context.Context,
 	// --- Step 1: Load existing per-batch totals INSIDE this txn ---
 	oldTotals := make(map[int64]int64)
 	rows, err := tx.QueryContext(ctx, `
-		SELECT pbi.drug_batch_id, COALESCE(SUM(pbi.quantity), 0)
+		SELECT pbi.drug_batch_location_id, COALESCE(SUM(pbi.quantity), 0)
 		FROM drug_prescriptions dp
 		JOIN prescription_batch_items pbi ON pbi.drug_prescription_id = dp.id
 		WHERE dp.prescription_id = $1
-		GROUP BY pbi.drug_batch_id
+		GROUP BY pbi.drug_batch_location_id
 	`, p.ID)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
-		var batchID, qty int64
-		if err := rows.Scan(&batchID, &qty); err != nil {
+		var batchLocationID, qty int64
+		if err := rows.Scan(&batchLocationID, &qty); err != nil {
 			return nil, err
 		}
-		oldTotals[batchID] = qty
+		oldTotals[batchLocationID] = qty
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	rows.Close()
 
-	// --- Step 2: Build new per-batch totals from payload ---
+	// --- Step 2: Build new per-batchLocation totals from payload ---
 	newTotals := make(map[int64]int64)
 	for i := range p.PrescribedDrugs {
 		for j := range p.PrescribedDrugs[i].Batches {
 			b := p.PrescribedDrugs[i].Batches[j]
-			newTotals[b.BatchId] += int64(b.Quantity)
+			newTotals[b.BatchLocationId] += int64(b.Quantity)
 		}
 	}
 
@@ -279,9 +279,9 @@ func (r *postgresPrescriptionRepository) UpdatePrescription(ctx context.Context,
 		keys[k] = struct{}{}
 	}
 
-	for batchID := range keys {
-		oldQ := oldTotals[batchID]
-		newQ := newTotals[batchID]
+	for batchLocationID := range keys {
+		oldQ := oldTotals[batchLocationID]
+		newQ := newTotals[batchLocationID]
 		delta := newQ - oldQ
 		if delta == 0 {
 			continue
@@ -290,23 +290,23 @@ func (r *postgresPrescriptionRepository) UpdatePrescription(ctx context.Context,
 		if delta > 0 {
 			// Need more from this batch
 			res, err := tx.ExecContext(ctx, `
-				UPDATE drug_batches
+				UPDATE batch_locations
 				SET quantity = quantity - $1
 				WHERE id = $2 AND quantity >= $1
-			`, delta, batchID)
+			`, delta, batchLocationID)
 			if err != nil {
 				return nil, err
 			}
 			if rows, _ := res.RowsAffected(); rows == 0 {
-				return nil, fmt.Errorf("insufficient stock in batch %d", batchID)
+				return nil, fmt.Errorf("insufficient stock in batch %d", batchLocationID)
 			}
 		} else {
 			// Return surplus to this batch
 			if _, err := tx.ExecContext(ctx, `
-				UPDATE drug_batches
+				UPDATE batch_locations
 				SET quantity = quantity + $1
 				WHERE id = $2
-			`, -delta, batchID); err != nil {
+			`, -delta, batchLocationID); err != nil {
 				return nil, err
 			}
 		}
@@ -340,10 +340,10 @@ func (r *postgresPrescriptionRepository) UpdatePrescription(ctx context.Context,
 		d := &p.PrescribedDrugs[i]
 
 		err = tx.QueryRowContext(ctx, `
-			INSERT INTO drug_prescriptions (prescription_id, drug_id, quantity, remarks)
-			VALUES ($1, $2, $3, $4)
+			INSERT INTO drug_prescriptions (prescription_id, drug_id, remarks)
+			VALUES ($1, $2, $3)
 			RETURNING id, created_at, updated_at
-		`, p.ID, d.DrugID, d.Quantity, d.Remarks).
+		`, p.ID, d.DrugID, d.Remarks).
 			Scan(&d.ID, &d.CreatedAt, &d.UpdatedAt)
 		if err != nil {
 			return nil, err
@@ -353,10 +353,10 @@ func (r *postgresPrescriptionRepository) UpdatePrescription(ctx context.Context,
 			b := &d.Batches[j]
 
 			err = tx.QueryRowContext(ctx, `
-				INSERT INTO prescription_batch_items (drug_prescription_id, drug_batch_id, quantity)
+				INSERT INTO prescription_batch_items (drug_prescription_id, drug_batch_location_id, quantity)
 				VALUES ($1, $2, $3)
 				RETURNING id, created_at, updated_at
-			`, d.ID, b.BatchId, b.Quantity).
+			`, d.ID, b.BatchLocationId, b.Quantity).
 				Scan(&b.ID, &b.CreatedAt, &b.UpdatedAt)
 			if err != nil {
 				return nil, err
@@ -387,11 +387,11 @@ func (r *postgresPrescriptionRepository) DeletePrescription(ctx context.Context,
 	var allocs []alloc
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT pbi.drug_batch_id, COALESCE(SUM(pbi.quantity), 0) AS qty
+		SELECT pbi.drug_batch_location_id, COALESCE(SUM(pbi.quantity), 0) AS qty
 		FROM drug_prescriptions dp
 		JOIN prescription_batch_items pbi ON pbi.drug_prescription_id = dp.id
 		WHERE dp.prescription_id = $1
-		GROUP BY pbi.drug_batch_id
+		GROUP BY pbi.drug_batch_location_id
 	`, id)
 	if err != nil {
 		return err
@@ -414,7 +414,7 @@ func (r *postgresPrescriptionRepository) DeletePrescription(ctx context.Context,
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE drug_batches
+			UPDATE batch_locations
 			SET quantity = quantity + $1
 			WHERE id = $2
 		`, a.qty, a.batchID); err != nil {

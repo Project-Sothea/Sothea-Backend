@@ -11,25 +11,35 @@ type Drug struct {
 	ID          int64   `json:"id"`
 	Name        string  `json:"name"`
 	Unit        string  `json:"unit"`
-	DefaultSize *int    `json:"default_size,omitempty"`
+	DefaultSize *int    `json:"defaultSize,omitempty"`
 	Notes       *string `json:"notes,omitempty"`
 }
 
 // Represents each batch of the drug
 type DrugBatch struct {
-	ID          int64      `json:"id"`
-	DrugID      int64      `json:"drug_id"`
-	BatchNumber string     `json:"batch_no"`
-	Location    string     `json:"location,omitempty"`
-	Quantity    int        `json:"quantity"`
-	ExpiryDate  time.Time  `json:"expiry_date"`
-	Supplier    *string    `json:"supplier,omitempty"`
-	DepletedAt  *time.Time `json:"depleted_at,omitempty"`
+	ID          int64     `json:"id"`
+	DrugID      int64     `json:"drugId"`
+	BatchNumber string    `json:"batchNumber"`
+	ExpiryDate  time.Time `json:"expiryDate"`
+	Supplier    *string   `json:"supplier,omitempty"`
+}
+
+// Represents each batch of the drug
+type DrugBatchLocation struct {
+	ID       int64  `json:"id"`
+	BatchID  int64  `json:"drugId"`
+	Location string `json:"location"`
+	Quantity int64  `json:"quantity"`
+}
+
+type BatchDetail struct {
+	DrugBatch
+	BatchLocations []DrugBatchLocation `json:"batchLocations"`
 }
 
 type DrugDetail struct {
 	Drug
-	Batches []DrugBatch `json:"batches"`
+	Batches []BatchDetail `json:"batches"`
 }
 
 type PharmacyRepository interface {
@@ -39,10 +49,17 @@ type PharmacyRepository interface {
 	UpdateDrug(ctx context.Context, d *Drug) (*Drug, error)
 	DeleteDrug(ctx context.Context, id int64) error
 
-	ListBatches(ctx context.Context, drugID *int64) ([]DrugBatch, error) // set drugID = nil for all batches
-	CreateBatch(ctx context.Context, b *DrugBatch) (int64, error)
-	UpdateBatch(ctx context.Context, b *DrugBatch) error
+	ListBatchDetails(ctx context.Context, drugID *int64) ([]BatchDetail, error)
+	GetBatch(ctx context.Context, id int64) (*BatchDetail, error)
+	CreateBatch(ctx context.Context, b *BatchDetail) (*BatchDetail, error)
+	UpdateBatch(ctx context.Context, b *DrugBatch) (*BatchDetail, error)
 	DeleteBatch(ctx context.Context, id int64) error
+
+	ListBatchLocations(ctx context.Context, batchID int64) ([]DrugBatchLocation, error)
+	GetBatchLocation(ctx context.Context, id int64) (*DrugBatchLocation, error)
+	CreateBatchLocation(ctx context.Context, loc *DrugBatchLocation) (*DrugBatchLocation, error)
+	UpdateBatchLocation(ctx context.Context, loc *DrugBatchLocation) (*DrugBatchLocation, error)
+	DeleteBatchLocation(ctx context.Context, id int64) error
 }
 
 type PharmacyUseCase interface {
@@ -54,8 +71,13 @@ type PharmacyUseCase interface {
 	DeleteDrug(ctx context.Context, id int64) error
 
 	// Batch-level
-	ListBatches(ctx context.Context, drugID *int64) ([]DrugBatch, error) // set drugID = nil for all batches
-	CreateBatch(ctx context.Context, b *DrugBatch) (int64, error)
-	UpdateBatch(ctx context.Context, b *DrugBatch) error
+	ListBatches(ctx context.Context, drugID *int64) ([]BatchDetail, error) // set drugID = nil for all batches
+	CreateBatch(ctx context.Context, b *BatchDetail) (*BatchDetail, error)
+	UpdateBatch(ctx context.Context, b *DrugBatch) (*BatchDetail, error)
 	DeleteBatch(ctx context.Context, id int64) error
+
+	// BatchLocation CRUD (independent)
+	CreateBatchLocation(ctx context.Context, batchLocation *DrugBatchLocation) (*DrugBatchLocation, error)
+	UpdateBatchLocation(ctx context.Context, batchLocation *DrugBatchLocation) (*DrugBatchLocation, error)
+	DeleteBatchLocation(ctx context.Context, id int64) error
 }

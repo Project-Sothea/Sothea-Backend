@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"github.com/jieqiboh/sothea_backend/entities"
+	"github.com/lib/pq"
 )
 
 // -----------------------------------------------------------------------------
@@ -126,94 +128,191 @@ func (r *postgresPharmacyRepository) DeleteDrug(
 }
 
 // -----------------------------------------------------------------------------
-//  DRUG BATCHES  (stock entries)
+//  DRUG BATCHES
 // -----------------------------------------------------------------------------
 
-func (r *postgresPharmacyRepository) ListBatches(
+func (r *postgresPharmacyRepository) ListBatchDetails(
 	ctx context.Context,
-	drugID *int64, // nil = show all
-) ([]entities.DrugBatch, error) {
+	drugID *int64, // nil = all
+) ([]entities.BatchDetail, error) {
 
-	base := `
-SELECT id, drug_id, batch_no, location,
-       quantity, expiry_date, supplier, depleted_at
-FROM   drug_batches`
-	var rows *sql.Rows
-	var err error
-
+	// 1) Fetch batches (optionally filtered by drug)
+	var (
+		args []any
+		q    = `
+			SELECT id, drug_id, batch_number, expiry_date, supplier
+			FROM drug_batches
+		`
+	)
 	if drugID != nil {
-		rows, err = r.Conn.QueryContext(ctx,
-			base+" WHERE drug_id=$1 ORDER BY expiry_date", *drugID)
-	} else {
-		rows, err = r.Conn.QueryContext(ctx,
-			base+" ORDER BY drug_id, expiry_date")
+		q += " WHERE drug_id = $1"
+		args = append(args, *drugID)
 	}
+	q += " ORDER BY drug_id, expiry_date, id"
+
+	rows, err := r.Conn.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	out := []entities.DrugBatch{}
+	batches := make([]entities.DrugBatch, 0, 64)
+	batchIDs := make([]int64, 0, 64)
+
 	for rows.Next() {
 		var b entities.DrugBatch
-		if err := rows.Scan(&b.ID, &b.DrugID, &b.BatchNumber, &b.Location,
-			&b.Quantity, &b.ExpiryDate, &b.Supplier, &b.DepletedAt); err != nil {
+		if err := rows.Scan(&b.ID, &b.DrugID, &b.BatchNumber, &b.ExpiryDate, &b.Supplier); err != nil {
 			return nil, err
 		}
-		out = append(out, b)
+		batches = append(batches, b)
+		batchIDs = append(batchIDs, b.ID)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(batches) == 0 {
+		return []entities.BatchDetail{}, nil
+	}
+
+	// 2) Fetch all locations for those batches in one query
+	locRows, err := r.Conn.QueryContext(ctx, `
+		SELECT id, batch_id, location, quantity
+		FROM batch_locations
+		WHERE batch_id = ANY($1)
+		ORDER BY batch_id, location, id
+	`, pq.Array(batchIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer locRows.Close()
+
+	// batchID -> []locations
+	locsByBatch := make(map[int64][]entities.DrugBatchLocation, len(batchIDs))
+	for locRows.Next() {
+		var l entities.DrugBatchLocation
+		if err := locRows.Scan(&l.ID, &l.BatchID, &l.Location, &l.Quantity); err != nil {
+			return nil, err
+		}
+		locsByBatch[l.BatchID] = append(locsByBatch[l.BatchID], l)
+	}
+	if err := locRows.Err(); err != nil {
+		return nil, err
+	}
+
+	// 3) Combine
+	out := make([]entities.BatchDetail, 0, len(batches))
+	for _, b := range batches {
+		out = append(out, entities.BatchDetail{
+			DrugBatch:      b,
+			BatchLocations: locsByBatch[b.ID],
+		})
+	}
+	return out, nil
+}
+
+const qGetBatch = `
+SELECT id, drug_id, batch_number, expiry_date, supplier
+FROM   drug_batches
+WHERE  id=$1;`
+
+func (r *postgresPharmacyRepository) GetBatch(ctx context.Context, id int64) (*entities.BatchDetail, error) {
+	var batch entities.DrugBatch
+	err := r.Conn.QueryRowContext(ctx, qGetBatch, id).
+		Scan(&batch.ID, &batch.DrugID, &batch.BatchNumber, &batch.ExpiryDate, &batch.Supplier)
+	if err == sql.ErrNoRows {
+		return nil, errors.New("batch not found")
+	}
+
+	batchLocations, err := r.ListBatchLocations(ctx, batch.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	var batchDetails = &entities.BatchDetail{
+		DrugBatch:      batch,
+		BatchLocations: batchLocations,
+	}
+	return batchDetails, err
 }
 
 const qCreateBatch = `
-INSERT INTO drug_batches
-    (drug_id, batch_no, location, quantity, expiry_date, supplier)
-VALUES ($1,$2,$3,$4,$5,$6)
-RETURNING id;`
+INSERT INTO drug_batches (drug_id, batch_number, expiry_date, supplier)
+VALUES ($1, $2, $3, $4)
+RETURNING id;
+`
 
-func (r *postgresPharmacyRepository) CreateBatch(ctx context.Context, b *entities.DrugBatch) (int64, error) {
-	var id int64
-	err := r.Conn.QueryRowContext(ctx, qCreateBatch,
-		b.DrugID, b.BatchNumber, b.Location,
-		b.Quantity, b.ExpiryDate, b.Supplier,
-	).Scan(&id)
+func (r *postgresPharmacyRepository) CreateBatch(ctx context.Context, b *entities.BatchDetail) (*entities.BatchDetail, error) {
+	tx, err := r.Conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
 
-	return id, err
+	// 1) Insert batch
+	var batchID int64
+	if err := tx.QueryRowContext(ctx, qCreateBatch,
+		b.DrugID, b.BatchNumber, b.ExpiryDate, b.Supplier).Scan(&batchID); err != nil {
+		return nil, err
+	}
+
+	// 2) Insert nested locations if provided
+	if len(b.BatchLocations) > 0 {
+		stmt, err := tx.PrepareContext(ctx, qCreateBatchLocation)
+		if err != nil {
+			return nil, err
+		}
+		defer stmt.Close()
+
+		for i := range b.BatchLocations {
+			loc := &b.BatchLocations[i]
+			if loc.Quantity < 0 {
+				return nil, fmt.Errorf("location %q has negative quantity", loc.Location)
+			}
+			// ensure FK is set
+			loc.BatchID = batchID
+
+			var locID int64
+			if err := stmt.QueryRowContext(ctx, batchID, loc.Location, loc.Quantity).Scan(&locID); err != nil {
+				return nil, err
+			}
+			loc.ID = locID
+		}
+	}
+
+	// 3) Commit the whole thing atomically
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	// 4) Return the hydrated detail (locations included)
+	return r.GetBatch(ctx, batchID)
 }
 
 const qUpdateBatch = `
 UPDATE drug_batches
-SET    drug_id=$2,
-       batch_no=$3,
-       location=$4,
-       quantity=$5,
-       expiry_date=$6,
-       supplier=$7,
-       depleted_at=$8,
-       updated_at=NOW()
-WHERE  id=$1;`
+SET drug_id=$2,
+    batch_number=$3,
+    expiry_date=$4,
+    supplier=$5
+WHERE id=$1;
+`
 
-func (r *postgresPharmacyRepository) UpdateBatch(
-	ctx context.Context, b *entities.DrugBatch) error {
-
+func (r *postgresPharmacyRepository) UpdateBatch(ctx context.Context, b *entities.DrugBatch) (*entities.BatchDetail, error) {
 	res, err := r.Conn.ExecContext(ctx, qUpdateBatch,
-		b.ID, b.DrugID, b.BatchNumber, b.Location,
-		b.Quantity, b.ExpiryDate, b.Supplier, b.DepletedAt)
+		b.ID, b.DrugID, b.BatchNumber, b.ExpiryDate, b.Supplier)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	aff, _ := res.RowsAffected()
 	if aff == 0 {
-		return errors.New("batch not found")
+		return nil, errors.New("batch not found")
 	}
-	return nil
+	return r.GetBatch(ctx, b.ID)
 }
 
 const qDeleteBatch = `DELETE FROM drug_batches WHERE id=$1;`
 
-func (r *postgresPharmacyRepository) DeleteBatch(
-	ctx context.Context, id int64) error {
-
+func (r *postgresPharmacyRepository) DeleteBatch(ctx context.Context, id int64) error {
 	res, err := r.Conn.ExecContext(ctx, qDeleteBatch, id)
 	if err != nil {
 		return err
@@ -226,34 +325,95 @@ func (r *postgresPharmacyRepository) DeleteBatch(
 }
 
 // -----------------------------------------------------------------------------
-//  (Optional) FEFO helper – not wired yet
+//  DRUG BATCH LOCATIONS  (stock entries)
 // -----------------------------------------------------------------------------
 
-func (r *postgresPharmacyRepository) earliestBatches(
-	ctx context.Context, drugID int64,
-) ([]entities.DrugBatch, error) {
-
-	const q = `
-SELECT id, drug_id, batch_no, location,
-       quantity, expiry_date, supplier, depleted_at
-FROM   drug_batches
-WHERE  drug_id = $1 AND quantity > 0
-ORDER  BY expiry_date;`
-
-	rows, err := r.Conn.QueryContext(ctx, q, drugID)
+func (r *postgresPharmacyRepository) ListBatchLocations(ctx context.Context, batchID int64) ([]entities.DrugBatchLocation, error) {
+	rows, err := r.Conn.QueryContext(ctx, `
+		SELECT id, batch_id, location, quantity
+		FROM batch_locations
+		WHERE batch_id = $1
+		ORDER BY location, id
+	`, batchID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var out []entities.DrugBatch
+	var out []entities.DrugBatchLocation
 	for rows.Next() {
-		var b entities.DrugBatch
-		if err := rows.Scan(&b.ID, &b.DrugID, &b.BatchNumber, &b.Location,
-			&b.Quantity, &b.ExpiryDate, &b.Supplier, &b.DepletedAt); err != nil {
+		var l entities.DrugBatchLocation
+		if err := rows.Scan(&l.ID, &l.BatchID, &l.Location, &l.Quantity); err != nil {
 			return nil, err
 		}
-		out = append(out, b)
+		out = append(out, l)
 	}
 	return out, rows.Err()
+}
+
+const qGetBatchLocation = `
+SELECT id, batch_id, location, quantity
+FROM   batch_locations
+WHERE  id=$1;`
+
+func (r *postgresPharmacyRepository) GetBatchLocation(ctx context.Context, id int64) (*entities.DrugBatchLocation, error) {
+	var batchLocation entities.DrugBatchLocation
+	err := r.Conn.QueryRowContext(ctx, qGetBatchLocation, id).
+		Scan(&batchLocation.ID, &batchLocation.BatchID, &batchLocation.Location, &batchLocation.Quantity)
+	if err == sql.ErrNoRows {
+		return nil, errors.New("batch location not found")
+	}
+	return &batchLocation, err
+}
+
+const qCreateBatchLocation = `
+	INSERT INTO batch_locations (batch_id, location, quantity)
+	VALUES ($1, $2, $3)
+	RETURNING id
+`
+
+func (r *postgresPharmacyRepository) CreateBatchLocation(ctx context.Context, loc *entities.DrugBatchLocation) (*entities.DrugBatchLocation, error) {
+	var id int64
+	err := r.Conn.QueryRowContext(ctx, qCreateBatchLocation,
+		loc.BatchID, loc.Location, loc.Quantity).Scan(&id)
+	if err != nil {
+		return nil, err
+	}
+	return r.GetBatchLocation(ctx, id)
+}
+
+const qUpdateBatchLocation = `
+UPDATE batch_locations
+SET batch_id=$2,
+    location=$3,
+    quantity=$4
+WHERE id=$1;
+`
+
+func (r *postgresPharmacyRepository) UpdateBatchLocation(ctx context.Context, loc *entities.DrugBatchLocation) (*entities.DrugBatchLocation, error) {
+	res, err := r.Conn.ExecContext(ctx, qUpdateBatchLocation,
+		loc.ID, loc.BatchID, loc.Location, loc.Quantity)
+	if err != nil {
+		return nil, err
+	}
+	if aff, _ := res.RowsAffected(); aff == 0 {
+		return nil, errors.New("batch location not found")
+	}
+	return r.GetBatchLocation(ctx, loc.ID)
+}
+
+const qDeleteBatchLocation = `
+	DELETE FROM batch_locations WHERE id=$1
+`
+
+func (r *postgresPharmacyRepository) DeleteBatchLocation(ctx context.Context, id int64) error {
+	res, err := r.Conn.ExecContext(ctx, qDeleteBatchLocation, id)
+	if err != nil {
+		return err
+	}
+	aff, _ := res.RowsAffected()
+	if aff == 0 {
+		return errors.New("location not found")
+	}
+	return nil
 }

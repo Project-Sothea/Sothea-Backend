@@ -15,26 +15,58 @@ type PharmacyUseCase struct {
 }
 
 // CreateBatch provides a mock function with given fields: ctx, b
-func (_m *PharmacyUseCase) CreateBatch(ctx context.Context, b *entities.DrugBatch) (int64, error) {
+func (_m *PharmacyUseCase) CreateBatch(ctx context.Context, b *entities.BatchDetail) (*entities.BatchDetail, error) {
 	ret := _m.Called(ctx, b)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateBatch")
 	}
 
-	var r0 int64
+	var r0 *entities.BatchDetail
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *entities.DrugBatch) (int64, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *entities.BatchDetail) (*entities.BatchDetail, error)); ok {
 		return rf(ctx, b)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *entities.DrugBatch) int64); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *entities.BatchDetail) *entities.BatchDetail); ok {
 		r0 = rf(ctx, b)
 	} else {
-		r0 = ret.Get(0).(int64)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*entities.BatchDetail)
+		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *entities.DrugBatch) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *entities.BatchDetail) error); ok {
 		r1 = rf(ctx, b)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// CreateBatchLocation provides a mock function with given fields: ctx, batchLocation
+func (_m *PharmacyUseCase) CreateBatchLocation(ctx context.Context, batchLocation *entities.DrugBatchLocation) (*entities.DrugBatchLocation, error) {
+	ret := _m.Called(ctx, batchLocation)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateBatchLocation")
+	}
+
+	var r0 *entities.DrugBatchLocation
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *entities.DrugBatchLocation) (*entities.DrugBatchLocation, error)); ok {
+		return rf(ctx, batchLocation)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *entities.DrugBatchLocation) *entities.DrugBatchLocation); ok {
+		r0 = rf(ctx, batchLocation)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*entities.DrugBatchLocation)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *entities.DrugBatchLocation) error); ok {
+		r1 = rf(ctx, batchLocation)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -78,6 +110,24 @@ func (_m *PharmacyUseCase) DeleteBatch(ctx context.Context, id int64) error {
 
 	if len(ret) == 0 {
 		panic("no return value specified for DeleteBatch")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
+		r0 = rf(ctx, id)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DeleteBatchLocation provides a mock function with given fields: ctx, id
+func (_m *PharmacyUseCase) DeleteBatchLocation(ctx context.Context, id int64) error {
+	ret := _m.Called(ctx, id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteBatchLocation")
 	}
 
 	var r0 error
@@ -139,23 +189,23 @@ func (_m *PharmacyUseCase) GetDrug(ctx context.Context, id int64) (*entities.Dru
 }
 
 // ListBatches provides a mock function with given fields: ctx, drugID
-func (_m *PharmacyUseCase) ListBatches(ctx context.Context, drugID *int64) ([]entities.DrugBatch, error) {
+func (_m *PharmacyUseCase) ListBatches(ctx context.Context, drugID *int64) ([]entities.BatchDetail, error) {
 	ret := _m.Called(ctx, drugID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ListBatches")
 	}
 
-	var r0 []entities.DrugBatch
+	var r0 []entities.BatchDetail
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *int64) ([]entities.DrugBatch, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *int64) ([]entities.BatchDetail, error)); ok {
 		return rf(ctx, drugID)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *int64) []entities.DrugBatch); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *int64) []entities.BatchDetail); ok {
 		r0 = rf(ctx, drugID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]entities.DrugBatch)
+			r0 = ret.Get(0).([]entities.BatchDetail)
 		}
 	}
 
@@ -199,21 +249,63 @@ func (_m *PharmacyUseCase) ListDrugs(ctx context.Context) ([]entities.Drug, erro
 }
 
 // UpdateBatch provides a mock function with given fields: ctx, b
-func (_m *PharmacyUseCase) UpdateBatch(ctx context.Context, b *entities.DrugBatch) error {
+func (_m *PharmacyUseCase) UpdateBatch(ctx context.Context, b *entities.DrugBatch) (*entities.BatchDetail, error) {
 	ret := _m.Called(ctx, b)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateBatch")
 	}
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *entities.DrugBatch) error); ok {
+	var r0 *entities.BatchDetail
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *entities.DrugBatch) (*entities.BatchDetail, error)); ok {
+		return rf(ctx, b)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *entities.DrugBatch) *entities.BatchDetail); ok {
 		r0 = rf(ctx, b)
 	} else {
-		r0 = ret.Error(0)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*entities.BatchDetail)
+		}
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(context.Context, *entities.DrugBatch) error); ok {
+		r1 = rf(ctx, b)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UpdateBatchLocation provides a mock function with given fields: ctx, batchLocation
+func (_m *PharmacyUseCase) UpdateBatchLocation(ctx context.Context, batchLocation *entities.DrugBatchLocation) (*entities.DrugBatchLocation, error) {
+	ret := _m.Called(ctx, batchLocation)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateBatchLocation")
+	}
+
+	var r0 *entities.DrugBatchLocation
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *entities.DrugBatchLocation) (*entities.DrugBatchLocation, error)); ok {
+		return rf(ctx, batchLocation)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *entities.DrugBatchLocation) *entities.DrugBatchLocation); ok {
+		r0 = rf(ctx, batchLocation)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*entities.DrugBatchLocation)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *entities.DrugBatchLocation) error); ok {
+		r1 = rf(ctx, batchLocation)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // UpdateDrug provides a mock function with given fields: ctx, d
