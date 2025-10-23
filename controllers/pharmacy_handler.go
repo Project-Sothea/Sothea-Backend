@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"database/sql"
 	"net/http"
 	"strconv"
 
@@ -20,32 +21,32 @@ type PharmacyHandler struct {
 }
 
 // NewPharmacyHandler registers /pharmacy/* routes and applies JWT auth.
-func NewPharmacyHandler(r *gin.Engine, uc entities.PharmacyUseCase, secretKey []byte) {
+func NewPharmacyHandler(r *gin.Engine, uc entities.PharmacyUseCase, secretKey []byte, db *sql.DB) {
 	h := &PharmacyHandler{Usecase: uc}
 
 	// NewPharmacyHandler …
 	grp := r.Group("/pharmacy")
 	grp.Use(middleware.AuthRequired(secretKey))
-	{
-		// DRUG CATALOG
-		grp.GET("/drugs", h.ListDrugs)
-		grp.POST("/drugs", h.CreateDrug)
-		grp.GET("/drugs/:drugId", h.GetDrug)
-		grp.PATCH("/drugs/:drugId", h.UpdateDrug)
-		grp.DELETE("/drugs/:drugId", h.DeleteDrug)
+	grp.Use(middleware.WithTx(db))
 
-		// BATCHES
-		grp.GET("/batches", h.ListBatches)
-		grp.POST("/batches", h.CreateBatch)
-		grp.PATCH("/batches/:batchId", h.UpdateBatch)
-		grp.DELETE("/batches/:batchId", h.DeleteBatch)
+	// DRUG CATALOG
+	grp.GET("/drugs", h.ListDrugs)
+	grp.POST("/drugs", h.CreateDrug)
+	grp.GET("/drugs/:drugId", h.GetDrug)
+	grp.PATCH("/drugs/:drugId", h.UpdateDrug)
+	grp.DELETE("/drugs/:drugId", h.DeleteDrug)
 
-		// BATCH LOCATIONS
-		grp.POST("/batches/:batchId/locations", h.CreateBatchLocation)
-		grp.PATCH("/batches/:batchId/locations/:locationId", h.UpdateBatchLocation)
-		grp.DELETE("/batches/:batchId/locations/:locationId", h.DeleteBatchLocation)
+	// BATCHES
+	grp.GET("/batches", h.ListBatches)
+	grp.POST("/batches", h.CreateBatch)
+	grp.PATCH("/batches/:batchId", h.UpdateBatch)
+	grp.DELETE("/batches/:batchId", h.DeleteBatch)
 
-	}
+	// BATCH LOCATIONS
+	grp.POST("/batches/:batchId/locations", h.CreateBatchLocation)
+	grp.PATCH("/batches/:batchId/locations/:locationId", h.UpdateBatchLocation)
+	grp.DELETE("/batches/:batchId/locations/:locationId", h.DeleteBatchLocation)
+
 }
 
 // -----------------------------------------------------------------------------

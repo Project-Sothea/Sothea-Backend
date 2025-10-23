@@ -9,12 +9,16 @@ type Prescription struct {
 	ID              int64              `json:"id"`
 	VID             int32              `json:"vid"`
 	PatientID       int64              `json:"patientId"`
-	StaffID         *int64             `json:"staffId"` // Optional
 	Notes           *string            `json:"notes"`
+	CreatedBy       *int64             `json:"createdBy"`
+	CreatorName     *string            `json:"creatorName,omitempty"`
 	CreatedAt       time.Time          `json:"createdAt"`
 	UpdatedAt       time.Time          `json:"updatedAt"`
 	PrescribedDrugs []DrugPrescription `json:"prescribedDrugs"`
-	IsPacked        bool               `json:"isPacked"`
+	IsDispensed     bool               `json:"isDispensed"`
+	DispensedBy     *int64             `json:"dispensedBy,omitempty"`
+	DispenserName   *string            `json:"dispenserName,omitempty"`
+	DispensedAt     *time.Time         `json:"dispensedAt,omitempty"`
 }
 
 type DrugPrescription struct {
@@ -22,6 +26,11 @@ type DrugPrescription struct {
 	PrescriptionID int64                   `json:"prescriptionId"`
 	DrugID         int64                   `json:"drugId"`
 	Remarks        *string                 `json:"remarks"` // aka instructions
+	RequestedQty   int64                   `json:"requestedQty"`
+	IsPacked       bool                    `json:"isPacked"`
+	PackedBy       *int64                  `json:"packedBy,omitempty"`
+	PackerName     *string                 `json:"packerName,omitempty"`
+	PackedAt       *time.Time              `json:"packedAt,omitempty"`
 	CreatedAt      time.Time               `json:"createdAt"`
 	UpdatedAt      time.Time               `json:"updatedAt"`
 	Batches        []PrescriptionBatchItem `json:"batches"`

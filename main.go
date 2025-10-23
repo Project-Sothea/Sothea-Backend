@@ -90,11 +90,11 @@ func main() {
 
 	pharmacyRepo := _patientPostgresRepository.NewPostgresPharmacyRepository(db)
 	pharmacyUseCase := _useCase.NewPharmacyUsecase(pharmacyRepo, 2*time.Second)
-	_httpDelivery.NewPharmacyHandler(router, pharmacyUseCase, secretKey)
+	_httpDelivery.NewPharmacyHandler(router, pharmacyUseCase, secretKey, db)
 
 	prescriptionRepo := _patientPostgresRepository.NewPostgresPrescriptionRepository(db)
 	prescriptionUseCase := _useCase.NewPrescriptionUsecase(prescriptionRepo, 2*time.Second)
-	_httpDelivery.NewPrescriptionHandler(router, prescriptionUseCase, secretKey)
+	_httpDelivery.NewPrescriptionHandler(router, prescriptionUseCase, secretKey, db)
 
 	router.Run(address)
 }

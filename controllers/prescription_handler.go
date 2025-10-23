@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"database/sql"
 	"net/http"
 	"strconv"
 
@@ -18,18 +19,18 @@ type PrescriptionHandler struct {
 	Usecase entities.PrescriptionUseCase
 }
 
-func NewPrescriptionHandler(r *gin.Engine, uc entities.PrescriptionUseCase, secretKey []byte) {
+func NewPrescriptionHandler(r *gin.Engine, uc entities.PrescriptionUseCase, secretKey []byte, db *sql.DB) {
 	h := &PrescriptionHandler{Usecase: uc}
 
 	grp := r.Group("/prescriptions")
 	grp.Use(middleware.AuthRequired(secretKey))
-	{
-		grp.GET("", h.ListPrescriptions)
-		grp.POST("", h.CreatePrescription)
-		grp.GET(":id", h.GetPrescription)
-		grp.PATCH(":id", h.UpdatePrescription)
-		grp.DELETE(":id", h.DeletePrescription)
-	}
+	grp.Use(middleware.WithTx(db))
+
+	grp.GET("", h.ListPrescriptions)
+	grp.GET("/:id", h.GetPrescription)
+	grp.POST("", h.CreatePrescription)
+	grp.PATCH("/:id", h.UpdatePrescription)
+	grp.DELETE("/:id", h.DeletePrescription)
 }
 
 // -----------------------------------------------------------------------------

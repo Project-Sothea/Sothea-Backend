@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jieqiboh/sothea_backend/entities"
 )
@@ -22,17 +23,24 @@ func NewPostgresPrescriptionRepository(conn *sql.DB) entities.PrescriptionReposi
 // -----------------------------------------------------------------------------
 
 func (r *postgresPrescriptionRepository) CreatePrescription(ctx context.Context, p *entities.Prescription) (*entities.Prescription, error) {
-	tx, err := r.Conn.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
+	tx, ok := TxFromCtx(ctx)
+	ownTx := false
 
-	err = tx.QueryRowContext(ctx, `
-		INSERT INTO prescriptions (patient_id, vid, staff_id, notes)
-		VALUES ($1, $2, $3, $4)
+	if !ok {
+		var err error
+		tx, err = r.Conn.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, err
+		}
+		ownTx = true
+		defer tx.Rollback()
+	}
+
+	err := tx.QueryRowContext(ctx, `
+		INSERT INTO prescriptions (patient_id, vid, notes)
+		VALUES ($1, $2, $3)
 		RETURNING id, created_at, updated_at
-	`, p.PatientID, p.VID, p.StaffID, p.Notes).
+	`, p.PatientID, p.VID, p.Notes).
 		Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -42,15 +50,14 @@ func (r *postgresPrescriptionRepository) CreatePrescription(ctx context.Context,
 		d := &p.PrescribedDrugs[i]
 
 		err = tx.QueryRowContext(ctx, `
-			INSERT INTO drug_prescriptions (prescription_id, drug_id, remarks)
-			VALUES ($1, $2, $3)
+			INSERT INTO drug_prescriptions (prescription_id, drug_id, remarks, quantity_requested)
+			VALUES ($1, $2, $3, $4)
 			RETURNING id, created_at, updated_at
-		`, p.ID, d.DrugID, d.Remarks).
+		`, p.ID, d.DrugID, d.Remarks, d.RequestedQty).
 			Scan(&d.ID, &d.CreatedAt, &d.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
-
 		for j := range d.Batches {
 			b := &d.Batches[j]
 
@@ -72,15 +79,19 @@ func (r *postgresPrescriptionRepository) CreatePrescription(ctx context.Context,
 			if err != nil {
 				return nil, err
 			}
+
 			rows, _ := res.RowsAffected()
 			if rows == 0 {
 				return nil, fmt.Errorf("insufficient stock in batch-location %d", b.BatchLocationId)
 			}
+
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
-		return nil, err
+	if ownTx {
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
 	}
 
 	return r.GetPrescriptionByID(ctx, p.ID)
@@ -88,154 +99,434 @@ func (r *postgresPrescriptionRepository) CreatePrescription(ctx context.Context,
 
 func (r *postgresPrescriptionRepository) GetPrescriptionByID(ctx context.Context, id int64) (*entities.Prescription, error) {
 	var p entities.Prescription
+	dbx := DBFromCtx(ctx, r.Conn)
 
-	err := r.Conn.QueryRowContext(ctx, `
-		SELECT id, patient_id, vid, staff_id, notes, created_at, updated_at, is_packed
-		FROM prescriptions
-		WHERE id = $1
-	`, id).Scan(&p.ID, &p.PatientID, &p.VID, &p.StaffID, &p.Notes, &p.CreatedAt, &p.UpdatedAt, &p.IsPacked)
+	// parent
+	if err := dbx.QueryRowContext(ctx, `
+        SELECT id, patient_id, vid, notes, created_by,
+               is_dispensed, dispensed_by, dispensed_at,
+               created_at, updated_at
+        FROM prescriptions
+        WHERE id = $1
+    `, id).Scan(
+		&p.ID, &p.PatientID, &p.VID, &p.Notes, &p.CreatedBy,
+		&p.IsDispensed, &p.DispensedBy, &p.DispensedAt,
+		&p.CreatedAt, &p.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+
+	// phase 1: load all drug_prescriptions (NO inner queries here)
+	drugRows, err := dbx.QueryContext(ctx, `
+        SELECT id, prescription_id, drug_id,
+               remarks, quantity_requested,
+               is_packed, packed_by, packed_at,
+               created_at, updated_at
+        FROM drug_prescriptions
+        WHERE prescription_id = $1
+        ORDER BY id
+    `, id)
 	if err != nil {
 		return nil, err
 	}
 
-	drugRows, err := r.Conn.QueryContext(ctx, `
-		SELECT id, prescription_id, drug_id, remarks, created_at, updated_at
-		FROM drug_prescriptions
-		WHERE prescription_id = $1
-	`, id)
-	if err != nil {
-		return nil, err
-	}
-	defer drugRows.Close()
-
+	var (
+		drugs        = []entities.DrugPrescription{}
+		packerIDsSet = map[int64]struct{}{}
+	)
 	for drugRows.Next() {
 		var d entities.DrugPrescription
-		err := drugRows.Scan(&d.ID, &d.PrescriptionID, &d.DrugID, &d.Remarks, &d.CreatedAt, &d.UpdatedAt)
-		if err != nil {
+		if err := drugRows.Scan(&d.ID, &d.PrescriptionID, &d.DrugID,
+			&d.Remarks, &d.RequestedQty,
+			&d.IsPacked, &d.PackedBy, &d.PackedAt,
+			&d.CreatedAt, &d.UpdatedAt); err != nil {
+			drugRows.Close()
 			return nil, err
 		}
+		if d.IsPacked && d.PackedBy != nil {
+			packerIDsSet[*d.PackedBy] = struct{}{} // collect, don't query yet
+		}
+		drugs = append(drugs, d)
+	}
+	if err := drugRows.Err(); err != nil {
+		drugRows.Close()
+		return nil, err
+	}
+	drugRows.Close()
 
-		batchRows, err := r.Conn.QueryContext(ctx, `
-			SELECT id, drug_prescription_id, drug_batch_location_id, quantity, created_at, updated_at
-			FROM prescription_batch_items
-			WHERE drug_prescription_id = $1
-		`, d.ID)
+	// phase 2: load batches for each drug (still no inner queries inside loops)
+	for i := range drugs {
+		d := &drugs[i]
+		d.Batches = []entities.PrescriptionBatchItem{}
+		batchRows, err := dbx.QueryContext(ctx, `
+            SELECT id, drug_prescription_id, drug_batch_location_id, quantity, created_at, updated_at
+            FROM prescription_batch_items
+            WHERE drug_prescription_id = $1
+            ORDER BY id
+        `, d.ID)
 		if err != nil {
 			return nil, err
 		}
-		defer batchRows.Close()
 
 		for batchRows.Next() {
 			var b entities.PrescriptionBatchItem
-			var drugBatchLocationID int64
-			err := batchRows.Scan(&b.ID, &b.DrugPrescriptionID, &drugBatchLocationID, &b.Quantity, &b.CreatedAt, &b.UpdatedAt)
-			if err != nil {
+			var locID int64
+			if err := batchRows.Scan(&b.ID, &b.DrugPrescriptionID, &locID, &b.Quantity, &b.CreatedAt, &b.UpdatedAt); err != nil {
+				batchRows.Close()
 				return nil, err
 			}
-			b.BatchLocationId = drugBatchLocationID
+			b.BatchLocationId = locID
 			d.Batches = append(d.Batches, b)
 		}
-		p.PrescribedDrugs = append(p.PrescribedDrugs, d)
+		if err := batchRows.Err(); err != nil {
+			batchRows.Close()
+			return nil, err
+		}
+		batchRows.Close()
 	}
 
+	// phase 3: resolve user names AFTER all rows are closed
+	// You may use dbx (tx) here since no rows are open now.
+	if p.CreatedBy != nil {
+		u, err := getUserByID(dbx, *p.CreatedBy)
+		if err != nil {
+			return nil, err
+		}
+		p.CreatorName = &u.Name
+	}
+	if p.IsDispensed && p.DispensedBy != nil {
+		u, err := getUserByID(dbx, *p.DispensedBy)
+		if err != nil {
+			return nil, err
+		}
+		p.DispenserName = &u.Name
+	}
+
+	if len(packerIDsSet) > 0 {
+		// (Optional optimisation) fetch all packers in one query.
+		// Or simpler: loop and call getUserByID sequentially.
+		for i := range drugs {
+			if drugs[i].IsPacked && drugs[i].PackedBy != nil {
+				u, err := getUserByID(dbx, *drugs[i].PackedBy)
+				if err != nil {
+					return nil, err
+				}
+				drugs[i].PackerName = &u.Name
+			}
+		}
+	}
+
+	p.PrescribedDrugs = drugs
 	return &p, nil
 }
 
 func (r *postgresPrescriptionRepository) ListPrescriptions(ctx context.Context, patientID *int64, vid *int32) ([]*entities.Prescription, error) {
-	query := `
-		SELECT id, patient_id, vid, staff_id, notes, created_at, updated_at, is_packed
+	dbx := DBFromCtx(ctx, r.Conn)
+
+	// -------------------------
+	// Phase 1: load prescriptions
+	// -------------------------
+	base := `
+		SELECT id, patient_id, vid, notes, created_by,
+		       is_dispensed, dispensed_by, dispensed_at,
+		       created_at, updated_at
 		FROM prescriptions`
 
-	var rows *sql.Rows
-	var err error
-
+	var (
+		rows *sql.Rows
+		err  error
+	)
 	switch {
 	case patientID != nil && vid != nil:
-		query += ` WHERE patient_id = $1 AND vid = $2 ORDER BY created_at DESC`
-		rows, err = r.Conn.QueryContext(ctx, query, *patientID, *vid)
+		rows, err = dbx.QueryContext(ctx, base+` WHERE patient_id = $1 AND vid = $2 ORDER BY created_at DESC`, *patientID, *vid)
 	case patientID != nil:
-		query += ` WHERE patient_id = $1 ORDER BY created_at DESC`
-		rows, err = r.Conn.QueryContext(ctx, query, *patientID)
+		rows, err = dbx.QueryContext(ctx, base+` WHERE patient_id = $1 ORDER BY created_at DESC`, *patientID)
 	default:
-		query += ` ORDER BY created_at DESC`
-		rows, err = r.Conn.QueryContext(ctx, query)
+		rows, err = dbx.QueryContext(ctx, base+` ORDER BY created_at DESC`)
 	}
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var result []*entities.Prescription
+	var (
+		result    = []*entities.Prescription{}
+		prescIDs  = []int64{}
+		prescByID = make(map[int64]*entities.Prescription)
+	)
 	for rows.Next() {
-		var p entities.Prescription
-		err := rows.Scan(&p.ID, &p.PatientID, &p.VID, &p.StaffID, &p.Notes, &p.CreatedAt, &p.UpdatedAt, &p.IsPacked)
-		if err != nil {
+		p := new(entities.Prescription)
+		if err := rows.Scan(
+			&p.ID, &p.PatientID, &p.VID, &p.Notes, &p.CreatedBy,
+			&p.IsDispensed, &p.DispensedBy, &p.DispensedAt,
+			&p.CreatedAt, &p.UpdatedAt,
+		); err != nil {
+			rows.Close()
 			return nil, err
 		}
+		p.PrescribedDrugs = []entities.DrugPrescription{}
+		result = append(result, p)
+		prescIDs = append(prescIDs, p.ID)
+		prescByID[p.ID] = p
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
 
-		// Hydrate prescribed drugs
-		drugRows, err := r.Conn.QueryContext(ctx, `
-			SELECT id, prescription_id, drug_id, remarks, created_at, updated_at
-			FROM drug_prescriptions
-			WHERE prescription_id = $1
-		`, p.ID)
-		if err != nil {
+	if len(result) == 0 {
+		return result, nil
+	}
+
+	// util: ($1,$2,...)
+	inPlaceholders := func(n int, startIdx int) string {
+		var b strings.Builder
+		b.WriteByte('(')
+		for i := 0; i < n; i++ {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			fmt.Fprintf(&b, "$%d", startIdx+i)
+		}
+		b.WriteByte(')')
+		return b.String()
+	}
+
+	// -------------------------
+	// Phase 2: load drug_prescriptions in one go (no inner queries!)
+	// -------------------------
+	dpArgs := make([]any, len(prescIDs))
+	for i, id := range prescIDs {
+		dpArgs[i] = id
+	}
+	dpQuery := `
+		SELECT id, prescription_id, drug_id,
+		       remarks, quantity_requested,
+		       is_packed, packed_by, packed_at,
+		       created_at, updated_at
+		FROM drug_prescriptions
+		WHERE prescription_id IN ` + inPlaceholders(len(prescIDs), 1) + `
+		ORDER BY prescription_id, id`
+
+	dpRows, err := dbx.QueryContext(ctx, dpQuery, dpArgs...)
+	if err != nil {
+		return nil, err
+	}
+
+	// collect for phase 3/4
+	dpByID := make(map[int64]*entities.DrugPrescription)
+	packerIDsSet := make(map[int64]struct{})
+
+	for dpRows.Next() {
+		var d entities.DrugPrescription
+		if err := dpRows.Scan(
+			&d.ID, &d.PrescriptionID, &d.DrugID,
+			&d.Remarks, &d.RequestedQty,
+			&d.IsPacked, &d.PackedBy, &d.PackedAt,
+			&d.CreatedAt, &d.UpdatedAt,
+		); err != nil {
+			dpRows.Close()
 			return nil, err
 		}
-
-		var prescribedDrugs []entities.DrugPrescription
-		for drugRows.Next() {
-			var d entities.DrugPrescription
-			err = drugRows.Scan(&d.ID, &d.PrescriptionID, &d.DrugID, &d.Remarks, &d.CreatedAt, &d.UpdatedAt)
-			if err != nil {
-				drugRows.Close()
-				return nil, err
+		d.Batches = []entities.PrescriptionBatchItem{}
+		parent := prescByID[d.PrescriptionID]
+		if parent != nil {
+			parent.PrescribedDrugs = append(parent.PrescribedDrugs, d)
+			dpByID[d.ID] = &parent.PrescribedDrugs[len(parent.PrescribedDrugs)-1]
+			if d.IsPacked && d.PackedBy != nil {
+				packerIDsSet[*d.PackedBy] = struct{}{} // collect; don't query yet
 			}
+		}
+	}
+	if err := dpRows.Err(); err != nil {
+		dpRows.Close()
+		return nil, err
+	}
+	dpRows.Close()
 
-			// Hydrate prescription batch items
-			batchRows, err := r.Conn.QueryContext(ctx, `
-				SELECT id, drug_prescription_id, drug_batch_location_id, quantity, created_at, updated_at
-				FROM prescription_batch_items
-				WHERE drug_prescription_id = $1
-			`, d.ID)
-			if err != nil {
-				drugRows.Close()
-				return nil, err
-			}
-
-			var batches []entities.PrescriptionBatchItem
-			for batchRows.Next() {
-				var b entities.PrescriptionBatchItem
-				var drugBatchLocationID int64
-				err = batchRows.Scan(&b.ID, &b.DrugPrescriptionID, &drugBatchLocationID, &b.Quantity, &b.CreatedAt, &b.UpdatedAt)
+	if len(dpByID) == 0 {
+		// No line items; resolve parent user names and return.
+		for _, p := range result {
+			if p.CreatedBy != nil {
+				u, err := getUserByID(dbx, *p.CreatedBy)
 				if err != nil {
-					batchRows.Close()
-					drugRows.Close()
 					return nil, err
 				}
-				b.BatchLocationId = drugBatchLocationID
-				batches = append(batches, b)
+				p.CreatorName = &u.Name
 			}
-			batchRows.Close()
-
-			d.Batches = batches
-			prescribedDrugs = append(prescribedDrugs, d)
+			if p.DispensedBy != nil {
+				u, err := getUserByID(dbx, *p.DispensedBy)
+				if err != nil {
+					return nil, err
+				}
+				p.DispenserName = &u.Name
+			}
 		}
-		drugRows.Close()
+		return result, nil
+	}
 
-		p.PrescribedDrugs = prescribedDrugs
-		result = append(result, &p)
+	// -------------------------
+	// Phase 3: load all batch items in one go
+	// -------------------------
+	dpIDs := make([]int64, 0, len(dpByID))
+	for id := range dpByID {
+		dpIDs = append(dpIDs, id)
+	}
+	biArgs := make([]any, len(dpIDs))
+	for i, id := range dpIDs {
+		biArgs[i] = id
+	}
+	biQuery := `
+		SELECT id, drug_prescription_id, drug_batch_location_id, quantity, created_at, updated_at
+		FROM prescription_batch_items
+		WHERE drug_prescription_id IN ` + inPlaceholders(len(dpIDs), 1) + `
+		ORDER BY drug_prescription_id, id`
+
+	biRows, err := dbx.QueryContext(ctx, biQuery, biArgs...)
+	if err != nil {
+		return nil, err
+	}
+	for biRows.Next() {
+		var b entities.PrescriptionBatchItem
+		var locID int64
+		if err := biRows.Scan(&b.ID, &b.DrugPrescriptionID, &locID, &b.Quantity, &b.CreatedAt, &b.UpdatedAt); err != nil {
+			biRows.Close()
+			return nil, err
+		}
+		b.BatchLocationId = locID
+		if dp := dpByID[b.DrugPrescriptionID]; dp != nil {
+			dp.Batches = append(dp.Batches, b)
+		}
+	}
+	if err := biRows.Err(); err != nil {
+		biRows.Close()
+		return nil, err
+	}
+	biRows.Close()
+
+	// -------------------------
+	// Phase 4: resolve user names AFTER all rows are closed
+	// -------------------------
+	// parent creator/dispensers (as before)
+	for _, p := range result {
+		if p.CreatedBy != nil {
+			u, err := getUserByID(dbx, *p.CreatedBy)
+			if err != nil {
+				return nil, err
+			}
+			p.CreatorName = &u.Name
+		}
+		if p.DispensedBy != nil {
+			u, err := getUserByID(dbx, *p.DispensedBy)
+			if err != nil {
+				return nil, err
+			}
+			p.DispenserName = &u.Name
+		}
+	}
+
+	// packers: bulk resolve to avoid N+1 (optional but nice)
+	if len(packerIDsSet) > 0 {
+		packerIDs := make([]int64, 0, len(packerIDsSet))
+		for id := range packerIDsSet {
+			packerIDs = append(packerIDs, id)
+		}
+
+		// build args
+		args := make([]any, len(packerIDs))
+		for i, id := range packerIDs {
+			args[i] = id
+		}
+
+		// id -> name map
+		packerByID := make(map[int64]string)
+		q := `SELECT id, name FROM users WHERE id IN ` + inPlaceholders(len(packerIDs), 1)
+		uRows, err := dbx.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, err
+		}
+		for uRows.Next() {
+			var id int64
+			var name string
+			if err := uRows.Scan(&id, &name); err != nil {
+				uRows.Close()
+				return nil, err
+			}
+			packerByID[id] = name
+		}
+		if err := uRows.Err(); err != nil {
+			uRows.Close()
+			return nil, err
+		}
+		uRows.Close()
+
+		// assign names
+		for _, p := range result {
+			for i := range p.PrescribedDrugs {
+				d := &p.PrescribedDrugs[i]
+				if d.IsPacked && d.PackedBy != nil {
+					if name, ok := packerByID[*d.PackedBy]; ok {
+						d.PackerName = &name
+					}
+				}
+			}
+		}
 	}
 
 	return result, nil
 }
 
 func (r *postgresPrescriptionRepository) UpdatePrescription(ctx context.Context, p *entities.Prescription) (*entities.Prescription, error) {
-	tx, err := r.Conn.BeginTx(ctx, nil)
+	tx, ok := TxFromCtx(ctx)
+	ownTx := false
+
+	if !ok {
+		var err error
+		tx, err = r.Conn.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, err
+		}
+		ownTx = true
+		defer tx.Rollback()
+	}
+
+	// --- Step 0: Check if the prescription has already been dispensed ---
+	var isDispensed bool
+	err := tx.QueryRowContext(ctx, `
+		SELECT is_dispensed FROM prescriptions
+		WHERE id = $1
+	`, p.ID).Scan(&isDispensed)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+
+	// Record the old workflow states of the prescription and drug batches to update
+	dispenseNow := (!isDispensed) && p.IsDispensed // transition false->true?
+	prevPackedByDrug := map[int64]bool{}
+	rowsPrev, err := tx.QueryContext(ctx, `
+		SELECT dp.drug_id, bool_or(dp.is_packed) AS was_packed
+		FROM drug_prescriptions dp
+		WHERE dp.prescription_id = $1
+		GROUP BY dp.drug_id
+	`, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	for rowsPrev.Next() {
+		var drugID int64
+		var wasPacked bool
+		if err := rowsPrev.Scan(&drugID, &wasPacked); err != nil {
+			return nil, err
+		}
+		prevPackedByDrug[drugID] = wasPacked
+	}
+	if err := rowsPrev.Err(); err != nil {
+		return nil, err
+	}
+	rowsPrev.Close()
+	if isDispensed {
+		return nil, errors.New("cannot update a dispensed prescription")
+	}
 
 	// --- Step 1: Load existing per-batch totals INSIDE this txn ---
 	oldTotals := make(map[int64]int64)
@@ -326,12 +617,24 @@ func (r *postgresPrescriptionRepository) UpdatePrescription(ctx context.Context,
 	}
 
 	// --- Step 5: Update prescription metadata ---
-	_, err = tx.ExecContext(ctx, `
-		UPDATE prescriptions
-		SET patient_id = $2, vid = $3, staff_id = $4, notes = $5, updated_at = now(), is_packed=$6
-		WHERE id = $1
-	`, p.ID, p.PatientID, p.VID, p.StaffID, p.Notes, p.IsPacked)
-	if err != nil {
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE prescriptions pr
+		SET
+			patient_id     = $2,
+			vid            = $3,
+			notes          = $4,
+			updated_at     = now(),
+			is_dispensed   = $5,
+			dispensed_by   = CASE
+				WHEN $6 THEN current_setting('sothea.user_id')::BIGINT
+				ELSE pr.dispensed_by
+			END,
+			dispensed_at   = CASE
+				WHEN $6 THEN now()
+				ELSE pr.dispensed_at
+			END
+		WHERE pr.id = $1
+	`, p.ID, p.PatientID, p.VID, p.Notes, p.IsDispensed, dispenseNow); err != nil {
 		return nil, err
 	}
 
@@ -339,11 +642,27 @@ func (r *postgresPrescriptionRepository) UpdatePrescription(ctx context.Context,
 	for i := range p.PrescribedDrugs {
 		d := &p.PrescribedDrugs[i]
 
+		wasPacked := prevPackedByDrug[d.DrugID]
+		stampPack := (!wasPacked) && d.IsPacked
+
+		// stampPack := (!wasPacked) && d.IsPacked
 		err = tx.QueryRowContext(ctx, `
-			INSERT INTO drug_prescriptions (prescription_id, drug_id, remarks)
-			VALUES ($1, $2, $3)
-			RETURNING id, created_at, updated_at
-		`, p.ID, d.DrugID, d.Remarks).
+		INSERT INTO drug_prescriptions (
+			prescription_id,
+			drug_id,
+			remarks,
+			quantity_requested,
+			is_packed,
+			packed_by,
+			packed_at
+		)
+		VALUES (
+			$1, $2, $3, $4, $5,
+			CASE WHEN $6 THEN current_setting('sothea.user_id')::BIGINT ELSE NULL END,
+			CASE WHEN $6 THEN now() ELSE NULL END
+		)
+		RETURNING id, created_at, updated_at
+		`, p.ID, d.DrugID, d.Remarks, d.RequestedQty, d.IsPacked, stampPack).
 			Scan(&d.ID, &d.CreatedAt, &d.UpdatedAt)
 		if err != nil {
 			return nil, err
@@ -365,19 +684,29 @@ func (r *postgresPrescriptionRepository) UpdatePrescription(ctx context.Context,
 	}
 
 	// --- Step 7: Commit ---
-	if err := tx.Commit(); err != nil {
-		return nil, err
+	if ownTx {
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return r.GetPrescriptionByID(context.Background(), p.ID)
 	}
 
 	return r.GetPrescriptionByID(ctx, p.ID)
 }
 
 func (r *postgresPrescriptionRepository) DeletePrescription(ctx context.Context, id int64) error {
-	tx, err := r.Conn.BeginTx(ctx, nil)
-	if err != nil {
-		return err
+	tx, ok := TxFromCtx(ctx)
+	ownTx := false
+
+	if !ok {
+		var err error
+		tx, err = r.Conn.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		ownTx = true
+		defer tx.Rollback()
 	}
-	defer tx.Rollback()
 
 	// 1) Collect current allocations (per batch) INSIDE this txn
 	type alloc struct {
@@ -448,5 +777,10 @@ func (r *postgresPrescriptionRepository) DeletePrescription(ctx context.Context,
 	}
 
 	// 4) Commit
-	return tx.Commit()
+	if ownTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
 }

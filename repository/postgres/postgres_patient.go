@@ -1015,8 +1015,8 @@ func (p *postgresPatientRepository) GetDBUser(ctx context.Context, username stri
 	user := entities.DBUser{}
 
 	// Get latest row
-	latestRow := p.Conn.QueryRowContext(ctx, `SELECT username, password_hash FROM users WHERE username = $1`, username)
-	err := latestRow.Scan(&user.Username, &user.PasswordHash)
+	latestRow := p.Conn.QueryRowContext(ctx, `SELECT id, username, password_hash FROM users WHERE username = $1`, username)
+	err := latestRow.Scan(&user.Id, &user.Username, &user.PasswordHash)
 	if err != nil {
 		return nil, err
 	}

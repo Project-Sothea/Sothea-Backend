@@ -21,13 +21,14 @@ type DrugBatch struct {
 	DrugID      int64     `json:"drugId"`
 	BatchNumber string    `json:"batchNumber"`
 	ExpiryDate  time.Time `json:"expiryDate"`
+	Notes       *string   `json:"notes,omitempty"`
 	Supplier    *string   `json:"supplier,omitempty"`
 }
 
 // Represents each batch of the drug
 type DrugBatchLocation struct {
 	ID       int64  `json:"id"`
-	BatchID  int64  `json:"drugId"`
+	BatchID  int64  `json:"batchId"`
 	Location string `json:"location"`
 	Quantity int64  `json:"quantity"`
 }

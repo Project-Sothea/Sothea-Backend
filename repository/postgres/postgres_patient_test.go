@@ -4,16 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
+	"os"
+	"testing"
+	"time"
+
 	"github.com/jieqiboh/sothea_backend/entities"
 	"github.com/jieqiboh/sothea_backend/util"
 	_ "github.com/lib/pq"
 	"github.com/ory/dockertest/v3"
 	"github.com/ory/dockertest/v3/docker"
 	"github.com/stretchr/testify/assert"
-	"log"
-	"os"
-	"testing"
-	"time"
 
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 )

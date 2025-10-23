@@ -9,7 +9,6 @@ DROP TABLE IF EXISTS visualacuity;
 DROP TABLE IF EXISTS fallrisk;
 DROP TABLE IF EXISTS doctorsconsultation;
 DROP TABLE IF EXISTS admin;
-DROP TABLE IF EXISTS users;
 
 /*******************
 Create the schema and Load Extensions
@@ -397,19 +396,3 @@ INSERT INTO doctorsconsultation (id, vid, well, msk, cvs, respi, gu, git, eye, d
 VALUES (2, 2, TRUE, FALSE, FALSE, TRUE, TRUE, FALSE, TRUE, FALSE, 'LEUKAEMIA',
         'CHEST PAIN, SHORTNESS OF BREATH, COUGH', 'ACUTE BRONCHITIS',
         'REST, HYDRATION, COUGH SYRUP', FALSE, NULL, 'MONITOR FOR RESOLUTION');
-
-/*******************
-    Add usernames and passwords
- */
-CREATE TABLE users
-(
-    id            SERIAL PRIMARY KEY,    -- Auto-incrementing ID for each user (optional but recommended)
-    username      VARCHAR(255) NOT NULL, -- Username field, with a max length of 255 characters
-    password_hash TEXT         NOT NULL  -- Field to store the hashed password
-);
-
--- Insert the users
-INSERT INTO users (username, password_hash)
-VALUES ('admin', '$2a$10$Y/FMxVZsuiPcVutd0O3kfuWEyWyqZUb4HC5yXF7.xVxNCt9GUfOPe');
-INSERT INTO users (username, password_hash)
-VALUES ('user', '$2a$10$cqFdRzsZVwGF6fI4N.YEYOOEZL7B/93RmEZRkVPVHHqyBMfNwy48i');

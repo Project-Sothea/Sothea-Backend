@@ -32,7 +32,8 @@ FROM   drugs
 ORDER  BY name;`
 
 func (r *postgresPharmacyRepository) ListDrugs(ctx context.Context) ([]entities.Drug, error) {
-	rows, err := r.Conn.QueryContext(ctx, qListDrugs)
+	dbx := DBFromCtx(ctx, r.Conn)
+	rows, err := dbx.QueryContext(ctx, qListDrugs)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +58,8 @@ RETURNING id;`
 
 func (r *postgresPharmacyRepository) CreateDrug(ctx context.Context, d *entities.Drug) (*entities.Drug, error) {
 	var id int64
-	err := r.Conn.QueryRowContext(ctx, qCreateDrug,
+	dbx := DBFromCtx(ctx, r.Conn)
+	err := dbx.QueryRowContext(ctx, qCreateDrug,
 		d.Name, d.Unit, d.DefaultSize, d.Notes,
 	).Scan(&id)
 	switch {
@@ -79,7 +81,8 @@ WHERE  id=$1;`
 
 func (r *postgresPharmacyRepository) GetDrug(ctx context.Context, id int64) (*entities.Drug, error) {
 	var d entities.Drug
-	err := r.Conn.QueryRowContext(ctx, qGetDrug, id).
+	dbx := DBFromCtx(ctx, r.Conn)
+	err := dbx.QueryRowContext(ctx, qGetDrug, id).
 		Scan(&d.ID, &d.Name, &d.Unit, &d.DefaultSize, &d.Notes)
 	if err == sql.ErrNoRows {
 		return nil, errors.New("drug not found")
@@ -98,8 +101,8 @@ WHERE  id=$1;`
 
 func (r *postgresPharmacyRepository) UpdateDrug(
 	ctx context.Context, d *entities.Drug) (*entities.Drug, error) {
-
-	res, err := r.Conn.ExecContext(ctx, qUpdateDrug,
+	dbx := DBFromCtx(ctx, r.Conn)
+	res, err := dbx.ExecContext(ctx, qUpdateDrug,
 		d.ID, d.Name, d.Unit, d.DefaultSize, d.Notes)
 	if err != nil {
 		return nil, err
@@ -115,8 +118,8 @@ const qDeleteDrug = `DELETE FROM drugs WHERE id=$1;`
 
 func (r *postgresPharmacyRepository) DeleteDrug(
 	ctx context.Context, id int64) error {
-
-	res, err := r.Conn.ExecContext(ctx, qDeleteDrug, id)
+	dbx := DBFromCtx(ctx, r.Conn)
+	res, err := dbx.ExecContext(ctx, qDeleteDrug, id)
 	if err != nil {
 		return err
 	}
@@ -150,7 +153,8 @@ func (r *postgresPharmacyRepository) ListBatchDetails(
 	}
 	q += " ORDER BY drug_id, expiry_date, id"
 
-	rows, err := r.Conn.QueryContext(ctx, q, args...)
+	dbx := DBFromCtx(ctx, r.Conn)
+	rows, err := dbx.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +179,7 @@ func (r *postgresPharmacyRepository) ListBatchDetails(
 	}
 
 	// 2) Fetch all locations for those batches in one query
-	locRows, err := r.Conn.QueryContext(ctx, `
+	locRows, err := dbx.QueryContext(ctx, `
 		SELECT id, batch_id, location, quantity
 		FROM batch_locations
 		WHERE batch_id = ANY($1)
@@ -217,7 +221,8 @@ WHERE  id=$1;`
 
 func (r *postgresPharmacyRepository) GetBatch(ctx context.Context, id int64) (*entities.BatchDetail, error) {
 	var batch entities.DrugBatch
-	err := r.Conn.QueryRowContext(ctx, qGetBatch, id).
+	dbx := DBFromCtx(ctx, r.Conn)
+	err := dbx.QueryRowContext(ctx, qGetBatch, id).
 		Scan(&batch.ID, &batch.DrugID, &batch.BatchNumber, &batch.ExpiryDate, &batch.Supplier)
 	if err == sql.ErrNoRows {
 		return nil, errors.New("batch not found")
@@ -242,11 +247,18 @@ RETURNING id;
 `
 
 func (r *postgresPharmacyRepository) CreateBatch(ctx context.Context, b *entities.BatchDetail) (*entities.BatchDetail, error) {
-	tx, err := r.Conn.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
+	tx, ok := TxFromCtx(ctx)
+	ownTx := false
+
+	if !ok {
+		var err error
+		tx, err = r.Conn.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, err
+		}
+		ownTx = true
+		defer tx.Rollback()
 	}
-	defer tx.Rollback()
 
 	// 1) Insert batch
 	var batchID int64
@@ -280,8 +292,10 @@ func (r *postgresPharmacyRepository) CreateBatch(ctx context.Context, b *entitie
 	}
 
 	// 3) Commit the whole thing atomically
-	if err := tx.Commit(); err != nil {
-		return nil, err
+	if ownTx {
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
 	}
 
 	// 4) Return the hydrated detail (locations included)
@@ -298,7 +312,8 @@ WHERE id=$1;
 `
 
 func (r *postgresPharmacyRepository) UpdateBatch(ctx context.Context, b *entities.DrugBatch) (*entities.BatchDetail, error) {
-	res, err := r.Conn.ExecContext(ctx, qUpdateBatch,
+	dbx := DBFromCtx(ctx, r.Conn)
+	res, err := dbx.ExecContext(ctx, qUpdateBatch,
 		b.ID, b.DrugID, b.BatchNumber, b.ExpiryDate, b.Supplier)
 	if err != nil {
 		return nil, err
@@ -313,7 +328,8 @@ func (r *postgresPharmacyRepository) UpdateBatch(ctx context.Context, b *entitie
 const qDeleteBatch = `DELETE FROM drug_batches WHERE id=$1;`
 
 func (r *postgresPharmacyRepository) DeleteBatch(ctx context.Context, id int64) error {
-	res, err := r.Conn.ExecContext(ctx, qDeleteBatch, id)
+	dbx := DBFromCtx(ctx, r.Conn)
+	res, err := dbx.ExecContext(ctx, qDeleteBatch, id)
 	if err != nil {
 		return err
 	}
@@ -329,7 +345,8 @@ func (r *postgresPharmacyRepository) DeleteBatch(ctx context.Context, id int64) 
 // -----------------------------------------------------------------------------
 
 func (r *postgresPharmacyRepository) ListBatchLocations(ctx context.Context, batchID int64) ([]entities.DrugBatchLocation, error) {
-	rows, err := r.Conn.QueryContext(ctx, `
+	dbx := DBFromCtx(ctx, r.Conn)
+	rows, err := dbx.QueryContext(ctx, `
 		SELECT id, batch_id, location, quantity
 		FROM batch_locations
 		WHERE batch_id = $1
@@ -358,7 +375,8 @@ WHERE  id=$1;`
 
 func (r *postgresPharmacyRepository) GetBatchLocation(ctx context.Context, id int64) (*entities.DrugBatchLocation, error) {
 	var batchLocation entities.DrugBatchLocation
-	err := r.Conn.QueryRowContext(ctx, qGetBatchLocation, id).
+	dbx := DBFromCtx(ctx, r.Conn)
+	err := dbx.QueryRowContext(ctx, qGetBatchLocation, id).
 		Scan(&batchLocation.ID, &batchLocation.BatchID, &batchLocation.Location, &batchLocation.Quantity)
 	if err == sql.ErrNoRows {
 		return nil, errors.New("batch location not found")
@@ -374,7 +392,8 @@ const qCreateBatchLocation = `
 
 func (r *postgresPharmacyRepository) CreateBatchLocation(ctx context.Context, loc *entities.DrugBatchLocation) (*entities.DrugBatchLocation, error) {
 	var id int64
-	err := r.Conn.QueryRowContext(ctx, qCreateBatchLocation,
+	dbx := DBFromCtx(ctx, r.Conn)
+	err := dbx.QueryRowContext(ctx, qCreateBatchLocation,
 		loc.BatchID, loc.Location, loc.Quantity).Scan(&id)
 	if err != nil {
 		return nil, err
@@ -391,7 +410,8 @@ WHERE id=$1;
 `
 
 func (r *postgresPharmacyRepository) UpdateBatchLocation(ctx context.Context, loc *entities.DrugBatchLocation) (*entities.DrugBatchLocation, error) {
-	res, err := r.Conn.ExecContext(ctx, qUpdateBatchLocation,
+	dbx := DBFromCtx(ctx, r.Conn)
+	res, err := dbx.ExecContext(ctx, qUpdateBatchLocation,
 		loc.ID, loc.BatchID, loc.Location, loc.Quantity)
 	if err != nil {
 		return nil, err
@@ -407,7 +427,8 @@ const qDeleteBatchLocation = `
 `
 
 func (r *postgresPharmacyRepository) DeleteBatchLocation(ctx context.Context, id int64) error {
-	res, err := r.Conn.ExecContext(ctx, qDeleteBatchLocation, id)
+	dbx := DBFromCtx(ctx, r.Conn)
+	res, err := dbx.ExecContext(ctx, qDeleteBatchLocation, id)
 	if err != nil {
 		return err
 	}

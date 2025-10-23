@@ -8,31 +8,27 @@ DROP TABLE IF EXISTS drug_batches;
 DROP TABLE IF EXISTS drugs;
 
 /*******************
- Helper: updated_at trigger used by multiple tables
-********************/
-CREATE OR REPLACE FUNCTION touch_updated_at() RETURNS TRIGGER AS $$
-BEGIN
-  NEW.updated_at := now();
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-/*******************
  Create Drug Catalog
 ********************/
 CREATE TABLE IF NOT EXISTS drugs (
   id           BIGSERIAL PRIMARY KEY,
   name         TEXT NOT NULL UNIQUE,
   unit         TEXT NOT NULL,             -- e.g., "tablet", "ml", "sachet"
-  default_size INTEGER,                   -- e.g., 500 (mg), 200 (mg), etc.
+  default_size INTEGER,                   -- default serving size, e.g., 500 (mg), 200 (mg), etc.
   notes        TEXT,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_by   BIGINT REFERENCES users(id),
+  updated_at   TIMESTAMPTZ,
+  updated_by   BIGINT REFERENCES users(id)
 );
 
-CREATE TRIGGER trg_drugs_touch_updated_at
-BEFORE UPDATE ON drugs
-FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+CREATE TRIGGER trg_drugs_audit
+BEFORE INSERT OR UPDATE ON drugs
+FOR EACH ROW EXECUTE FUNCTION set_audit_fields();
+
+CREATE TRIGGER trg_drugs_log
+AFTER INSERT OR UPDATE OR DELETE ON drugs
+FOR EACH ROW EXECUTE FUNCTION audit_row();
 
 /*******************
  Create Inventory Table
@@ -45,13 +41,19 @@ CREATE TABLE IF NOT EXISTS drug_batches (
   expiry_date  DATE NOT NULL,
   supplier     TEXT,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by   BIGINT REFERENCES users(id),
+  updated_at   TIMESTAMPTZ,
+  updated_by   BIGINT REFERENCES users(id),
   UNIQUE (drug_id, batch_number)
 );
 
-CREATE TRIGGER trg_drug_batches_touch_updated_at
-BEFORE UPDATE ON drug_batches
-FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+CREATE TRIGGER trg_drug_batches_audit
+BEFORE INSERT OR UPDATE ON drug_batches
+FOR EACH ROW EXECUTE FUNCTION set_audit_fields();
+
+CREATE TRIGGER trg_drug_batches_log
+AFTER INSERT OR UPDATE OR DELETE ON drug_batches
+FOR EACH ROW EXECUTE FUNCTION audit_row();
 
 /*******************
  Create Batch Location Table
@@ -61,14 +63,20 @@ CREATE TABLE IF NOT EXISTS batch_locations (
   batch_id        BIGINT NOT NULL REFERENCES drug_batches(id) ON DELETE CASCADE,
   location       TEXT NOT NULL,
   quantity       INTEGER NOT NULL CHECK (quantity >= 0),
-  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by   BIGINT REFERENCES users(id),
+  updated_at   TIMESTAMPTZ,
+  updated_by   BIGINT REFERENCES users(id),
   UNIQUE (batch_id, location)
 );
 
-CREATE TRIGGER trg_batch_locations_touch_updated_at
-BEFORE UPDATE ON batch_locations
-FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+CREATE TRIGGER trg_batch_locations_audit
+BEFORE INSERT OR UPDATE ON batch_locations
+FOR EACH ROW EXECUTE FUNCTION set_audit_fields();
+
+CREATE TRIGGER trg_batch_locations_log
+AFTER INSERT OR UPDATE OR DELETE ON batch_locations
+FOR EACH ROW EXECUTE FUNCTION audit_row();
 
 -- Helpful indexes (FEFO joins & lookups by location text)
 CREATE INDEX IF NOT EXISTS idx_bl_batch ON batch_locations (batch_id);
@@ -77,21 +85,29 @@ CREATE INDEX IF NOT EXISTS idx_bl_location ON batch_locations (location);
 /*******************
  Prescriptions (FK to admin(id, vid))
 ********************/
+
 CREATE TABLE IF NOT EXISTS prescriptions (
   id         BIGSERIAL PRIMARY KEY,
   patient_id INTEGER NOT NULL,
   vid        INTEGER NOT NULL,
-  staff_id   INTEGER,
   notes      TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  is_packed BOOLEAN NOT NULL DEFAULT false,
+  is_dispensed BOOLEAN NOT NULL DEFAULT FALSE,
+  dispensed_by BIGINT REFERENCES users(id),
+  dispensed_at TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by   BIGINT REFERENCES users(id),
+  updated_at   TIMESTAMPTZ,
+  updated_by   BIGINT REFERENCES users(id),
   CONSTRAINT fk_admin FOREIGN KEY (patient_id, vid) REFERENCES admin(id, vid)
 );
 
-CREATE TRIGGER trg_prescriptions_touch_updated_at
-BEFORE UPDATE ON prescriptions
-FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+CREATE TRIGGER trg_prescriptions_audit
+BEFORE INSERT OR UPDATE ON prescriptions
+FOR EACH ROW EXECUTE FUNCTION set_audit_fields();
+
+CREATE TRIGGER trg_prescriptions_log
+AFTER INSERT OR UPDATE OR DELETE ON prescriptions
+FOR EACH ROW EXECUTE FUNCTION audit_row();
 
 CREATE INDEX IF NOT EXISTS idx_prescriptions_patient_visit ON prescriptions (patient_id, vid);
 
@@ -103,13 +119,23 @@ CREATE TABLE IF NOT EXISTS drug_prescriptions (
   prescription_id  BIGINT NOT NULL REFERENCES prescriptions(id) ON DELETE CASCADE,
   drug_id          BIGINT NOT NULL REFERENCES drugs(id),
   remarks          TEXT,
-  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+  quantity_requested INTEGER NOT NULL CHECK (quantity_requested > 0),
+  is_packed        BOOLEAN NOT NULL DEFAULT FALSE,
+  packed_by       BIGINT REFERENCES users(id),
+  packed_at       TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by   BIGINT REFERENCES users(id),
+  updated_at   TIMESTAMPTZ,
+  updated_by   BIGINT REFERENCES users(id)
 );
 
-CREATE TRIGGER trg_drug_prescriptions_touch_updated_at
-BEFORE UPDATE ON drug_prescriptions
-FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+CREATE TRIGGER trg_drug_prescriptions_audit
+BEFORE INSERT OR UPDATE ON drug_prescriptions
+FOR EACH ROW EXECUTE FUNCTION set_audit_fields();
+
+CREATE TRIGGER trg_drug_prescriptions_log
+AFTER INSERT OR UPDATE OR DELETE ON drug_prescriptions
+FOR EACH ROW EXECUTE FUNCTION audit_row();
 
 CREATE INDEX IF NOT EXISTS idx_drug_prescriptions_prescription ON drug_prescriptions (prescription_id);
 CREATE INDEX IF NOT EXISTS idx_drug_prescriptions_drug ON drug_prescriptions (drug_id);
@@ -122,16 +148,61 @@ CREATE TABLE IF NOT EXISTS prescription_batch_items (
   drug_prescription_id    BIGINT NOT NULL REFERENCES drug_prescriptions(id) ON DELETE CASCADE,
   drug_batch_location_id  BIGINT NOT NULL REFERENCES batch_locations(id),
   quantity               INTEGER NOT NULL CHECK (quantity > 0),
-  created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by   BIGINT REFERENCES users(id),
+  updated_at   TIMESTAMPTZ,
+  updated_by   BIGINT REFERENCES users(id)
 );
 
-CREATE TRIGGER trg_prescription_batch_items_touch_updated_at
-BEFORE UPDATE ON prescription_batch_items
-FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+CREATE TRIGGER trg_prescription_batch_items_audit
+BEFORE INSERT OR UPDATE ON prescription_batch_items
+FOR EACH ROW EXECUTE FUNCTION set_audit_fields();
+
+CREATE TRIGGER trg_prescription_batch_items_log
+AFTER INSERT OR UPDATE OR DELETE ON prescription_batch_items
+FOR EACH ROW EXECUTE FUNCTION audit_row();
 
 CREATE INDEX IF NOT EXISTS idx_pbi_prescription ON prescription_batch_items (drug_prescription_id);
 CREATE INDEX IF NOT EXISTS idx_pbi_batch ON prescription_batch_items (drug_batch_location_id);
+
+-- BEFORE INSERT/UPDATE on prescription_batch_items
+CREATE OR REPLACE FUNCTION pbi_check_not_exceed_requested()
+RETURNS TRIGGER AS $$
+DECLARE
+  requested INTEGER;
+  already_allocated INTEGER;
+  candidate_total INTEGER;
+BEGIN
+  SELECT dp.quantity_requested INTO requested
+  FROM drug_prescriptions dp
+  WHERE dp.id = NEW.drug_prescription_id;
+
+  IF requested IS NULL THEN
+    RAISE EXCEPTION 'No line item found for %', NEW.drug_prescription_id;
+  END IF;
+
+  -- Sum existing (excluding this row if updating)
+  SELECT COALESCE(SUM(quantity),0) INTO already_allocated
+  FROM prescription_batch_items
+  WHERE drug_prescription_id = NEW.drug_prescription_id
+    AND id <> COALESCE(NEW.id, -1);
+
+  candidate_total := already_allocated + NEW.quantity;
+
+  IF candidate_total > requested THEN
+    RAISE EXCEPTION 'Allocations (%s) exceed requested qty (%s) for line %s',
+      candidate_total, requested, NEW.drug_prescription_id;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_pbi_check_requested ON prescription_batch_items;
+CREATE TRIGGER trg_pbi_check_requested
+BEFORE INSERT OR UPDATE ON prescription_batch_items
+FOR EACH ROW EXECUTE FUNCTION pbi_check_not_exceed_requested();
+
 
 /*******************
  Seed data
@@ -147,7 +218,7 @@ INSERT INTO drugs (name, unit, default_size, notes) VALUES
   ('Metformin',     'tablet', 500, 'For T2DM')
 ON CONFLICT (name) DO NOTHING;
 
--- Drug batches (NO location/quantity columns anymore)
+-- Drug batches
 INSERT INTO drug_batches (drug_id, batch_number, notes, expiry_date, supplier)
 SELECT id, 'PCM-2401', 'FEFO older batch', DATE '2025-12-31', 'Acme Pharma'
 FROM drugs WHERE name = 'Paracetamol'
@@ -170,8 +241,7 @@ UNION ALL
 SELECT id, 'MET-2405', NULL, DATE '2026-05-31', 'BetaCare'
 FROM drugs WHERE name = 'Metformin';
 
--- Per-location quantities (FREE-TEXT location)
--- Mirrors your previous single-location + quantity values
+-- Per-location quantities
 INSERT INTO batch_locations (batch_id, location, quantity)
 SELECT b.id, 'Main Store', 300
 FROM drug_batches b
@@ -214,55 +284,52 @@ FROM drug_batches b
 JOIN drugs d ON d.id = b.drug_id
 WHERE d.name = 'Metformin' AND b.batch_number = 'MET-2405';
 
--- Prescriptions (link to existing patients/visits)
--- P1: patient 1, visit 1
-INSERT INTO prescriptions (patient_id, vid, staff_id, notes)
-VALUES (1, 1, 101, 'Fever and myalgia; start PCM + Ibuprofen');
+-- Prescriptions
+INSERT INTO prescriptions (patient_id, vid, notes)
+VALUES (1, 1, 'Fever and myalgia; start PCM + Ibuprofen');
 
--- P2: patient 1, visit 2
-INSERT INTO prescriptions (patient_id, vid, staff_id, notes)
-VALUES (1, 2, 102, 'Dehydration; give ORS; continue PCM as needed');
+INSERT INTO prescriptions (patient_id, vid, notes)
+VALUES (1, 2, 'Dehydration; give ORS; continue PCM as needed');
 
--- P3: patient 2, visit 1
-INSERT INTO prescriptions (patient_id, vid, staff_id, notes)
-VALUES (2, 1, 201, 'Pharyngitis; amoxicillin course; PCM PRN');
+INSERT INTO prescriptions (patient_id, vid, notes)
+VALUES (2, 1, 'Pharyngitis; amoxicillin course; PCM PRN');
 
--- Drug prescriptions (NOTE: no quantity column anymore; totals live in batch splits)
--- For P1
-INSERT INTO drug_prescriptions (prescription_id, drug_id, remarks)
-SELECT p.id, d.id, 'Paracetamol 500mg: 1 tab q6h PRN, 4 days'
+-- Drug prescriptions (now include quantity_requested)
+-- P1 (patient 1, visit 1)
+INSERT INTO drug_prescriptions (prescription_id, drug_id, remarks, quantity_requested)
+SELECT p.id, d.id, 'Paracetamol 500mg: 1 tab q6h PRN, 4 days', 16
 FROM prescriptions p, drugs d
 WHERE p.patient_id = 1 AND p.vid = 1 AND d.name = 'Paracetamol';
 
-INSERT INTO drug_prescriptions (prescription_id, drug_id, remarks)
-SELECT p.id, d.id, 'Ibuprofen 200mg: 1 tab q8h PRN, 4 days'
+INSERT INTO drug_prescriptions (prescription_id, drug_id, remarks, quantity_requested)
+SELECT p.id, d.id, 'Ibuprofen 200mg: 1 tab q8h PRN, 4 days', 12
 FROM prescriptions p, drugs d
 WHERE p.patient_id = 1 AND p.vid = 1 AND d.name = 'Ibuprofen';
 
--- For P2
-INSERT INTO drug_prescriptions (prescription_id, drug_id, remarks)
-SELECT p.id, d.id, 'ORS: 1 sachet after each loose stool (max 6)'
+-- P2 (patient 1, visit 2)
+INSERT INTO drug_prescriptions (prescription_id, drug_id, remarks, quantity_requested)
+SELECT p.id, d.id, 'ORS: 1 sachet after each loose stool (max 6)', 6
 FROM prescriptions p, drugs d
 WHERE p.patient_id = 1 AND p.vid = 2 AND d.name = 'Oral Rehydration Salts';
 
-INSERT INTO drug_prescriptions (prescription_id, drug_id, remarks)
-SELECT p.id, d.id, 'Paracetamol 500mg: 1 tab q8h PRN, 3 days'
+INSERT INTO drug_prescriptions (prescription_id, drug_id, remarks, quantity_requested)
+SELECT p.id, d.id, 'Paracetamol 500mg: 1 tab q8h PRN, 3 days', 8
 FROM prescriptions p, drugs d
 WHERE p.patient_id = 1 AND p.vid = 2 AND d.name = 'Paracetamol';
 
--- For P3
-INSERT INTO drug_prescriptions (prescription_id, drug_id, remarks)
-SELECT p.id, d.id, 'Amoxicillin 500mg: 1 cap TID, 7 days'
+-- P3 (patient 2, visit 1)
+INSERT INTO drug_prescriptions (prescription_id, drug_id, remarks, quantity_requested)
+SELECT p.id, d.id, 'Amoxicillin 500mg: 1 cap TID, 7 days', 21
 FROM prescriptions p, drugs d
 WHERE p.patient_id = 2 AND p.vid = 1 AND d.name = 'Amoxicillin';
 
-INSERT INTO drug_prescriptions (prescription_id, drug_id, remarks)
-SELECT p.id, d.id, 'Paracetamol 500mg: 1 tab q8h PRN, 4 days'
+INSERT INTO drug_prescriptions (prescription_id, drug_id, remarks, quantity_requested)
+SELECT p.id, d.id, 'Paracetamol 500mg: 1 tab q8h PRN, 4 days', 12
 FROM prescriptions p, drugs d
 WHERE p.patient_id = 2 AND p.vid = 1 AND d.name = 'Paracetamol';
 
--- Batch splits (FEFO-style) — now insert INTO prescription_batch_items using batch_location rows
--- P1: PCM 16 tabs -> 10 from PCM-2401 (Main Store), 6 from PCM-2407 (Mobile Clinic A)
+-- Batch splits (FEFO-style) — insert into prescription_batch_items using batch_location rows
+-- P1: PCM 16 -> 10 from PCM-2401 (Main Store), 6 from PCM-2407 (Mobile Clinic A)
 INSERT INTO prescription_batch_items (drug_prescription_id, drug_batch_location_id, quantity)
 SELECT dp.id, bl.id, 10
 FROM drug_prescriptions dp
@@ -281,7 +348,7 @@ JOIN drug_batches b ON b.drug_id = d.id AND b.batch_number = 'PCM-2407'
 JOIN batch_locations bl ON bl.batch_id = b.id AND bl.location = 'Mobile Clinic A'
 WHERE p.patient_id = 1 AND p.vid = 1;
 
--- P1: Ibuprofen 12 tabs -> from IBU-2403 at Mobile Clinic B
+-- P1: Ibuprofen 12 -> IBU-2403 @ Mobile Clinic B
 INSERT INTO prescription_batch_items (drug_prescription_id, drug_batch_location_id, quantity)
 SELECT dp.id, bl.id, 12
 FROM drug_prescriptions dp
@@ -291,7 +358,7 @@ JOIN drug_batches b ON b.drug_id = d.id AND b.batch_number = 'IBU-2403'
 JOIN batch_locations bl ON bl.batch_id = b.id AND bl.location = 'Mobile Clinic B'
 WHERE p.patient_id = 1 AND p.vid = 1;
 
--- P2: ORS 6 sachets -> ORS-2401 at Main Store
+-- P2: ORS 6 -> ORS-2401 @ Main Store
 INSERT INTO prescription_batch_items (drug_prescription_id, drug_batch_location_id, quantity)
 SELECT dp.id, bl.id, 6
 FROM drug_prescriptions dp
@@ -301,7 +368,7 @@ JOIN drug_batches b ON b.drug_id = d.id AND b.batch_number = 'ORS-2401'
 JOIN batch_locations bl ON bl.batch_id = b.id AND bl.location = 'Main Store'
 WHERE p.patient_id = 1 AND p.vid = 2;
 
--- P2: PCM 8 tabs -> take from older PCM-2401 at Main Store
+-- P2: PCM 8 -> PCM-2401 @ Main Store
 INSERT INTO prescription_batch_items (drug_prescription_id, drug_batch_location_id, quantity)
 SELECT dp.id, bl.id, 8
 FROM drug_prescriptions dp
@@ -311,7 +378,7 @@ JOIN drug_batches b ON b.drug_id = d.id AND b.batch_number = 'PCM-2401'
 JOIN batch_locations bl ON bl.batch_id = b.id AND bl.location = 'Main Store'
 WHERE p.patient_id = 1 AND p.vid = 2;
 
--- P3: Amoxicillin 21 caps -> split 11/10 across older/newer batches (both Main Store)
+-- P3: Amoxicillin 21 -> split 11/10 across AMX-2402/2410 (both Main Store)
 INSERT INTO prescription_batch_items (drug_prescription_id, drug_batch_location_id, quantity)
 SELECT dp.id, bl.id, 11
 FROM drug_prescriptions dp
@@ -330,7 +397,7 @@ JOIN drug_batches b ON b.drug_id = d.id AND b.batch_number = 'AMX-2410'
 JOIN batch_locations bl ON bl.batch_id = b.id AND bl.location = 'Main Store'
 WHERE p.patient_id = 2 AND p.vid = 1;
 
--- P3: PCM 12 tabs -> consume older PCM-2401 at Main Store
+-- P3: PCM 12 -> PCM-2401 @ Main Store
 INSERT INTO prescription_batch_items (drug_prescription_id, drug_batch_location_id, quantity)
 SELECT dp.id, bl.id, 12
 FROM drug_prescriptions dp

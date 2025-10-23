@@ -2,10 +2,11 @@ package usecases
 
 import (
 	"context"
+	"time"
+
 	"github.com/jieqiboh/sothea_backend/controllers/middleware"
 	"github.com/jieqiboh/sothea_backend/entities"
 	"golang.org/x/crypto/bcrypt"
-	"time"
 )
 
 type loginUsecase struct {
@@ -37,7 +38,7 @@ func (l *loginUsecase) Login(ctx context.Context, user entities.User) (string, e
 		return "", entities.ErrLoginFailed
 	}
 
-	token, err := middleware.CreateToken(user.Username, l.secretKey)
+	token, err := middleware.CreateToken(dbUser.Id, user.Username, l.secretKey)
 	if err != nil {
 		return "", err
 	}
