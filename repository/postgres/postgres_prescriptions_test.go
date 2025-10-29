@@ -1,543 +1,1145 @@
-// postgres_prescription_repository_test.go
 package postgres
 
 import (
 	"context"
 	"database/sql"
-	"fmt"
-	"strconv"
+	"errors"
+	"regexp"
 	"testing"
-	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/jieqiboh/sothea_backend/entities"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-// ---------- helpers ----------
+// --- helpers ---------------------------------------------------------------
 
-func unique(prefix string) string { return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano()) }
+func sp(s string) *string { return &s }
+func ip(i int64) *int64   { return &i }
 
-// runInTxAsUser opens a single transaction, sets the session user GUC,
-// injects the tx into context (so repo picks it up), runs fn, and commits.
-func runInTxAsUser(t *testing.T, userID int64, fn func(ctx context.Context)) {
+func newRxRepo(t *testing.T) (*postgresPrescriptionRepository, sqlmock.Sqlmock, func()) {
 	t.Helper()
-
-	tx, err := db.BeginTx(context.Background(), &sql.TxOptions{})
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	// set GUC inside this tx
-	_, err = tx.ExecContext(
-		context.Background(),
-		`SELECT set_config('sothea.user_id', $1, true)`,
-		strconv.FormatInt(userID, 10),
-	)
-	require.NoError(t, err)
-
-	// sanity check
-	var got sql.NullString
-	err = tx.QueryRowContext(context.Background(),
-		`SELECT current_setting('sothea.user_id', true)`).Scan(&got)
-	require.NoError(t, err)
-	require.Equal(t, strconv.FormatInt(userID, 10), got.String)
-
-	ctx := CtxWithTx(context.Background(), tx)
-
-	// optional assert to verify wiring
-	if txx, ok := TxFromCtx(ctx); !ok || txx == nil {
-		t.Fatalf("no tx found in ctx")
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
 	}
-
-	fn(ctx)
-	require.NoError(t, tx.Commit())
-}
-
-func mustAdminID(t *testing.T) int64 {
-	t.Helper()
-	repo := NewPostgresPatientRepository(db).(*postgresPatientRepository)
-
-	u, err := repo.GetDBUser(context.Background(), "admin")
-	require.NoError(t, err)
-	require.NotNil(t, u)
-
-	return u.Id
-}
-
-func mustCreatePatientAndVisit(t *testing.T) (int32, int32) {
-	t.Helper()
-	ctx := context.Background()
-	patRepo := NewPostgresPatientRepository(db).(*postgresPatientRepository)
-
-	now := time.Now().UTC().Truncate(time.Second)
-	admin := entities.Admin{
-		FamilyGroup:         entities.PtrTo(unique("FG")),
-		RegDate:             entities.PtrTo(now),
-		QueueNo:             entities.PtrTo("Q1"),
-		Name:                entities.PtrTo(unique("John Doe")),
-		KhmerName:           entities.PtrTo("ខ្មែរ"),
-		Dob:                 entities.PtrTo(now.AddDate(-30, 0, 0)),
-		Age:                 entities.PtrTo(30),
-		Gender:              entities.PtrTo("M"),
-		Village:             entities.PtrTo("VillageX"),
-		ContactNo:           entities.PtrTo("12345678"),
-		Pregnant:            entities.PtrTo(false),
-		LastMenstrualPeriod: nil,
-		DrugAllergies:       entities.PtrTo("none"),
-		SentToID:            entities.PtrTo(false),
-		Photo:               nil,
+	repo := &postgresPrescriptionRepository{Conn: db}
+	cleanup := func() {
+		assert.NoError(t, mock.ExpectationsWereMet())
+		_ = db.Close()
 	}
-
-	id, err := patRepo.CreatePatient(ctx, &admin)
-	require.NoError(t, err)
-
-	vid, err := patRepo.CreatePatientVisit(ctx, id, &admin)
-	require.NoError(t, err)
-
-	return id, vid
+	return repo, mock, cleanup
 }
 
-func mustCreateDrug(t *testing.T, name string) *entities.Drug {
-	t.Helper()
-	ctx := context.Background()
-	ph := NewPostgresPharmacyRepository(db).(*postgresPharmacyRepository)
+// --- CreatePrescription ----------------------------------------------------
 
-	d, err := ph.CreateDrug(ctx, &entities.Drug{
-		Name:        name,
-		Unit:        "tablet",
-		DefaultSize: entities.PtrTo(1),
-		Notes:       entities.PtrTo(""),
-	})
-	require.NoError(t, err)
-	return d
+func Test_CreatePrescription_Success(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
+
+	now := mustNow()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`
+		INSERT INTO prescriptions (patient_id, vid, notes)
+		VALUES ($1,$2,$3)
+		RETURNING id, created_at, updated_at`)).
+		WithArgs(int64(99), int32(1), sp("note")).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at"}).
+			AddRow(int64(5), now, now))
+	mock.ExpectCommit()
+
+	// hydrate via GetPrescriptionByID
+	mock.ExpectQuery(qm(`
+		SELECT id, patient_id, vid, notes,
+		       created_by, created_at, updated_at,
+		       is_dispensed, dispensed_by, dispensed_at
+		FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(5)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "patient_id", "vid", "notes",
+			"created_by", "created_at", "updated_at",
+			"is_dispensed", "dispensed_by", "dispensed_at",
+		}).AddRow(int64(5), int64(99), int32(1), "note", ip(7), now, now, false, nil, nil))
+
+	// lines (none)
+	mock.ExpectQuery(qm(`
+		SELECT
+		  pl.id, pl.prescription_id, pl.presentation_id, pl.remarks,
+		  pl.dose_amount, pl.dose_unit,
+		  pl.schedule_kind, pl.every_n, pl.frequency_per_schedule, pl.duration,
+		  pl.total_to_dispense, pl.is_packed, pl.packed_by, pl.packed_at,
+		  (SELECT generic_name FROM drugs d
+		     JOIN drug_presentations dp ON dp.drug_id=d.id
+		   WHERE dp.id=pl.presentation_id) AS drug_name,
+		  (SELECT route_code FROM drug_presentations dp WHERE dp.id=pl.presentation_id) AS route_code,
+		  (SELECT dispense_unit FROM drug_presentations dp WHERE dp.id=pl.presentation_id) AS dispense_unit,
+		  (SELECT CASE
+		            WHEN dp.strength_den IS NULL THEN
+		              dp.strength_num::text || ' ' || dp.strength_unit_num || '/' || dp.dispense_unit
+		            ELSE
+		              dp.strength_num::text || ' ' || dp.strength_unit_num || '/' ||
+		              dp.strength_den::text || ' ' || dp.strength_unit_den
+		          END
+		     FROM drug_presentations dp
+		    WHERE dp.id=pl.presentation_id) AS display_strength
+		FROM prescription_lines pl
+		WHERE pl.prescription_id = $1
+		ORDER BY pl.id`)).
+		WithArgs(int64(5)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "prescription_id", "presentation_id", "remarks",
+			"dose_amount", "dose_unit",
+			"schedule_kind", "every_n", "frequency_per_schedule", "duration",
+			"total_to_dispense", "is_packed", "packed_by", "packed_at",
+			"drug_name", "route_code", "dispense_unit", "display_strength",
+		}))
+
+	p := &entities.Prescription{PatientID: 99, VID: 1, Notes: sp("note")}
+	out, err := repo.CreatePrescription(context.Background(), p)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(5), out.ID)
+	assert.False(t, out.IsDispensed)
 }
 
-// Creates a batch row and a location row with quantity, returns (batchID, locationID)
-func mustCreateBatchAndLocation(t *testing.T, drugID int64, batchNo string, qty int, expiry time.Time, location string) (int64, int64) {
-	t.Helper()
-	ctx := context.Background()
+func Test_CreatePrescription_InsertErr_RollsBack(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
 
-	var batchID int64
-	err := db.QueryRowContext(ctx, `
-		INSERT INTO drug_batches (drug_id, batch_number, expiry_date, supplier)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id
-	`, drugID, batchNo, expiry, "ACME").Scan(&batchID)
-	require.NoError(t, err)
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`INSERT INTO prescriptions`)).
+		WithArgs(int64(1), int32(2), (*string)(nil)).
+		WillReturnError(errors.New("ins err"))
+	mock.ExpectRollback()
 
-	var locID int64
-	err = db.QueryRowContext(ctx, `
-		INSERT INTO batch_locations (batch_id, location, quantity)
-		VALUES ($1, $2, $3)
-		RETURNING id
-	`, batchID, location, qty).Scan(&locID)
-	require.NoError(t, err)
-
-	return batchID, locID
+	_, err := repo.CreatePrescription(context.Background(), &entities.Prescription{PatientID: 1, VID: 2})
+	assert.Error(t, err)
 }
 
-func getLocationQty(t *testing.T, locationID int64) int64 {
-	t.Helper()
-	var q int64
-	err := db.QueryRow(`SELECT quantity FROM batch_locations WHERE id=$1`, locationID).Scan(&q)
-	require.NoError(t, err)
-	return q
+func Test_CreatePrescription_CommitErr(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
+
+	now := mustNow()
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`INSERT INTO prescriptions`)).
+		WithArgs(int64(1), int32(2), (*string)(nil)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at"}).AddRow(int64(10), now, now))
+	mock.ExpectCommit().WillReturnError(errors.New("commit fail"))
+
+	_, err := repo.CreatePrescription(context.Background(), &entities.Prescription{PatientID: 1, VID: 2})
+	assert.Error(t, err)
 }
 
-// ---------- tests ----------
+// --- GetPrescriptionByID ---------------------------------------------------
 
-func TestPrescription_CreateAndGet_ReducesStockAndHydrates(t *testing.T) {
-	adminID := mustAdminID(t)
-	id, vid := mustCreatePatientAndVisit(t)
+func Test_GetPrescriptionByID_WithLinesAndAllocations(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
 
-	drug := mustCreateDrug(t, unique("Paracetamol"))
-	_, loc1 := mustCreateBatchAndLocation(t, drug.ID, "P-B1", 100, time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC), "Main")
-	_, loc2 := mustCreateBatchAndLocation(t, drug.ID, "P-B2", 50, time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC), "Main")
+	now := mustNow()
+	// header
+	mock.ExpectQuery(qm(`
+		SELECT id, patient_id, vid, notes,
+		       created_by, created_at, updated_at,
+		       is_dispensed, dispensed_by, dispensed_at
+		FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(55)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "patient_id", "vid", "notes",
+			"created_by", "created_at", "updated_at",
+			"is_dispensed", "dispensed_by", "dispensed_at",
+		}).AddRow(int64(55), int64(99), int32(3), "hdr", ip(7), now, now, false, nil, nil))
 
-	before1 := getLocationQty(t, loc1)
-	before2 := getLocationQty(t, loc2)
+	// lines (2)
+	lrows := sqlmock.NewRows([]string{
+		"id", "prescription_id", "presentation_id", "remarks",
+		"dose_amount", "dose_unit",
+		"schedule_kind", "every_n", "frequency_per_schedule", "duration",
+		"total_to_dispense", "is_packed", "packed_by", "packed_at",
+		"drug_name", "route_code", "dispense_unit", "display_strength",
+	}).AddRow(int64(1), int64(55), int64(101), "rmk", 500, "mg", "day", 1, 3.0, 5.0,
+		9, false, nil, nil, "PCM", "PO", "tab", "500 mg/tab").
+		AddRow(int64(2), int64(55), int64(102), nil, 5, "mL", "hour", 8, 1.0, 1.0,
+			5, true, ip(42), now, "PCM", "PO", "mL", "250 mg/5 mL")
+	mock.ExpectQuery(qm(`FROM prescription_lines pl
+		WHERE pl.prescription_id = $1
+		ORDER BY pl.id`)).
+		WithArgs(int64(55)).
+		WillReturnRows(lrows)
 
-	repo := NewPostgresPrescriptionRepository(db).(*postgresPrescriptionRepository)
+	// allocations for both lines
+	mock.ExpectQuery(regexp.QuoteMeta(`
+			SELECT id, line_id, batch_location_id, quantity, created_at, updated_at
+			FROM prescription_batch_items
+			WHERE line_id IN ($1,$2)
+			ORDER BY line_id, id`)).
+		WithArgs(int64(1), int64(2)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "line_id", "batch_location_id", "quantity", "created_at", "updated_at",
+		}).AddRow(int64(11), int64(1), int64(9001), 4, now, now).
+			AddRow(int64(21), int64(2), int64(9002), 5, now, now))
 
-	var created *entities.Prescription
-	runInTxAsUser(t, adminID, func(ctx context.Context) {
-		p := &entities.Prescription{
-			PatientID: int64(id),
-			VID:       vid,
-			Notes:     entities.PtrTo("Take after meals"),
-			PrescribedDrugs: []entities.DrugPrescription{
-				{
-					DrugID:       drug.ID,
-					Remarks:      entities.PtrTo("q8h"),
-					RequestedQty: 70, // sum of batches below
-					Batches: []entities.PrescriptionBatchItem{
-						{BatchLocationId: loc1, Quantity: 40},
-						{BatchLocationId: loc2, Quantity: 30},
-					},
-				},
-			},
-		}
-		var err error
-		created, err = repo.CreatePrescription(ctx, p)
-		require.NoError(t, err)
-		require.NotNil(t, created)
-
-		// created_by should be stamped to adminID; default is_dispensed should be false
-		var createdBy sql.NullInt64
-		var isDispensed bool
-		tx, _ := TxFromCtx(ctx)
-		err = tx.QueryRowContext(ctx,
-			`SELECT created_by, is_dispensed FROM prescriptions WHERE id = $1`, created.ID).
-			Scan(&createdBy, &isDispensed)
-		require.NoError(t, err)
-		require.True(t, createdBy.Valid)
-		assert.EqualValues(t, adminID, createdBy.Int64)
-		assert.False(t, isDispensed)
-
-		// hydrate via Get inside same GUC/tx path
-		got, err := repo.GetPrescriptionByID(ctx, created.ID)
-		require.NoError(t, err)
-		require.NotNil(t, got)
-		assert.Equal(t, created.ID, got.ID)
-	})
-
-	require.NotZero(t, created.ID)
-	assert.Equal(t, int64(id), created.PatientID)
-	assert.Equal(t, vid, created.VID)
-	require.Len(t, created.PrescribedDrugs, 1)
-	require.Len(t, created.PrescribedDrugs[0].Batches, 2)
-
-	after1 := getLocationQty(t, loc1)
-	after2 := getLocationQty(t, loc2)
-	assert.Equal(t, before1-40, after1)
-	assert.Equal(t, before2-30, after2)
+	p, err := repo.GetPrescriptionByID(context.Background(), 55)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(p.Lines))
+	assert.Equal(t, 1, len(p.Lines[0].Allocations))
+	assert.Equal(t, 1, len(p.Lines[1].Allocations))
 }
 
-func TestPrescription_Create_FailsWhenInsufficientStock(t *testing.T) {
-	adminID := mustAdminID(t)
-	id, vid := mustCreatePatientAndVisit(t)
+func Test_GetPrescriptionByID_NotFound(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
 
-	drug := mustCreateDrug(t, unique("Amoxicillin"))
-	_, loc := mustCreateBatchAndLocation(t, drug.ID, "A-B1", 5, time.Now().AddDate(0, 6, 0), "Main")
+	mock.ExpectQuery(qm(`FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(9)).
+		WillReturnError(sql.ErrNoRows)
 
-	repo := NewPostgresPrescriptionRepository(db).(*postgresPrescriptionRepository)
-
-	runInTxAsUser(t, adminID, func(ctx context.Context) {
-		_, err := repo.CreatePrescription(ctx, &entities.Prescription{
-			PatientID: int64(id),
-			VID:       vid,
-			Notes:     entities.PtrTo("Too much"),
-			PrescribedDrugs: []entities.DrugPrescription{
-				{
-					DrugID:       drug.ID,
-					Remarks:      nil,
-					RequestedQty: 10, // > stock available (5)
-					Batches:      []entities.PrescriptionBatchItem{{BatchLocationId: loc, Quantity: 10}},
-				},
-			},
-		})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "insufficient stock in batch-location")
-	})
+	p, err := repo.GetPrescriptionByID(context.Background(), 9)
+	assert.Error(t, err)
+	assert.Nil(t, p)
+	assert.Equal(t, "prescription not found", err.Error())
 }
 
-func TestPrescription_List_WithFiltersAndOrder(t *testing.T) {
-	adminID := mustAdminID(t)
-	id, vid := mustCreatePatientAndVisit(t)
+func Test_GetPrescriptionByID_LinesQueryErr(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
 
-	drug := mustCreateDrug(t, unique("Ibuprofen"))
-	_, loc := mustCreateBatchAndLocation(t, drug.ID, "I-B1", 100, time.Now().AddDate(0, 12, 0), "Main")
+	now := mustNow()
+	mock.ExpectQuery(qm(`FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(1)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "patient_id", "vid", "notes",
+			"created_by", "created_at", "updated_at",
+			"is_dispensed", "dispensed_by", "dispensed_at",
+		}).AddRow(int64(1), int64(2), int32(3), nil, nil, now, now, false, nil, nil))
+	mock.ExpectQuery(qm(`FROM prescription_lines pl
+		WHERE pl.prescription_id = $1
+		ORDER BY pl.id`)).
+		WithArgs(int64(1)).
+		WillReturnError(errors.New("lines err"))
 
-	repo := NewPostgresPrescriptionRepository(db).(*postgresPrescriptionRepository)
+	_, err := repo.GetPrescriptionByID(context.Background(), 1)
+	assert.Error(t, err)
+}
 
-	make := func(note string, q int) int64 {
-		var pid int64
-		runInTxAsUser(t, adminID, func(ctx context.Context) {
-			p, err := repo.CreatePrescription(ctx, &entities.Prescription{
-				PatientID: int64(id),
-				VID:       vid,
-				Notes:     &note,
-				PrescribedDrugs: []entities.DrugPrescription{
-					{
-						DrugID:       drug.ID,
-						Remarks:      nil,
-						RequestedQty: int64(q), // match batch total
-						Batches:      []entities.PrescriptionBatchItem{{BatchLocationId: loc, Quantity: q}},
-					},
-				},
-			})
-			require.NoError(t, err)
-			require.NotNil(t, p)
-			pid = p.ID
-		})
-		return pid
-	}
-	firstID := make("first", 10)
-	_ = firstID
-	time.Sleep(5 * time.Millisecond) // ensure created_at ordering
-	secondID := make("second", 5)
-	_ = secondID
+func Test_GetPrescriptionByID_AllocQueryErr(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
 
-	list, err := repo.ListPrescriptions(context.Background(), &[]int64{int64(id)}[0], &[]int32{vid}[0])
-	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(list), 2)
-	assert.Equal(t, "second", *list[0].Notes) // most recent first
-	assert.Equal(t, "first", *list[1].Notes)
+	now := mustNow()
+	mock.ExpectQuery(qm(`FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(1)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "patient_id", "vid", "notes",
+			"created_by", "created_at", "updated_at",
+			"is_dispensed", "dispensed_by", "dispensed_at",
+		}).AddRow(int64(1), int64(2), int32(3), nil, nil, now, now, false, nil, nil))
+	lrows := sqlmock.NewRows([]string{
+		"id", "prescription_id", "presentation_id", "remarks",
+		"dose_amount", "dose_unit",
+		"schedule_kind", "every_n", "frequency_per_schedule", "duration",
+		"total_to_dispense", "is_packed", "packed_by", "packed_at",
+		"drug_name", "route_code", "dispense_unit", "display_strength",
+	}).AddRow(int64(7), int64(1), int64(50), nil, 1, "tab", "day", 1, 1.0, 1.0, 1, false, nil, nil, "X", "PO", "tab", "somestr")
+	mock.ExpectQuery(qm(`FROM prescription_lines pl
+		WHERE pl.prescription_id = $1
+		ORDER BY pl.id`)).
+		WithArgs(int64(1)).
+		WillReturnRows(lrows)
+	mock.ExpectQuery(regexp.QuoteMeta(`
+			SELECT id, line_id, batch_location_id, quantity, created_at, updated_at
+			FROM prescription_batch_items
+			WHERE line_id IN ($1)
+			ORDER BY line_id, id`)).
+		WithArgs(int64(7)).
+		WillReturnError(errors.New("alloc err"))
+
+	_, err := repo.GetPrescriptionByID(context.Background(), 1)
+	assert.Error(t, err)
+}
+
+// --- ListPrescriptions -----------------------------------------------------
+
+func Test_ListPrescriptions_All_And_Filters(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
+
+	now := mustNow()
+	// all
+	mock.ExpectQuery(qm(`
+	  SELECT id, patient_id, vid, notes,
+	         created_by, created_at, updated_at,
+	         is_dispensed, dispensed_by, dispensed_at
+	  FROM prescriptions ORDER BY created_at DESC`)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "patient_id", "vid", "notes",
+			"created_by", "created_at", "updated_at",
+			"is_dispensed", "dispensed_by", "dispensed_at",
+		}).AddRow(int64(1), int64(10), int32(1), nil, nil, now, now, false, nil, nil).
+			AddRow(int64(2), int64(11), int32(1), "n", ip(7), now, now, true, ip(8), tp(now)))
 
 	all, err := repo.ListPrescriptions(context.Background(), nil, nil)
-	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(all), 2)
+	assert.NoError(t, err)
+	assert.Len(t, all, 2)
+
+	// by patient
+	pid := int64(10)
+	mock.ExpectQuery(qm(`
+	  SELECT id, patient_id, vid, notes,
+	         created_by, created_at, updated_at,
+	         is_dispensed, dispensed_by, dispensed_at
+	  FROM prescriptions WHERE patient_id=$1 ORDER BY created_at DESC`)).
+		WithArgs(pid).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "patient_id", "vid", "notes",
+			"created_by", "created_at", "updated_at",
+			"is_dispensed", "dispensed_by", "dispensed_at",
+		}).AddRow(int64(1), int64(10), int32(1), nil, nil, now, now, false, nil, nil))
+	flt1, err := repo.ListPrescriptions(context.Background(), &pid, nil)
+	assert.NoError(t, err)
+	assert.Len(t, flt1, 1)
+
+	// by patient + vid
+	vid := int32(3)
+	mock.ExpectQuery(qm(`
+	  SELECT id, patient_id, vid, notes,
+	         created_by, created_at, updated_at,
+	         is_dispensed, dispensed_by, dispensed_at
+	  FROM prescriptions WHERE patient_id=$1 AND vid=$2 ORDER BY created_at DESC`)).
+		WithArgs(pid, vid).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "patient_id", "vid", "notes",
+			"created_by", "created_at", "updated_at",
+			"is_dispensed", "dispensed_by", "dispensed_at",
+		}).AddRow(int64(9), int64(10), int32(3), "x", nil, now, now, false, nil, nil))
+	flt2, err := repo.ListPrescriptions(context.Background(), &pid, &vid)
+	assert.NoError(t, err)
+	assert.Len(t, flt2, 1)
 }
 
-// Transition some drug lines to packed → stamp packed_by/packed_at at the line level
-func TestPrescription_Update_MarksPackedLines_WithStamps(t *testing.T) {
-	adminID := mustAdminID(t)
-	id, vid := mustCreatePatientAndVisit(t)
+func Test_ListPrescriptions_QueryErr(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
 
-	drug := mustCreateDrug(t, unique("Metformin"))
-	_, locA := mustCreateBatchAndLocation(t, drug.ID, "M-A", 100, time.Now().AddDate(0, 6, 0), "Main")
-	_, locB := mustCreateBatchAndLocation(t, drug.ID, "M-B", 100, time.Now().AddDate(0, 9, 0), "Main")
+	mock.ExpectQuery(qm(`FROM prescriptions ORDER BY created_at DESC`)).
+		WillReturnError(errors.New("q err"))
 
-	repo := NewPostgresPrescriptionRepository(db).(*postgresPrescriptionRepository)
+	_, err := repo.ListPrescriptions(context.Background(), nil, nil)
+	assert.Error(t, err)
+}
 
-	var p *entities.Prescription
-	runInTxAsUser(t, adminID, func(ctx context.Context) {
-		var err error
-		p, err = repo.CreatePrescription(ctx, &entities.Prescription{
-			PatientID: int64(id),
-			VID:       vid,
-			Notes:     entities.PtrTo("init"),
-			PrescribedDrugs: []entities.DrugPrescription{
-				{
-					DrugID:       drug.ID,
-					Remarks:      nil,
-					RequestedQty: 50, // 30 + 20
-					Batches: []entities.PrescriptionBatchItem{
-						{BatchLocationId: locA, Quantity: 30},
-						{BatchLocationId: locB, Quantity: 20},
-					},
-				},
-			},
-		})
-		require.NoError(t, err)
-		require.NotNil(t, p)
-	})
+// --- UpdatePrescription ----------------------------------------------------
 
-	// Mark the line as packed (transition false->true triggers stamp in Step 6)
-	p.Notes = entities.PtrTo("packed-now")
-	for i := range p.PrescribedDrugs {
-		if p.PrescribedDrugs[i].DrugID == drug.ID {
-			p.PrescribedDrugs[i].IsPacked = true
-		}
+func Test_UpdatePrescription_Success(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
+
+	now := mustNow()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(5)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectExec(qm(`
+		UPDATE prescriptions
+		SET patient_id=$2, vid=$3, notes=$4, updated_at=now()
+		WHERE id=$1`)).
+		WithArgs(int64(5), int64(100), int32(2), sp("n")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	// hydrate
+	mock.ExpectQuery(qm(`FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(5)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "patient_id", "vid", "notes",
+			"created_by", "created_at", "updated_at",
+			"is_dispensed", "dispensed_by", "dispensed_at",
+		}).AddRow(int64(5), int64(100), int32(2), "n", nil, now, now, false, nil, nil))
+	mock.ExpectQuery(qm(`FROM prescription_lines pl
+		WHERE pl.prescription_id = $1
+		ORDER BY pl.id`)).
+		WithArgs(int64(5)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "prescription_id", "presentation_id", "remarks",
+			"dose_amount", "dose_unit",
+			"schedule_kind", "every_n", "frequency_per_schedule", "duration",
+			"total_to_dispense", "is_packed", "packed_by", "packed_at",
+			"drug_name", "route_code", "dispense_unit", "display_strength",
+		}))
+
+	out, err := repo.UpdatePrescription(context.Background(), &entities.Prescription{ID: 5, PatientID: 100, VID: 2, Notes: sp("n")})
+	assert.NoError(t, err)
+	assert.Equal(t, int64(5), out.ID)
+}
+
+func Test_UpdatePrescription_DispensedGuard(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(5)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(true))
+	mock.ExpectRollback()
+
+	_, err := repo.UpdatePrescription(context.Background(), &entities.Prescription{ID: 5})
+	assert.Error(t, err)
+	assert.Equal(t, "cannot modify a dispensed prescription", err.Error())
+}
+
+func Test_UpdatePrescription_SelectErr_ExecErr_CommitErr(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
+
+	// select err
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(1)).WillReturnError(errors.New("sel err"))
+	mock.ExpectRollback()
+	_, err := repo.UpdatePrescription(context.Background(), &entities.Prescription{ID: 1})
+	assert.Error(t, err)
+
+	// exec err
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(2)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectExec(qm(`UPDATE prescriptions`)).
+		WithArgs(int64(2), int64(9), int32(1), (*string)(nil)).
+		WillReturnError(errors.New("exec err"))
+	mock.ExpectRollback()
+	_, err = repo.UpdatePrescription(context.Background(), &entities.Prescription{ID: 2, PatientID: 9, VID: 1})
+	assert.Error(t, err)
+
+	// commit err
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(3)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectExec(qm(`UPDATE prescriptions`)).
+		WithArgs(int64(3), int64(9), int32(1), (*string)(nil)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit().WillReturnError(errors.New("commit err"))
+	_, err = repo.UpdatePrescription(context.Background(), &entities.Prescription{ID: 3, PatientID: 9, VID: 1})
+	assert.Error(t, err)
+}
+
+// --- DeletePrescription ----------------------------------------------------
+
+func Test_DeletePrescription_Success(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(77)).
+		WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectExec(qm(`DELETE FROM prescription_batch_items WHERE line_id IN (SELECT id FROM prescription_lines WHERE prescription_id=$1)`)).
+		WithArgs(int64(77)).WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectExec(qm(`DELETE FROM prescription_lines WHERE prescription_id=$1`)).
+		WithArgs(int64(77)).WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectExec(qm(`DELETE FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(77)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	err := repo.DeletePrescription(context.Background(), 77)
+	assert.NoError(t, err)
+}
+
+func Test_DeletePrescription_Guards_And_NotFound(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
+
+	// dispensed guard
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(1)).
+		WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(true))
+	mock.ExpectRollback()
+	assert.EqualError(t, repo.DeletePrescription(context.Background(), 1), "cannot delete a dispensed prescription")
+
+	// not found
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(2)).
+		WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectExec(qm(`DELETE FROM prescription_batch_items`)).
+		WithArgs(int64(2)).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(qm(`DELETE FROM prescription_lines`)).
+		WithArgs(int64(2)).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(qm(`DELETE FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(2)).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectRollback()
+	assert.EqualError(t, repo.DeletePrescription(context.Background(), 2), "prescription not found")
+}
+
+func Test_DeletePrescription_Errors(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
+
+	// select err
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(3)).WillReturnError(errors.New("sel err"))
+	mock.ExpectRollback()
+	assert.Error(t, repo.DeletePrescription(context.Background(), 3))
+
+	// child delete err
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(4)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectExec(qm(`DELETE FROM prescription_batch_items`)).
+		WithArgs(int64(4)).WillReturnError(errors.New("child err"))
+	mock.ExpectRollback()
+	assert.Error(t, repo.DeletePrescription(context.Background(), 4))
+}
+
+// --- AddLine ---------------------------------------------------------------
+
+func Test_AddLine_Success(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(55)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectQuery(qm(`
+	  INSERT INTO prescription_lines (
+	    prescription_id, presentation_id, remarks,
+	    dose_amount, dose_unit,
+	    schedule_kind, every_n, frequency_per_schedule, duration
+	  )
+	  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+	  RETURNING id, total_to_dispense, is_packed`)).
+		WithArgs(int64(55), int64(101), sp("r"), 500, "mg", "day", 1, 3.0, 5.0).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "total_to_dispense", "is_packed"}).AddRow(int64(7), 9, false))
+	mock.ExpectCommit()
+
+	// hydrate GetLine
+	mock.ExpectQuery(qm(`
+	  SELECT
+	    pl.id, pl.prescription_id, pl.presentation_id, pl.remarks,
+	    pl.dose_amount, pl.dose_unit,
+	    pl.schedule_kind, pl.every_n, pl.frequency_per_schedule, pl.duration,
+	    pl.total_to_dispense, pl.is_packed, pl.packed_by, pl.packed_at,
+	    (SELECT dispense_unit FROM drug_presentations WHERE id=pl.presentation_id) AS du
+	  FROM prescription_lines pl
+	  WHERE pl.id=$1`)).
+		WithArgs(int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "prescription_id", "presentation_id", "remarks",
+			"dose_amount", "dose_unit",
+			"schedule_kind", "every_n", "frequency_per_schedule", "duration",
+			"total_to_dispense", "is_packed", "packed_by", "packed_at", "du",
+		}).AddRow(int64(7), int64(55), int64(101), "r", 500, "mg", "day", 1, 3.0, 5.0, 9, false, nil, nil, "tab"))
+	mock.ExpectQuery(qm(`FROM prescription_batch_items WHERE line_id=$1 ORDER BY id`)).
+		WithArgs(int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "line_id", "batch_location_id", "quantity", "created_at", "updated_at"}))
+
+	line := &entities.PrescriptionLine{
+		PrescriptionID: 55, PresentationID: 101, Remarks: sp("r"),
+		DoseAmount: 500, DoseUnit: "mg", ScheduleKind: "day", EveryN: 1, FrequencyPerSchedule: 3, Duration: 5,
 	}
-
-	runInTxAsUser(t, adminID, func(ctx context.Context) {
-		upd, err := repo.UpdatePrescription(ctx, p)
-		require.NoError(t, err)
-		require.NotNil(t, upd)
-		assert.Equal(t, "packed-now", *upd.Notes)
-
-		// Verify stamp at the line level
-		tx, _ := TxFromCtx(ctx)
-		type packedRow struct {
-			isPacked   bool
-			packedBy   sql.NullInt64
-			packedAt   sql.NullTime
-			prescrID   int64
-			drugID     int64
-			requestedQ int64
-		}
-		var got packedRow
-		err = tx.QueryRowContext(ctx, `
-			SELECT is_packed, packed_by, packed_at, prescription_id, drug_id, quantity_requested
-			FROM drug_prescriptions
-			WHERE prescription_id = $1 AND drug_id = $2
-			ORDER BY id LIMIT 1
-		`, upd.ID, drug.ID).Scan(&got.isPacked, &got.packedBy, &got.packedAt, &got.prescrID, &got.drugID, &got.requestedQ)
-		require.NoError(t, err)
-		assert.True(t, got.isPacked)
-		require.True(t, got.packedBy.Valid)
-		assert.EqualValues(t, adminID, got.packedBy.Int64)
-		require.True(t, got.packedAt.Valid)
-	})
+	out, err := repo.AddLine(context.Background(), line)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(7), out.ID)
+	assert.Equal(t, "tab", out.DispenseUnit)
 }
 
-func TestPrescription_Update_AppliesBatchDeltas(t *testing.T) {
-	adminID := mustAdminID(t)
-	id, vid := mustCreatePatientAndVisit(t)
+func Test_AddLine_DispensedGuard_InsertErr(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
 
-	drug := mustCreateDrug(t, unique("Metformin"))
-	_, locA := mustCreateBatchAndLocation(t, drug.ID, "M-A", 100, time.Now().AddDate(0, 6, 0), "Main")
-	_, locB := mustCreateBatchAndLocation(t, drug.ID, "M-B", 100, time.Now().AddDate(0, 9, 0), "Main")
+	// dispensed
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(1)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(true))
+	mock.ExpectRollback()
+	_, err := repo.AddLine(context.Background(), &entities.PrescriptionLine{PrescriptionID: 1})
+	assert.EqualError(t, err, "cannot add line to a dispensed prescription")
 
-	repo := NewPostgresPrescriptionRepository(db).(*postgresPrescriptionRepository)
+	// insert err
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(2)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectQuery(qm(`INSERT INTO prescription_lines`)).
+		WithArgs(int64(2), int64(10), (*string)(nil), 1, "x", "day", 1, 1.0, 1.0).
+		WillReturnError(errors.New("ins err"))
+	mock.ExpectRollback()
+	_, err = repo.AddLine(context.Background(), &entities.PrescriptionLine{PrescriptionID: 2, PresentationID: 10, DoseAmount: 1, DoseUnit: "x", ScheduleKind: "day", EveryN: 1, FrequencyPerSchedule: 1, Duration: 1})
+	assert.Error(t, err)
+}
 
-	var p *entities.Prescription
-	runInTxAsUser(t, adminID, func(ctx context.Context) {
-		var err error
-		p, err = repo.CreatePrescription(ctx, &entities.Prescription{
-			PatientID: int64(id),
-			VID:       vid,
-			Notes:     entities.PtrTo("init"),
-			PrescribedDrugs: []entities.DrugPrescription{
-				{
-					DrugID:       drug.ID,
-					Remarks:      nil,
-					RequestedQty: 50, // 30 + 20
-					Batches: []entities.PrescriptionBatchItem{
-						{BatchLocationId: locA, Quantity: 30},
-						{BatchLocationId: locB, Quantity: 20},
-					},
-				},
-			},
-		})
-		require.NoError(t, err)
-		require.NotNil(t, p)
-	})
+// --- UpdateLine ------------------------------------------------------------
 
-	aAfterCreate := getLocationQty(t, locA) // expect 70
-	bAfterCreate := getLocationQty(t, locB) // expect 80
+func Test_UpdateLine_Success(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
 
-	// update: A=10, B=50  → delta A = -20 (return 20), delta B = +30 (take 30)
-	p.Notes = entities.PtrTo("updated")
-	p.PrescribedDrugs = []entities.DrugPrescription{
-		{
-			DrugID:       drug.ID,
-			Remarks:      entities.PtrTo("new"),
-			RequestedQty: 60, // 10 + 50
-			Batches: []entities.PrescriptionBatchItem{
-				{BatchLocationId: locA, Quantity: 10},
-				{BatchLocationId: locB, Quantity: 50},
-			},
-		},
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT prescription_id FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(9)).WillReturnRows(sqlmock.NewRows([]string{"prescription_id"}).AddRow(int64(55)))
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(55)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectExec(qm(`DELETE FROM prescription_batch_items WHERE line_id=$1`)).
+		WithArgs(int64(9)).WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectQuery(qm(`UPDATE prescription_lines SET`)).
+		WithArgs(int64(9), int64(101), (*string)(nil), 2, "tab", "day", 1, 1.5, 1.0).
+		WillReturnRows(sqlmock.NewRows([]string{"total_to_dispense"}).AddRow(10))
+	mock.ExpectCommit()
+
+	// hydrate
+	mock.ExpectQuery(qm(`FROM prescription_lines pl
+	  WHERE pl.id=$1`)).
+		WithArgs(int64(9)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "prescription_id", "presentation_id", "remarks",
+			"dose_amount", "dose_unit",
+			"schedule_kind", "every_n", "frequency_per_schedule", "duration",
+			"total_to_dispense", "is_packed", "packed_by", "packed_at", "du",
+		}).AddRow(int64(9), int64(55), int64(101), nil, 2, "tab", "day", 1, 1.5, 1.0, 10, false, nil, nil, "tab"))
+	mock.ExpectQuery(qm(`FROM prescription_batch_items WHERE line_id=$1 ORDER BY id`)).
+		WithArgs(int64(9)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "line_id", "batch_location_id", "quantity", "created_at", "updated_at"}))
+
+	out, err := repo.UpdateLine(context.Background(), &entities.PrescriptionLine{ID: 9, PresentationID: 101, DoseAmount: 2, DoseUnit: "tab", ScheduleKind: "day", EveryN: 1, FrequencyPerSchedule: 1.5, Duration: 1})
+	assert.NoError(t, err)
+	assert.Equal(t, 10, out.TotalToDispense)
+}
+
+func Test_UpdateLine_GuardsAndErrors(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
+
+	// select pid err
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT prescription_id FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(1)).WillReturnError(errors.New("sel err"))
+	mock.ExpectRollback()
+	_, err := repo.UpdateLine(context.Background(), &entities.PrescriptionLine{ID: 1})
+	assert.Error(t, err)
+
+	// dispensed guard
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT prescription_id FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(2)).WillReturnRows(sqlmock.NewRows([]string{"prescription_id"}).AddRow(int64(20)))
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(20)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(true))
+	mock.ExpectRollback()
+	_, err = repo.UpdateLine(context.Background(), &entities.PrescriptionLine{ID: 2})
+	assert.EqualError(t, err, "cannot modify a line on a dispensed prescription")
+
+	// delete allocs err
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT prescription_id FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(3)).WillReturnRows(sqlmock.NewRows([]string{"prescription_id"}).AddRow(int64(21)))
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(21)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectExec(qm(`DELETE FROM prescription_batch_items WHERE line_id=$1`)).
+		WithArgs(int64(3)).WillReturnError(errors.New("del err"))
+	mock.ExpectRollback()
+	_, err = repo.UpdateLine(context.Background(), &entities.PrescriptionLine{ID: 3})
+	assert.Error(t, err)
+}
+
+// --- RemoveLine ------------------------------------------------------------
+
+func Test_RemoveLine_Success_And_NotFound(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
+
+	// success
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT prescription_id FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"prescription_id"}).AddRow(int64(40)))
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(40)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectExec(qm(`DELETE FROM prescription_batch_items WHERE line_id=$1`)).
+		WithArgs(int64(7)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(qm(`DELETE FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(7)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	assert.NoError(t, repo.RemoveLine(context.Background(), 7))
+
+	// not found
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT prescription_id FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(8)).WillReturnRows(sqlmock.NewRows([]string{"prescription_id"}).AddRow(int64(40)))
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(40)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectExec(qm(`DELETE FROM prescription_batch_items WHERE line_id=$1`)).
+		WithArgs(int64(8)).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(qm(`DELETE FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(8)).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectRollback()
+	assert.EqualError(t, repo.RemoveLine(context.Background(), 8), "line not found")
+}
+
+func Test_RemoveLine_Guard_And_Errors(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
+
+	// dispensed guard
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT prescription_id FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(9)).WillReturnRows(sqlmock.NewRows([]string{"prescription_id"}).AddRow(int64(41)))
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(41)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(true))
+	mock.ExpectRollback()
+	assert.EqualError(t, repo.RemoveLine(context.Background(), 9), "cannot remove a line from a dispensed prescription")
+
+	// select pid err
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT prescription_id FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(10)).WillReturnError(errors.New("sel err"))
+	mock.ExpectRollback()
+	assert.Error(t, repo.RemoveLine(context.Background(), 10))
+}
+
+// --- ListLineAllocations ---------------------------------------------------
+
+func Test_ListLineAllocations_Success_And_Err(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
+
+	now := mustNow()
+	mock.ExpectQuery(qm(`
+	  SELECT id, line_id, batch_location_id, quantity, created_at, updated_at
+	  FROM prescription_batch_items
+	  WHERE line_id=$1 ORDER BY id`)).
+		WithArgs(int64(5)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "line_id", "batch_location_id", "quantity", "created_at", "updated_at",
+		}).AddRow(int64(1), int64(5), int64(100), 2, now, now))
+	out, err := repo.ListLineAllocations(context.Background(), 5)
+	assert.NoError(t, err)
+	assert.Len(t, out, 1)
+
+	mock.ExpectQuery(qm(`FROM prescription_batch_items
+	  WHERE line_id=$1 ORDER BY id`)).
+		WithArgs(int64(6)).
+		WillReturnError(errors.New("q err"))
+	_, err = repo.ListLineAllocations(context.Background(), 6)
+	assert.Error(t, err)
+}
+
+// --- SetLineAllocations ----------------------------------------------------
+
+func Test_SetLineAllocations_Success_WithAndWithoutItems(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
+
+	now := mustNow()
+	// with items
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT prescription_id FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(50)).WillReturnRows(sqlmock.NewRows([]string{"prescription_id"}).AddRow(int64(77)))
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(77)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectExec(qm(`DELETE FROM prescription_batch_items WHERE line_id=$1`)).
+		WithArgs(int64(50)).WillReturnResult(sqlmock.NewResult(0, 2))
+
+	prep := mock.ExpectPrepare(qm(`
+  	INSERT INTO prescription_batch_items (line_id, batch_location_id, quantity)
+  	VALUES ($1,$2,$3) RETURNING id, created_at, updated_at`))
+
+	// 1st item
+	prep.ExpectQuery().
+		WithArgs(int64(50), int64(9001), 3).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at"}).
+			AddRow(int64(1), now, now))
+
+	// 2nd item
+	prep.ExpectQuery().
+		WithArgs(int64(50), int64(9002), 6).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at"}).
+			AddRow(int64(2), now, now))
+
+	mock.ExpectCommit()
+
+	// list after commit
+	mock.ExpectQuery(qm(`FROM prescription_batch_items
+	  WHERE line_id=$1 ORDER BY id`)).
+		WithArgs(int64(50)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "line_id", "batch_location_id", "quantity", "created_at", "updated_at",
+		}).AddRow(int64(1), int64(50), int64(9001), 3, now, now).
+			AddRow(int64(2), int64(50), int64(9002), 6, now, now))
+
+	items := []entities.LineAllocation{
+		{BatchLocationID: 9001, Quantity: 3},
+		{BatchLocationID: 9002, Quantity: 6},
 	}
+	out, err := repo.SetLineAllocations(context.Background(), 50, items)
+	assert.NoError(t, err)
+	assert.Len(t, out, 2)
 
-	runInTxAsUser(t, adminID, func(ctx context.Context) {
-		upd, err := repo.UpdatePrescription(ctx, p)
-		require.NoError(t, err)
-		require.NotNil(t, upd)
-		assert.Equal(t, "updated", *upd.Notes)
-		require.Len(t, upd.PrescribedDrugs, 1)
-		require.Len(t, upd.PrescribedDrugs[0].Batches, 2)
-	})
-
-	aFinal := getLocationQty(t, locA)
-	bFinal := getLocationQty(t, locB)
-	assert.Equal(t, aAfterCreate+20, aFinal) // 70 + 20 = 90
-	assert.Equal(t, bAfterCreate-30, bFinal) // 80 - 30 = 50
+	// without items (delete only)
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT prescription_id FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(51)).WillReturnRows(sqlmock.NewRows([]string{"prescription_id"}).AddRow(int64(77)))
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(77)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectExec(qm(`DELETE FROM prescription_batch_items WHERE line_id=$1`)).
+		WithArgs(int64(51)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	mock.ExpectQuery(qm(`FROM prescription_batch_items
+	  WHERE line_id=$1 ORDER BY id`)).
+		WithArgs(int64(51)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "line_id", "batch_location_id", "quantity", "created_at", "updated_at"}))
+	empty, err := repo.SetLineAllocations(context.Background(), 51, nil)
+	assert.NoError(t, err)
+	assert.Len(t, empty, 0)
 }
 
-func TestPrescription_Update_StatusDispensed_StampsDispenserAndBlocksFurtherEdits(t *testing.T) {
-	adminID := mustAdminID(t)
-	id, vid := mustCreatePatientAndVisit(t)
+func Test_SetLineAllocations_GuardsAndErrors(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
 
-	drug := mustCreateDrug(t, unique("Lisinopril"))
-	_, loc := mustCreateBatchAndLocation(t, drug.ID, "L-A", 100, time.Now().AddDate(0, 6, 0), "Main")
+	// dispensed guard
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT prescription_id FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(60)).WillReturnRows(sqlmock.NewRows([]string{"prescription_id"}).AddRow(int64(100)))
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(100)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(true))
+	mock.ExpectRollback()
+	_, err := repo.SetLineAllocations(context.Background(), 60, nil)
+	assert.EqualError(t, err, "cannot change allocations on a dispensed prescription")
 
-	repo := NewPostgresPrescriptionRepository(db).(*postgresPrescriptionRepository)
+	// delete err
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT prescription_id FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(61)).WillReturnRows(sqlmock.NewRows([]string{"prescription_id"}).AddRow(int64(100)))
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(100)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectExec(qm(`DELETE FROM prescription_batch_items WHERE line_id=$1`)).
+		WithArgs(int64(61)).WillReturnError(errors.New("del err"))
+	mock.ExpectRollback()
+	_, err = repo.SetLineAllocations(context.Background(), 61, nil)
+	assert.Error(t, err)
 
-	var p *entities.Prescription
-	runInTxAsUser(t, adminID, func(ctx context.Context) {
-		var err error
-		p, err = repo.CreatePrescription(ctx, &entities.Prescription{
-			PatientID: int64(id),
-			VID:       vid,
-			Notes:     entities.PtrTo("to-dispense"),
-			PrescribedDrugs: []entities.DrugPrescription{
-				{
-					DrugID:       drug.ID,
-					Remarks:      nil,
-					RequestedQty: 10, // 10 allocated below
-					Batches: []entities.PrescriptionBatchItem{
-						{BatchLocationId: loc, Quantity: 10},
-					},
-				},
-			},
-		})
-		require.NoError(t, err)
-		require.NotNil(t, p)
-	})
+	// prepare err
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT prescription_id FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(62)).WillReturnRows(sqlmock.NewRows([]string{"prescription_id"}).AddRow(int64(100)))
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(100)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectExec(qm(`DELETE FROM prescription_batch_items WHERE line_id=$1`)).
+		WithArgs(int64(62)).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectPrepare(qm(`INSERT INTO prescription_batch_items`)).WillReturnError(errors.New("prep err"))
+	mock.ExpectRollback()
+	_, err = repo.SetLineAllocations(context.Background(), 62, []entities.LineAllocation{{BatchLocationID: 1, Quantity: 1}})
+	assert.Error(t, err)
 
-	// Move directly to DISPENSED (repo updates is_dispensed + stamps by/at)
-	p.IsDispensed = true
+	// insert err
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT prescription_id FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(63)).WillReturnRows(sqlmock.NewRows([]string{"prescription_id"}).AddRow(int64(100)))
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(100)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectExec(qm(`DELETE FROM prescription_batch_items WHERE line_id=$1`)).
+		WithArgs(int64(63)).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectPrepare(qm(`INSERT INTO prescription_batch_items`)).
+		ExpectQuery().WithArgs(int64(63), int64(1), 1).
+		WillReturnError(errors.New("ins err"))
+	mock.ExpectRollback()
+	_, err = repo.SetLineAllocations(context.Background(), 63, []entities.LineAllocation{{BatchLocationID: 1, Quantity: 1}})
+	assert.Error(t, err)
 
-	runInTxAsUser(t, adminID, func(ctx context.Context) {
-		upd, err := repo.UpdatePrescription(ctx, p)
-		require.NoError(t, err)
-		require.NotNil(t, upd)
-		assert.True(t, upd.IsDispensed)
-
-		// verify dispensed_by/dispensed_at stamped
-		var dispensedBy sql.NullInt64
-		var dispensedAt sql.NullTime
-		tx, _ := TxFromCtx(ctx)
-		err = tx.QueryRowContext(ctx, `
-			SELECT dispensed_by, dispensed_at
-			FROM prescriptions
-			WHERE id = $1
-		`, upd.ID).Scan(&dispensedBy, &dispensedAt)
-		require.NoError(t, err)
-		require.True(t, dispensedBy.Valid)
-		assert.EqualValues(t, adminID, dispensedBy.Int64)
-		require.True(t, dispensedAt.Valid)
-	})
-
-	// Any further edits should be blocked
-	runInTxAsUser(t, adminID, func(ctx context.Context) {
-		p.Notes = entities.PtrTo("after-dispense-attempt")
-		_, err := repo.UpdatePrescription(ctx, p)
-		require.EqualError(t, err, "cannot update a dispensed prescription")
-	})
+	// commit err
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT prescription_id FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(64)).WillReturnRows(sqlmock.NewRows([]string{"prescription_id"}).AddRow(int64(100)))
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(100)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectExec(qm(`DELETE FROM prescription_batch_items WHERE line_id=$1`)).
+		WithArgs(int64(64)).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit().WillReturnError(errors.New("commit err"))
+	_, err = repo.SetLineAllocations(context.Background(), 64, nil)
+	assert.Error(t, err)
 }
 
-func TestPrescription_Delete_RestoresStockAndRemovesRows(t *testing.T) {
-	adminID := mustAdminID(t)
-	id, vid := mustCreatePatientAndVisit(t)
+// --- MarkLinePacked --------------------------------------------------------
 
-	drug := mustCreateDrug(t, unique("Loratadine"))
-	_, loc := mustCreateBatchAndLocation(t, drug.ID, "L-B1", 40, time.Now().AddDate(0, 4, 0), "Main")
+func Test_MarkLinePacked_Success(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
 
-	before := getLocationQty(t, loc)
+	now := mustNow()
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT prescription_id FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"prescription_id"}).AddRow(int64(55)))
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(55)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectQuery(qm(`SELECT total_to_dispense FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"total_to_dispense"}).AddRow(9))
+	mock.ExpectQuery(qm(`SELECT COALESCE(SUM(quantity),0) FROM prescription_batch_items WHERE line_id=$1`)).
+		WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"sum"}).AddRow(9))
+	mock.ExpectExec(qm(`
+	  UPDATE prescription_lines
+	  SET is_packed=TRUE, packed_by=$2, packed_at=NOW(), updated_at=NOW()
+	  WHERE id=$1`)).
+		WithArgs(int64(7), int64(99)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
 
-	repo := NewPostgresPrescriptionRepository(db).(*postgresPrescriptionRepository)
+	// hydrate
+	mock.ExpectQuery(qm(`FROM prescription_lines pl
+	  WHERE pl.id=$1`)).
+		WithArgs(int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "prescription_id", "presentation_id", "remarks",
+			"dose_amount", "dose_unit",
+			"schedule_kind", "every_n", "frequency_per_schedule", "duration",
+			"total_to_dispense", "is_packed", "packed_by", "packed_at", "du",
+		}).AddRow(int64(7), int64(55), int64(101), nil, 500, "mg", "day", 1, 3.0, 5.0, 9, true, ip(99), tp(now), "tab"))
+	mock.ExpectQuery(qm(`FROM prescription_batch_items WHERE line_id=$1 ORDER BY id`)).
+		WithArgs(int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "line_id", "batch_location_id", "quantity", "created_at", "updated_at"}))
 
-	var pid int64
-	runInTxAsUser(t, adminID, func(ctx context.Context) {
-		p, err := repo.CreatePrescription(ctx, &entities.Prescription{
-			PatientID: int64(id),
-			VID:       vid,
-			Notes:     entities.PtrTo("to-delete"),
-			PrescribedDrugs: []entities.DrugPrescription{
-				{
-					DrugID:       drug.ID,
-					Remarks:      nil,
-					RequestedQty: 30,
-					Batches: []entities.PrescriptionBatchItem{
-						{BatchLocationId: loc, Quantity: 30},
-					},
-				},
-			},
-		})
-		require.NoError(t, err)
-		require.NotNil(t, p)
-		pid = p.ID
-	})
+	out, err := repo.MarkLinePacked(context.Background(), 7)
+	assert.NoError(t, err)
+	assert.True(t, out.IsPacked)
+	assert.Equal(t, int64(99), *out.PackedBy)
+}
 
-	mid := getLocationQty(t, loc)
-	assert.Equal(t, before-30, mid)
+func Test_MarkLinePacked_GuardsAndMismatch(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
 
-	// delete (no need for user GUC here, but keep pattern consistent)
-	runInTxAsUser(t, adminID, func(ctx context.Context) {
-		err := repo.DeletePrescription(ctx, pid)
-		require.NoError(t, err)
-	})
+	// dispensed
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT prescription_id FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(1)).WillReturnRows(sqlmock.NewRows([]string{"prescription_id"}).AddRow(int64(10)))
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(10)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(true))
+	mock.ExpectRollback()
+	_, err := repo.MarkLinePacked(context.Background(), 1)
+	assert.EqualError(t, err, "cannot pack a line on a dispensed prescription")
 
-	after := getLocationQty(t, loc)
-	assert.Equal(t, before, after)
+	// mismatch
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT prescription_id FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(2)).WillReturnRows(sqlmock.NewRows([]string{"prescription_id"}).AddRow(int64(10)))
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(10)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectQuery(qm(`SELECT total_to_dispense FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(2)).WillReturnRows(sqlmock.NewRows([]string{"total_to_dispense"}).AddRow(10))
+	mock.ExpectQuery(qm(`SELECT COALESCE(SUM(quantity),0) FROM prescription_batch_items WHERE line_id=$1`)).
+		WithArgs(int64(2)).WillReturnRows(sqlmock.NewRows([]string{"sum"}).AddRow(9))
+	mock.ExpectRollback()
+	_, err = repo.MarkLinePacked(context.Background(), 2)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "allocation sum 9 does not equal total_to_dispense 10")
+}
 
-	// deleting again → not found
-	runInTxAsUser(t, adminID, func(ctx context.Context) {
-		err := repo.DeletePrescription(ctx, pid)
-		require.EqualError(t, err, "prescription not found")
-	})
+// --- UnpackLine ------------------------------------------------------------
+
+func Test_UnpackLine_Success_And_Guard(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
+
+	// success
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT prescription_id FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(5)).WillReturnRows(sqlmock.NewRows([]string{"prescription_id"}).AddRow(int64(55)))
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(55)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectExec(qm(`
+	  UPDATE prescription_lines
+	  SET is_packed=FALSE, packed_by=NULL, packed_at=NULL, updated_at=NOW()
+	  WHERE id=$1`)).
+		WithArgs(int64(5)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	// hydrate
+	mock.ExpectQuery(qm(`FROM prescription_lines pl
+	  WHERE pl.id=$1`)).
+		WithArgs(int64(5)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "prescription_id", "presentation_id", "remarks",
+			"dose_amount", "dose_unit",
+			"schedule_kind", "every_n", "frequency_per_schedule", "duration",
+			"total_to_dispense", "is_packed", "packed_by", "packed_at", "du",
+		}).AddRow(int64(5), int64(55), int64(101), nil, 500, "mg", "day", 1, 3.0, 5.0, 9, false, nil, nil, "tab"))
+	mock.ExpectQuery(qm(`FROM prescription_batch_items WHERE line_id=$1 ORDER BY id`)).
+		WithArgs(int64(5)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "line_id", "batch_location_id", "quantity", "created_at", "updated_at"}))
+
+	l, err := repo.UnpackLine(context.Background(), 5)
+	assert.NoError(t, err)
+	assert.False(t, l.IsPacked)
+
+	// guard
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT prescription_id FROM prescription_lines WHERE id=$1`)).
+		WithArgs(int64(6)).WillReturnRows(sqlmock.NewRows([]string{"prescription_id"}).AddRow(int64(55)))
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(55)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(true))
+	mock.ExpectRollback()
+	_, err = repo.UnpackLine(context.Background(), 6)
+	assert.EqualError(t, err, "cannot unpack a line on a dispensed prescription")
+}
+
+// --- DispensePrescription --------------------------------------------------
+
+func Test_DispensePrescription_Success(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
+
+	now := mustNow()
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1 FOR UPDATE`)).
+		WithArgs(int64(99)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectQuery(qm(`SELECT COUNT(*) FROM prescription_lines WHERE prescription_id=$1`)).
+		WithArgs(int64(99)).WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(2))
+	mock.ExpectQuery(qm(`SELECT COUNT(*) FROM prescription_lines WHERE prescription_id=$1 AND is_packed=TRUE`)).
+		WithArgs(int64(99)).WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(2))
+	mock.ExpectQuery(qm(`
+	  SELECT COUNT(*) FROM prescription_lines l
+	  WHERE l.prescription_id=$1 AND
+	        l.total_to_dispense <> COALESCE((SELECT SUM(quantity) FROM prescription_batch_items i WHERE i.line_id=l.id),0)`)).
+		WithArgs(int64(99)).WillReturnRows(sqlmock.NewRows([]string{"m"}).AddRow(0))
+	mock.ExpectExec(qm(`
+	  UPDATE prescriptions
+	  SET is_dispensed=TRUE, dispensed_by=$2, dispensed_at=NOW(), updated_at=NOW()
+	  WHERE id=$1`)).
+		WithArgs(int64(99), int64(7)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	// hydrate
+	mock.ExpectQuery(qm(`FROM prescriptions WHERE id=$1`)).
+		WithArgs(int64(99)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "patient_id", "vid", "notes",
+			"created_by", "created_at", "updated_at",
+			"is_dispensed", "dispensed_by", "dispensed_at",
+		}).AddRow(int64(99), int64(10), int32(1), nil, nil, now, now, true, ip(7), tp(now)))
+	mock.ExpectQuery(qm(`FROM prescription_lines pl
+		WHERE pl.prescription_id = $1
+		ORDER BY pl.id`)).
+		WithArgs(int64(99)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "prescription_id", "presentation_id", "remarks",
+			"dose_amount", "dose_unit",
+			"schedule_kind", "every_n", "frequency_per_schedule", "duration",
+			"total_to_dispense", "is_packed", "packed_by", "packed_at",
+			"drug_name", "route_code", "dispense_unit", "display_strength",
+		}))
+
+	p, err := repo.DispensePrescription(context.Background(), 99)
+	assert.NoError(t, err)
+	assert.True(t, p.IsDispensed)
+}
+
+func Test_DispensePrescription_GuardsAndErrors(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
+
+	// already dispensed
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1 FOR UPDATE`)).
+		WithArgs(int64(1)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(true))
+	mock.ExpectRollback()
+	_, err := repo.DispensePrescription(context.Background(), 1)
+	assert.EqualError(t, err, "prescription already dispensed")
+
+	// no lines
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1 FOR UPDATE`)).
+		WithArgs(int64(2)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectQuery(qm(`SELECT COUNT(*) FROM prescription_lines WHERE prescription_id=$1`)).
+		WithArgs(int64(2)).WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(0))
+	mock.ExpectRollback()
+	_, err = repo.DispensePrescription(context.Background(), 2)
+	assert.EqualError(t, err, "no lines to dispense")
+
+	// not all packed
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1 FOR UPDATE`)).
+		WithArgs(int64(3)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectQuery(qm(`SELECT COUNT(*) FROM prescription_lines WHERE prescription_id=$1`)).
+		WithArgs(int64(3)).WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(2))
+	mock.ExpectQuery(qm(`SELECT COUNT(*) FROM prescription_lines WHERE prescription_id=$1 AND is_packed=TRUE`)).
+		WithArgs(int64(3)).WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(1))
+	mock.ExpectRollback()
+	_, err = repo.DispensePrescription(context.Background(), 3)
+	assert.EqualError(t, err, "all lines must be packed before dispense")
+
+	// allocation mismatch
+	mock.ExpectBegin()
+	mock.ExpectQuery(qm(`SELECT is_dispensed FROM prescriptions WHERE id=$1 FOR UPDATE`)).
+		WithArgs(int64(4)).WillReturnRows(sqlmock.NewRows([]string{"is_dispensed"}).AddRow(false))
+	mock.ExpectQuery(qm(`SELECT COUNT(*) FROM prescription_lines WHERE prescription_id=$1`)).
+		WithArgs(int64(4)).WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(2))
+	mock.ExpectQuery(qm(`SELECT COUNT(*) FROM prescription_lines WHERE prescription_id=$1 AND is_packed=TRUE`)).
+		WithArgs(int64(4)).WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(2))
+	mock.ExpectQuery(qm(`
+	  SELECT COUNT(*) FROM prescription_lines l
+	  WHERE l.prescription_id=$1 AND
+	        l.total_to_dispense <> COALESCE((SELECT SUM(quantity) FROM prescription_batch_items i WHERE i.line_id=l.id),0)`)).
+		WithArgs(int64(4)).WillReturnRows(sqlmock.NewRows([]string{"m"}).AddRow(1))
+	mock.ExpectRollback()
+	_, err = repo.DispensePrescription(context.Background(), 4)
+	assert.EqualError(t, err, "allocation totals mismatch")
+}
+
+// --- GetLine ---------------------------------------------------------------
+
+func Test_GetLine_Success_NotFound_AllocErr(t *testing.T) {
+	repo, mock, done := newRxRepo(t)
+	defer done()
+
+	now := mustNow()
+	// success
+	mock.ExpectQuery(qm(`
+	  SELECT
+	    pl.id, pl.prescription_id, pl.presentation_id, pl.remarks,
+	    pl.dose_amount, pl.dose_unit,
+	    pl.schedule_kind, pl.every_n, pl.frequency_per_schedule, pl.duration,
+	    pl.total_to_dispense, pl.is_packed, pl.packed_by, pl.packed_at,
+	    (SELECT dispense_unit FROM drug_presentations WHERE id=pl.presentation_id) AS du
+	  FROM prescription_lines pl
+	  WHERE pl.id=$1`)).
+		WithArgs(int64(5)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "prescription_id", "presentation_id", "remarks",
+			"dose_amount", "dose_unit",
+			"schedule_kind", "every_n", "frequency_per_schedule", "duration",
+			"total_to_dispense", "is_packed", "packed_by", "packed_at", "du",
+		}).AddRow(int64(5), int64(55), int64(101), "r", 1, "tab", "day", 1, 1.0, 1.0, 1, false, nil, nil, "tab"))
+	mock.ExpectQuery(qm(`FROM prescription_batch_items WHERE line_id=$1 ORDER BY id`)).
+		WithArgs(int64(5)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "line_id", "batch_location_id", "quantity", "created_at", "updated_at",
+		}).AddRow(int64(1), int64(5), int64(900), 1, now, now))
+	l, err := repo.GetLine(context.Background(), 5)
+	assert.NoError(t, err)
+	assert.Equal(t, "tab", l.DispenseUnit)
+	assert.Len(t, l.Allocations, 1)
+
+	// not found
+	mock.ExpectQuery(qm(`FROM prescription_lines pl
+	  WHERE pl.id=$1`)).
+		WithArgs(int64(6)).
+		WillReturnError(sql.ErrNoRows)
+	l, err = repo.GetLine(context.Background(), 6)
+	assert.Error(t, err)
+	assert.Nil(t, l)
+	assert.Equal(t, "line not found", err.Error())
+
+	// alloc err
+	mock.ExpectQuery(qm(`FROM prescription_lines pl
+	  WHERE pl.id=$1`)).
+		WithArgs(int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "prescription_id", "presentation_id", "remarks",
+			"dose_amount", "dose_unit",
+			"schedule_kind", "every_n", "frequency_per_schedule", "duration",
+			"total_to_dispense", "is_packed", "packed_by", "packed_at", "du",
+		}).AddRow(int64(7), int64(55), int64(101), nil, 1, "tab", "day", 1, 1.0, 1.0, 1, false, nil, nil, "tab"))
+	mock.ExpectQuery(qm(`FROM prescription_batch_items WHERE line_id=$1 ORDER BY id`)).
+		WithArgs(int64(7)).
+		WillReturnError(errors.New("alloc err"))
+	l, err = repo.GetLine(context.Background(), 7)
+	assert.Error(t, err)
+	assert.Nil(t, l)
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	_httpDelivery "github.com/jieqiboh/sothea_backend/controllers"
-	_patientPostgresRepository "github.com/jieqiboh/sothea_backend/repository/postgres"
+	_postgresRepository "github.com/jieqiboh/sothea_backend/repository/postgres"
 	_useCase "github.com/jieqiboh/sothea_backend/usecases"
 	"github.com/spf13/viper"
 )
@@ -75,11 +75,11 @@ func main() {
 	router.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:5173", "*"},
 		AllowHeaders:     []string{"Origin", "Authorization", "Content-Type"},
-		AllowMethods:     []string{"GET", "POST", "DELETE", "PATCH"},
+		AllowMethods:     []string{"GET", "POST", "DELETE", "PATCH", "PUT"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
-	patientRepo := _patientPostgresRepository.NewPostgresPatientRepository(db)
+	patientRepo := _postgresRepository.NewPostgresPatientRepository(db)
 	// Set up login routes
 	loginUseCase := _useCase.NewLoginUseCase(patientRepo, 5*time.Second, secretKey)
 	_httpDelivery.NewLoginHandler(router, loginUseCase, secretKey)
@@ -88,12 +88,12 @@ func main() {
 	patientUseCase := _useCase.NewPatientUsecase(patientRepo, 2*time.Second)
 	_httpDelivery.NewPatientHandler(router, patientUseCase, secretKey)
 
-	pharmacyRepo := _patientPostgresRepository.NewPostgresPharmacyRepository(db)
+	pharmacyRepo := _postgresRepository.NewPostgresPharmacyRepository(db)
 	pharmacyUseCase := _useCase.NewPharmacyUsecase(pharmacyRepo, 2*time.Second)
 	_httpDelivery.NewPharmacyHandler(router, pharmacyUseCase, secretKey, db)
 
-	prescriptionRepo := _patientPostgresRepository.NewPostgresPrescriptionRepository(db)
-	prescriptionUseCase := _useCase.NewPrescriptionUsecase(prescriptionRepo, 2*time.Second)
+	prescriptionRepo := _postgresRepository.NewPostgresPrescriptionRepository(db)
+	prescriptionUseCase := _useCase.NewPrescriptionUsecase(prescriptionRepo, pharmacyRepo, 2*time.Second)
 	_httpDelivery.NewPrescriptionHandler(router, prescriptionUseCase, secretKey, db)
 
 	router.Run(address)

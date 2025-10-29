@@ -14,9 +14,17 @@ type PharmacyUseCase struct {
 	mock.Mock
 }
 
-// CreateBatch provides a mock function with given fields: ctx, b
-func (_m *PharmacyUseCase) CreateBatch(ctx context.Context, b *entities.BatchDetail) (*entities.BatchDetail, error) {
-	ret := _m.Called(ctx, b)
+type PharmacyUseCase_Expecter struct {
+	mock *mock.Mock
+}
+
+func (_m *PharmacyUseCase) EXPECT() *PharmacyUseCase_Expecter {
+	return &PharmacyUseCase_Expecter{mock: &_m.Mock}
+}
+
+// CreateBatch provides a mock function with given fields: ctx, b, locations
+func (_m *PharmacyUseCase) CreateBatch(ctx context.Context, b *entities.DrugBatch, locations []entities.DrugBatchLocation) (*entities.BatchDetail, error) {
+	ret := _m.Called(ctx, b, locations)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateBatch")
@@ -24,19 +32,19 @@ func (_m *PharmacyUseCase) CreateBatch(ctx context.Context, b *entities.BatchDet
 
 	var r0 *entities.BatchDetail
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *entities.BatchDetail) (*entities.BatchDetail, error)); ok {
-		return rf(ctx, b)
+	if rf, ok := ret.Get(0).(func(context.Context, *entities.DrugBatch, []entities.DrugBatchLocation) (*entities.BatchDetail, error)); ok {
+		return rf(ctx, b, locations)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *entities.BatchDetail) *entities.BatchDetail); ok {
-		r0 = rf(ctx, b)
+	if rf, ok := ret.Get(0).(func(context.Context, *entities.DrugBatch, []entities.DrugBatchLocation) *entities.BatchDetail); ok {
+		r0 = rf(ctx, b, locations)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*entities.BatchDetail)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *entities.BatchDetail) error); ok {
-		r1 = rf(ctx, b)
+	if rf, ok := ret.Get(1).(func(context.Context, *entities.DrugBatch, []entities.DrugBatchLocation) error); ok {
+		r1 = rf(ctx, b, locations)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -44,9 +52,39 @@ func (_m *PharmacyUseCase) CreateBatch(ctx context.Context, b *entities.BatchDet
 	return r0, r1
 }
 
-// CreateBatchLocation provides a mock function with given fields: ctx, batchLocation
-func (_m *PharmacyUseCase) CreateBatchLocation(ctx context.Context, batchLocation *entities.DrugBatchLocation) (*entities.DrugBatchLocation, error) {
-	ret := _m.Called(ctx, batchLocation)
+// PharmacyUseCase_CreateBatch_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateBatch'
+type PharmacyUseCase_CreateBatch_Call struct {
+	*mock.Call
+}
+
+// CreateBatch is a helper method to define mock.On call
+//   - ctx context.Context
+//   - b *entities.DrugBatch
+//   - locations []entities.DrugBatchLocation
+func (_e *PharmacyUseCase_Expecter) CreateBatch(ctx interface{}, b interface{}, locations interface{}) *PharmacyUseCase_CreateBatch_Call {
+	return &PharmacyUseCase_CreateBatch_Call{Call: _e.mock.On("CreateBatch", ctx, b, locations)}
+}
+
+func (_c *PharmacyUseCase_CreateBatch_Call) Run(run func(ctx context.Context, b *entities.DrugBatch, locations []entities.DrugBatchLocation)) *PharmacyUseCase_CreateBatch_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*entities.DrugBatch), args[2].([]entities.DrugBatchLocation))
+	})
+	return _c
+}
+
+func (_c *PharmacyUseCase_CreateBatch_Call) Return(_a0 *entities.BatchDetail, _a1 error) *PharmacyUseCase_CreateBatch_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *PharmacyUseCase_CreateBatch_Call) RunAndReturn(run func(context.Context, *entities.DrugBatch, []entities.DrugBatchLocation) (*entities.BatchDetail, error)) *PharmacyUseCase_CreateBatch_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreateBatchLocation provides a mock function with given fields: ctx, loc
+func (_m *PharmacyUseCase) CreateBatchLocation(ctx context.Context, loc *entities.DrugBatchLocation) (*entities.DrugBatchLocation, error) {
+	ret := _m.Called(ctx, loc)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateBatchLocation")
@@ -55,10 +93,10 @@ func (_m *PharmacyUseCase) CreateBatchLocation(ctx context.Context, batchLocatio
 	var r0 *entities.DrugBatchLocation
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *entities.DrugBatchLocation) (*entities.DrugBatchLocation, error)); ok {
-		return rf(ctx, batchLocation)
+		return rf(ctx, loc)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *entities.DrugBatchLocation) *entities.DrugBatchLocation); ok {
-		r0 = rf(ctx, batchLocation)
+		r0 = rf(ctx, loc)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*entities.DrugBatchLocation)
@@ -66,12 +104,41 @@ func (_m *PharmacyUseCase) CreateBatchLocation(ctx context.Context, batchLocatio
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *entities.DrugBatchLocation) error); ok {
-		r1 = rf(ctx, batchLocation)
+		r1 = rf(ctx, loc)
 	} else {
 		r1 = ret.Error(1)
 	}
 
 	return r0, r1
+}
+
+// PharmacyUseCase_CreateBatchLocation_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateBatchLocation'
+type PharmacyUseCase_CreateBatchLocation_Call struct {
+	*mock.Call
+}
+
+// CreateBatchLocation is a helper method to define mock.On call
+//   - ctx context.Context
+//   - loc *entities.DrugBatchLocation
+func (_e *PharmacyUseCase_Expecter) CreateBatchLocation(ctx interface{}, loc interface{}) *PharmacyUseCase_CreateBatchLocation_Call {
+	return &PharmacyUseCase_CreateBatchLocation_Call{Call: _e.mock.On("CreateBatchLocation", ctx, loc)}
+}
+
+func (_c *PharmacyUseCase_CreateBatchLocation_Call) Run(run func(ctx context.Context, loc *entities.DrugBatchLocation)) *PharmacyUseCase_CreateBatchLocation_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*entities.DrugBatchLocation))
+	})
+	return _c
+}
+
+func (_c *PharmacyUseCase_CreateBatchLocation_Call) Return(_a0 *entities.DrugBatchLocation, _a1 error) *PharmacyUseCase_CreateBatchLocation_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *PharmacyUseCase_CreateBatchLocation_Call) RunAndReturn(run func(context.Context, *entities.DrugBatchLocation) (*entities.DrugBatchLocation, error)) *PharmacyUseCase_CreateBatchLocation_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // CreateDrug provides a mock function with given fields: ctx, d
@@ -104,9 +171,97 @@ func (_m *PharmacyUseCase) CreateDrug(ctx context.Context, d *entities.Drug) (*e
 	return r0, r1
 }
 
-// DeleteBatch provides a mock function with given fields: ctx, id
-func (_m *PharmacyUseCase) DeleteBatch(ctx context.Context, id int64) error {
-	ret := _m.Called(ctx, id)
+// PharmacyUseCase_CreateDrug_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateDrug'
+type PharmacyUseCase_CreateDrug_Call struct {
+	*mock.Call
+}
+
+// CreateDrug is a helper method to define mock.On call
+//   - ctx context.Context
+//   - d *entities.Drug
+func (_e *PharmacyUseCase_Expecter) CreateDrug(ctx interface{}, d interface{}) *PharmacyUseCase_CreateDrug_Call {
+	return &PharmacyUseCase_CreateDrug_Call{Call: _e.mock.On("CreateDrug", ctx, d)}
+}
+
+func (_c *PharmacyUseCase_CreateDrug_Call) Run(run func(ctx context.Context, d *entities.Drug)) *PharmacyUseCase_CreateDrug_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*entities.Drug))
+	})
+	return _c
+}
+
+func (_c *PharmacyUseCase_CreateDrug_Call) Return(_a0 *entities.Drug, _a1 error) *PharmacyUseCase_CreateDrug_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *PharmacyUseCase_CreateDrug_Call) RunAndReturn(run func(context.Context, *entities.Drug) (*entities.Drug, error)) *PharmacyUseCase_CreateDrug_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreatePresentation provides a mock function with given fields: ctx, p
+func (_m *PharmacyUseCase) CreatePresentation(ctx context.Context, p *entities.DrugPresentation) (*entities.DrugPresentationView, error) {
+	ret := _m.Called(ctx, p)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreatePresentation")
+	}
+
+	var r0 *entities.DrugPresentationView
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *entities.DrugPresentation) (*entities.DrugPresentationView, error)); ok {
+		return rf(ctx, p)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *entities.DrugPresentation) *entities.DrugPresentationView); ok {
+		r0 = rf(ctx, p)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*entities.DrugPresentationView)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *entities.DrugPresentation) error); ok {
+		r1 = rf(ctx, p)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// PharmacyUseCase_CreatePresentation_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreatePresentation'
+type PharmacyUseCase_CreatePresentation_Call struct {
+	*mock.Call
+}
+
+// CreatePresentation is a helper method to define mock.On call
+//   - ctx context.Context
+//   - p *entities.DrugPresentation
+func (_e *PharmacyUseCase_Expecter) CreatePresentation(ctx interface{}, p interface{}) *PharmacyUseCase_CreatePresentation_Call {
+	return &PharmacyUseCase_CreatePresentation_Call{Call: _e.mock.On("CreatePresentation", ctx, p)}
+}
+
+func (_c *PharmacyUseCase_CreatePresentation_Call) Run(run func(ctx context.Context, p *entities.DrugPresentation)) *PharmacyUseCase_CreatePresentation_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*entities.DrugPresentation))
+	})
+	return _c
+}
+
+func (_c *PharmacyUseCase_CreatePresentation_Call) Return(_a0 *entities.DrugPresentationView, _a1 error) *PharmacyUseCase_CreatePresentation_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *PharmacyUseCase_CreatePresentation_Call) RunAndReturn(run func(context.Context, *entities.DrugPresentation) (*entities.DrugPresentationView, error)) *PharmacyUseCase_CreatePresentation_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteBatch provides a mock function with given fields: ctx, batchID
+func (_m *PharmacyUseCase) DeleteBatch(ctx context.Context, batchID int64) error {
+	ret := _m.Called(ctx, batchID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DeleteBatch")
@@ -114,12 +269,41 @@ func (_m *PharmacyUseCase) DeleteBatch(ctx context.Context, id int64) error {
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
-		r0 = rf(ctx, id)
+		r0 = rf(ctx, batchID)
 	} else {
 		r0 = ret.Error(0)
 	}
 
 	return r0
+}
+
+// PharmacyUseCase_DeleteBatch_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteBatch'
+type PharmacyUseCase_DeleteBatch_Call struct {
+	*mock.Call
+}
+
+// DeleteBatch is a helper method to define mock.On call
+//   - ctx context.Context
+//   - batchID int64
+func (_e *PharmacyUseCase_Expecter) DeleteBatch(ctx interface{}, batchID interface{}) *PharmacyUseCase_DeleteBatch_Call {
+	return &PharmacyUseCase_DeleteBatch_Call{Call: _e.mock.On("DeleteBatch", ctx, batchID)}
+}
+
+func (_c *PharmacyUseCase_DeleteBatch_Call) Run(run func(ctx context.Context, batchID int64)) *PharmacyUseCase_DeleteBatch_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *PharmacyUseCase_DeleteBatch_Call) Return(_a0 error) *PharmacyUseCase_DeleteBatch_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *PharmacyUseCase_DeleteBatch_Call) RunAndReturn(run func(context.Context, int64) error) *PharmacyUseCase_DeleteBatch_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // DeleteBatchLocation provides a mock function with given fields: ctx, id
@@ -140,6 +324,35 @@ func (_m *PharmacyUseCase) DeleteBatchLocation(ctx context.Context, id int64) er
 	return r0
 }
 
+// PharmacyUseCase_DeleteBatchLocation_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteBatchLocation'
+type PharmacyUseCase_DeleteBatchLocation_Call struct {
+	*mock.Call
+}
+
+// DeleteBatchLocation is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id int64
+func (_e *PharmacyUseCase_Expecter) DeleteBatchLocation(ctx interface{}, id interface{}) *PharmacyUseCase_DeleteBatchLocation_Call {
+	return &PharmacyUseCase_DeleteBatchLocation_Call{Call: _e.mock.On("DeleteBatchLocation", ctx, id)}
+}
+
+func (_c *PharmacyUseCase_DeleteBatchLocation_Call) Run(run func(ctx context.Context, id int64)) *PharmacyUseCase_DeleteBatchLocation_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *PharmacyUseCase_DeleteBatchLocation_Call) Return(_a0 error) *PharmacyUseCase_DeleteBatchLocation_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *PharmacyUseCase_DeleteBatchLocation_Call) RunAndReturn(run func(context.Context, int64) error) *PharmacyUseCase_DeleteBatchLocation_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DeleteDrug provides a mock function with given fields: ctx, id
 func (_m *PharmacyUseCase) DeleteDrug(ctx context.Context, id int64) error {
 	ret := _m.Called(ctx, id)
@@ -158,29 +371,105 @@ func (_m *PharmacyUseCase) DeleteDrug(ctx context.Context, id int64) error {
 	return r0
 }
 
-// GetDrug provides a mock function with given fields: ctx, id
-func (_m *PharmacyUseCase) GetDrug(ctx context.Context, id int64) (*entities.DrugDetail, error) {
+// PharmacyUseCase_DeleteDrug_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteDrug'
+type PharmacyUseCase_DeleteDrug_Call struct {
+	*mock.Call
+}
+
+// DeleteDrug is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id int64
+func (_e *PharmacyUseCase_Expecter) DeleteDrug(ctx interface{}, id interface{}) *PharmacyUseCase_DeleteDrug_Call {
+	return &PharmacyUseCase_DeleteDrug_Call{Call: _e.mock.On("DeleteDrug", ctx, id)}
+}
+
+func (_c *PharmacyUseCase_DeleteDrug_Call) Run(run func(ctx context.Context, id int64)) *PharmacyUseCase_DeleteDrug_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *PharmacyUseCase_DeleteDrug_Call) Return(_a0 error) *PharmacyUseCase_DeleteDrug_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *PharmacyUseCase_DeleteDrug_Call) RunAndReturn(run func(context.Context, int64) error) *PharmacyUseCase_DeleteDrug_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeletePresentation provides a mock function with given fields: ctx, id
+func (_m *PharmacyUseCase) DeletePresentation(ctx context.Context, id int64) error {
 	ret := _m.Called(ctx, id)
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetDrug")
+		panic("no return value specified for DeletePresentation")
 	}
 
-	var r0 *entities.DrugDetail
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64) (*entities.DrugDetail, error)); ok {
-		return rf(ctx, id)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64) *entities.DrugDetail); ok {
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
 		r0 = rf(ctx, id)
 	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// PharmacyUseCase_DeletePresentation_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeletePresentation'
+type PharmacyUseCase_DeletePresentation_Call struct {
+	*mock.Call
+}
+
+// DeletePresentation is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id int64
+func (_e *PharmacyUseCase_Expecter) DeletePresentation(ctx interface{}, id interface{}) *PharmacyUseCase_DeletePresentation_Call {
+	return &PharmacyUseCase_DeletePresentation_Call{Call: _e.mock.On("DeletePresentation", ctx, id)}
+}
+
+func (_c *PharmacyUseCase_DeletePresentation_Call) Run(run func(ctx context.Context, id int64)) *PharmacyUseCase_DeletePresentation_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *PharmacyUseCase_DeletePresentation_Call) Return(_a0 error) *PharmacyUseCase_DeletePresentation_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *PharmacyUseCase_DeletePresentation_Call) RunAndReturn(run func(context.Context, int64) error) *PharmacyUseCase_DeletePresentation_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetBatch provides a mock function with given fields: ctx, batchID
+func (_m *PharmacyUseCase) GetBatch(ctx context.Context, batchID int64) (*entities.BatchDetail, error) {
+	ret := _m.Called(ctx, batchID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetBatch")
+	}
+
+	var r0 *entities.BatchDetail
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) (*entities.BatchDetail, error)); ok {
+		return rf(ctx, batchID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64) *entities.BatchDetail); ok {
+		r0 = rf(ctx, batchID)
+	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*entities.DrugDetail)
+			r0 = ret.Get(0).(*entities.BatchDetail)
 		}
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
-		r1 = rf(ctx, id)
+		r1 = rf(ctx, batchID)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -188,28 +477,57 @@ func (_m *PharmacyUseCase) GetDrug(ctx context.Context, id int64) (*entities.Dru
 	return r0, r1
 }
 
-// ListBatches provides a mock function with given fields: ctx, drugID
-func (_m *PharmacyUseCase) ListBatches(ctx context.Context, drugID *int64) ([]entities.BatchDetail, error) {
+// PharmacyUseCase_GetBatch_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetBatch'
+type PharmacyUseCase_GetBatch_Call struct {
+	*mock.Call
+}
+
+// GetBatch is a helper method to define mock.On call
+//   - ctx context.Context
+//   - batchID int64
+func (_e *PharmacyUseCase_Expecter) GetBatch(ctx interface{}, batchID interface{}) *PharmacyUseCase_GetBatch_Call {
+	return &PharmacyUseCase_GetBatch_Call{Call: _e.mock.On("GetBatch", ctx, batchID)}
+}
+
+func (_c *PharmacyUseCase_GetBatch_Call) Run(run func(ctx context.Context, batchID int64)) *PharmacyUseCase_GetBatch_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *PharmacyUseCase_GetBatch_Call) Return(_a0 *entities.BatchDetail, _a1 error) *PharmacyUseCase_GetBatch_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *PharmacyUseCase_GetBatch_Call) RunAndReturn(run func(context.Context, int64) (*entities.BatchDetail, error)) *PharmacyUseCase_GetBatch_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetDrugWithPresentations provides a mock function with given fields: ctx, drugID
+func (_m *PharmacyUseCase) GetDrugWithPresentations(ctx context.Context, drugID int64) (*entities.DrugWithPresentations, error) {
 	ret := _m.Called(ctx, drugID)
 
 	if len(ret) == 0 {
-		panic("no return value specified for ListBatches")
+		panic("no return value specified for GetDrugWithPresentations")
 	}
 
-	var r0 []entities.BatchDetail
+	var r0 *entities.DrugWithPresentations
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *int64) ([]entities.BatchDetail, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, int64) (*entities.DrugWithPresentations, error)); ok {
 		return rf(ctx, drugID)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *int64) []entities.BatchDetail); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, int64) *entities.DrugWithPresentations); ok {
 		r0 = rf(ctx, drugID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]entities.BatchDetail)
+			r0 = ret.Get(0).(*entities.DrugWithPresentations)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *int64) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
 		r1 = rf(ctx, drugID)
 	} else {
 		r1 = ret.Error(1)
@@ -218,9 +536,215 @@ func (_m *PharmacyUseCase) ListBatches(ctx context.Context, drugID *int64) ([]en
 	return r0, r1
 }
 
-// ListDrugs provides a mock function with given fields: ctx
-func (_m *PharmacyUseCase) ListDrugs(ctx context.Context) ([]entities.Drug, error) {
-	ret := _m.Called(ctx)
+// PharmacyUseCase_GetDrugWithPresentations_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetDrugWithPresentations'
+type PharmacyUseCase_GetDrugWithPresentations_Call struct {
+	*mock.Call
+}
+
+// GetDrugWithPresentations is a helper method to define mock.On call
+//   - ctx context.Context
+//   - drugID int64
+func (_e *PharmacyUseCase_Expecter) GetDrugWithPresentations(ctx interface{}, drugID interface{}) *PharmacyUseCase_GetDrugWithPresentations_Call {
+	return &PharmacyUseCase_GetDrugWithPresentations_Call{Call: _e.mock.On("GetDrugWithPresentations", ctx, drugID)}
+}
+
+func (_c *PharmacyUseCase_GetDrugWithPresentations_Call) Run(run func(ctx context.Context, drugID int64)) *PharmacyUseCase_GetDrugWithPresentations_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *PharmacyUseCase_GetDrugWithPresentations_Call) Return(_a0 *entities.DrugWithPresentations, _a1 error) *PharmacyUseCase_GetDrugWithPresentations_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *PharmacyUseCase_GetDrugWithPresentations_Call) RunAndReturn(run func(context.Context, int64) (*entities.DrugWithPresentations, error)) *PharmacyUseCase_GetDrugWithPresentations_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetPresentationStock provides a mock function with given fields: ctx, presentationID
+func (_m *PharmacyUseCase) GetPresentationStock(ctx context.Context, presentationID int64) (*entities.PresentationStock, error) {
+	ret := _m.Called(ctx, presentationID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPresentationStock")
+	}
+
+	var r0 *entities.PresentationStock
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) (*entities.PresentationStock, error)); ok {
+		return rf(ctx, presentationID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64) *entities.PresentationStock); ok {
+		r0 = rf(ctx, presentationID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*entities.PresentationStock)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
+		r1 = rf(ctx, presentationID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// PharmacyUseCase_GetPresentationStock_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPresentationStock'
+type PharmacyUseCase_GetPresentationStock_Call struct {
+	*mock.Call
+}
+
+// GetPresentationStock is a helper method to define mock.On call
+//   - ctx context.Context
+//   - presentationID int64
+func (_e *PharmacyUseCase_Expecter) GetPresentationStock(ctx interface{}, presentationID interface{}) *PharmacyUseCase_GetPresentationStock_Call {
+	return &PharmacyUseCase_GetPresentationStock_Call{Call: _e.mock.On("GetPresentationStock", ctx, presentationID)}
+}
+
+func (_c *PharmacyUseCase_GetPresentationStock_Call) Run(run func(ctx context.Context, presentationID int64)) *PharmacyUseCase_GetPresentationStock_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *PharmacyUseCase_GetPresentationStock_Call) Return(_a0 *entities.PresentationStock, _a1 error) *PharmacyUseCase_GetPresentationStock_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *PharmacyUseCase_GetPresentationStock_Call) RunAndReturn(run func(context.Context, int64) (*entities.PresentationStock, error)) *PharmacyUseCase_GetPresentationStock_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListBatchLocations provides a mock function with given fields: ctx, batchID
+func (_m *PharmacyUseCase) ListBatchLocations(ctx context.Context, batchID int64) ([]entities.DrugBatchLocation, error) {
+	ret := _m.Called(ctx, batchID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListBatchLocations")
+	}
+
+	var r0 []entities.DrugBatchLocation
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) ([]entities.DrugBatchLocation, error)); ok {
+		return rf(ctx, batchID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64) []entities.DrugBatchLocation); ok {
+		r0 = rf(ctx, batchID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]entities.DrugBatchLocation)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
+		r1 = rf(ctx, batchID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// PharmacyUseCase_ListBatchLocations_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListBatchLocations'
+type PharmacyUseCase_ListBatchLocations_Call struct {
+	*mock.Call
+}
+
+// ListBatchLocations is a helper method to define mock.On call
+//   - ctx context.Context
+//   - batchID int64
+func (_e *PharmacyUseCase_Expecter) ListBatchLocations(ctx interface{}, batchID interface{}) *PharmacyUseCase_ListBatchLocations_Call {
+	return &PharmacyUseCase_ListBatchLocations_Call{Call: _e.mock.On("ListBatchLocations", ctx, batchID)}
+}
+
+func (_c *PharmacyUseCase_ListBatchLocations_Call) Run(run func(ctx context.Context, batchID int64)) *PharmacyUseCase_ListBatchLocations_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *PharmacyUseCase_ListBatchLocations_Call) Return(_a0 []entities.DrugBatchLocation, _a1 error) *PharmacyUseCase_ListBatchLocations_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *PharmacyUseCase_ListBatchLocations_Call) RunAndReturn(run func(context.Context, int64) ([]entities.DrugBatchLocation, error)) *PharmacyUseCase_ListBatchLocations_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListBatches provides a mock function with given fields: ctx, presentationID
+func (_m *PharmacyUseCase) ListBatches(ctx context.Context, presentationID int64) ([]entities.BatchDetail, error) {
+	ret := _m.Called(ctx, presentationID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListBatches")
+	}
+
+	var r0 []entities.BatchDetail
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) ([]entities.BatchDetail, error)); ok {
+		return rf(ctx, presentationID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64) []entities.BatchDetail); ok {
+		r0 = rf(ctx, presentationID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]entities.BatchDetail)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
+		r1 = rf(ctx, presentationID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// PharmacyUseCase_ListBatches_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListBatches'
+type PharmacyUseCase_ListBatches_Call struct {
+	*mock.Call
+}
+
+// ListBatches is a helper method to define mock.On call
+//   - ctx context.Context
+//   - presentationID int64
+func (_e *PharmacyUseCase_Expecter) ListBatches(ctx interface{}, presentationID interface{}) *PharmacyUseCase_ListBatches_Call {
+	return &PharmacyUseCase_ListBatches_Call{Call: _e.mock.On("ListBatches", ctx, presentationID)}
+}
+
+func (_c *PharmacyUseCase_ListBatches_Call) Run(run func(ctx context.Context, presentationID int64)) *PharmacyUseCase_ListBatches_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *PharmacyUseCase_ListBatches_Call) Return(_a0 []entities.BatchDetail, _a1 error) *PharmacyUseCase_ListBatches_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *PharmacyUseCase_ListBatches_Call) RunAndReturn(run func(context.Context, int64) ([]entities.BatchDetail, error)) *PharmacyUseCase_ListBatches_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListDrugs provides a mock function with given fields: ctx, q
+func (_m *PharmacyUseCase) ListDrugs(ctx context.Context, q *string) ([]entities.Drug, error) {
+	ret := _m.Called(ctx, q)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ListDrugs")
@@ -228,24 +752,53 @@ func (_m *PharmacyUseCase) ListDrugs(ctx context.Context) ([]entities.Drug, erro
 
 	var r0 []entities.Drug
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) ([]entities.Drug, error)); ok {
-		return rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *string) ([]entities.Drug, error)); ok {
+		return rf(ctx, q)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) []entities.Drug); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *string) []entities.Drug); ok {
+		r0 = rf(ctx, q)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]entities.Drug)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
+	if rf, ok := ret.Get(1).(func(context.Context, *string) error); ok {
+		r1 = rf(ctx, q)
 	} else {
 		r1 = ret.Error(1)
 	}
 
 	return r0, r1
+}
+
+// PharmacyUseCase_ListDrugs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListDrugs'
+type PharmacyUseCase_ListDrugs_Call struct {
+	*mock.Call
+}
+
+// ListDrugs is a helper method to define mock.On call
+//   - ctx context.Context
+//   - q *string
+func (_e *PharmacyUseCase_Expecter) ListDrugs(ctx interface{}, q interface{}) *PharmacyUseCase_ListDrugs_Call {
+	return &PharmacyUseCase_ListDrugs_Call{Call: _e.mock.On("ListDrugs", ctx, q)}
+}
+
+func (_c *PharmacyUseCase_ListDrugs_Call) Run(run func(ctx context.Context, q *string)) *PharmacyUseCase_ListDrugs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*string))
+	})
+	return _c
+}
+
+func (_c *PharmacyUseCase_ListDrugs_Call) Return(_a0 []entities.Drug, _a1 error) *PharmacyUseCase_ListDrugs_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *PharmacyUseCase_ListDrugs_Call) RunAndReturn(run func(context.Context, *string) ([]entities.Drug, error)) *PharmacyUseCase_ListDrugs_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // UpdateBatch provides a mock function with given fields: ctx, b
@@ -278,9 +831,38 @@ func (_m *PharmacyUseCase) UpdateBatch(ctx context.Context, b *entities.DrugBatc
 	return r0, r1
 }
 
-// UpdateBatchLocation provides a mock function with given fields: ctx, batchLocation
-func (_m *PharmacyUseCase) UpdateBatchLocation(ctx context.Context, batchLocation *entities.DrugBatchLocation) (*entities.DrugBatchLocation, error) {
-	ret := _m.Called(ctx, batchLocation)
+// PharmacyUseCase_UpdateBatch_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateBatch'
+type PharmacyUseCase_UpdateBatch_Call struct {
+	*mock.Call
+}
+
+// UpdateBatch is a helper method to define mock.On call
+//   - ctx context.Context
+//   - b *entities.DrugBatch
+func (_e *PharmacyUseCase_Expecter) UpdateBatch(ctx interface{}, b interface{}) *PharmacyUseCase_UpdateBatch_Call {
+	return &PharmacyUseCase_UpdateBatch_Call{Call: _e.mock.On("UpdateBatch", ctx, b)}
+}
+
+func (_c *PharmacyUseCase_UpdateBatch_Call) Run(run func(ctx context.Context, b *entities.DrugBatch)) *PharmacyUseCase_UpdateBatch_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*entities.DrugBatch))
+	})
+	return _c
+}
+
+func (_c *PharmacyUseCase_UpdateBatch_Call) Return(_a0 *entities.BatchDetail, _a1 error) *PharmacyUseCase_UpdateBatch_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *PharmacyUseCase_UpdateBatch_Call) RunAndReturn(run func(context.Context, *entities.DrugBatch) (*entities.BatchDetail, error)) *PharmacyUseCase_UpdateBatch_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateBatchLocation provides a mock function with given fields: ctx, loc
+func (_m *PharmacyUseCase) UpdateBatchLocation(ctx context.Context, loc *entities.DrugBatchLocation) (*entities.DrugBatchLocation, error) {
+	ret := _m.Called(ctx, loc)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateBatchLocation")
@@ -289,10 +871,10 @@ func (_m *PharmacyUseCase) UpdateBatchLocation(ctx context.Context, batchLocatio
 	var r0 *entities.DrugBatchLocation
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *entities.DrugBatchLocation) (*entities.DrugBatchLocation, error)); ok {
-		return rf(ctx, batchLocation)
+		return rf(ctx, loc)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *entities.DrugBatchLocation) *entities.DrugBatchLocation); ok {
-		r0 = rf(ctx, batchLocation)
+		r0 = rf(ctx, loc)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*entities.DrugBatchLocation)
@@ -300,12 +882,41 @@ func (_m *PharmacyUseCase) UpdateBatchLocation(ctx context.Context, batchLocatio
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *entities.DrugBatchLocation) error); ok {
-		r1 = rf(ctx, batchLocation)
+		r1 = rf(ctx, loc)
 	} else {
 		r1 = ret.Error(1)
 	}
 
 	return r0, r1
+}
+
+// PharmacyUseCase_UpdateBatchLocation_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateBatchLocation'
+type PharmacyUseCase_UpdateBatchLocation_Call struct {
+	*mock.Call
+}
+
+// UpdateBatchLocation is a helper method to define mock.On call
+//   - ctx context.Context
+//   - loc *entities.DrugBatchLocation
+func (_e *PharmacyUseCase_Expecter) UpdateBatchLocation(ctx interface{}, loc interface{}) *PharmacyUseCase_UpdateBatchLocation_Call {
+	return &PharmacyUseCase_UpdateBatchLocation_Call{Call: _e.mock.On("UpdateBatchLocation", ctx, loc)}
+}
+
+func (_c *PharmacyUseCase_UpdateBatchLocation_Call) Run(run func(ctx context.Context, loc *entities.DrugBatchLocation)) *PharmacyUseCase_UpdateBatchLocation_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*entities.DrugBatchLocation))
+	})
+	return _c
+}
+
+func (_c *PharmacyUseCase_UpdateBatchLocation_Call) Return(_a0 *entities.DrugBatchLocation, _a1 error) *PharmacyUseCase_UpdateBatchLocation_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *PharmacyUseCase_UpdateBatchLocation_Call) RunAndReturn(run func(context.Context, *entities.DrugBatchLocation) (*entities.DrugBatchLocation, error)) *PharmacyUseCase_UpdateBatchLocation_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // UpdateDrug provides a mock function with given fields: ctx, d
@@ -336,6 +947,94 @@ func (_m *PharmacyUseCase) UpdateDrug(ctx context.Context, d *entities.Drug) (*e
 	}
 
 	return r0, r1
+}
+
+// PharmacyUseCase_UpdateDrug_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateDrug'
+type PharmacyUseCase_UpdateDrug_Call struct {
+	*mock.Call
+}
+
+// UpdateDrug is a helper method to define mock.On call
+//   - ctx context.Context
+//   - d *entities.Drug
+func (_e *PharmacyUseCase_Expecter) UpdateDrug(ctx interface{}, d interface{}) *PharmacyUseCase_UpdateDrug_Call {
+	return &PharmacyUseCase_UpdateDrug_Call{Call: _e.mock.On("UpdateDrug", ctx, d)}
+}
+
+func (_c *PharmacyUseCase_UpdateDrug_Call) Run(run func(ctx context.Context, d *entities.Drug)) *PharmacyUseCase_UpdateDrug_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*entities.Drug))
+	})
+	return _c
+}
+
+func (_c *PharmacyUseCase_UpdateDrug_Call) Return(_a0 *entities.Drug, _a1 error) *PharmacyUseCase_UpdateDrug_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *PharmacyUseCase_UpdateDrug_Call) RunAndReturn(run func(context.Context, *entities.Drug) (*entities.Drug, error)) *PharmacyUseCase_UpdateDrug_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdatePresentation provides a mock function with given fields: ctx, p
+func (_m *PharmacyUseCase) UpdatePresentation(ctx context.Context, p *entities.DrugPresentation) (*entities.DrugPresentationView, error) {
+	ret := _m.Called(ctx, p)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdatePresentation")
+	}
+
+	var r0 *entities.DrugPresentationView
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *entities.DrugPresentation) (*entities.DrugPresentationView, error)); ok {
+		return rf(ctx, p)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *entities.DrugPresentation) *entities.DrugPresentationView); ok {
+		r0 = rf(ctx, p)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*entities.DrugPresentationView)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *entities.DrugPresentation) error); ok {
+		r1 = rf(ctx, p)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// PharmacyUseCase_UpdatePresentation_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdatePresentation'
+type PharmacyUseCase_UpdatePresentation_Call struct {
+	*mock.Call
+}
+
+// UpdatePresentation is a helper method to define mock.On call
+//   - ctx context.Context
+//   - p *entities.DrugPresentation
+func (_e *PharmacyUseCase_Expecter) UpdatePresentation(ctx interface{}, p interface{}) *PharmacyUseCase_UpdatePresentation_Call {
+	return &PharmacyUseCase_UpdatePresentation_Call{Call: _e.mock.On("UpdatePresentation", ctx, p)}
+}
+
+func (_c *PharmacyUseCase_UpdatePresentation_Call) Run(run func(ctx context.Context, p *entities.DrugPresentation)) *PharmacyUseCase_UpdatePresentation_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*entities.DrugPresentation))
+	})
+	return _c
+}
+
+func (_c *PharmacyUseCase_UpdatePresentation_Call) Return(_a0 *entities.DrugPresentationView, _a1 error) *PharmacyUseCase_UpdatePresentation_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *PharmacyUseCase_UpdatePresentation_Call) RunAndReturn(run func(context.Context, *entities.DrugPresentation) (*entities.DrugPresentationView, error)) *PharmacyUseCase_UpdatePresentation_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // NewPharmacyUseCase creates a new instance of PharmacyUseCase. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

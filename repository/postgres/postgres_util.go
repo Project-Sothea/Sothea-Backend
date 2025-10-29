@@ -32,9 +32,9 @@ func CtxWithTx(ctx context.Context, tx *sql.Tx) context.Context {
 	return middleware.CtxWithTx(ctx, tx)
 }
 
-func getUserByID(dbx DBRunner, id int64) (*entities.DBUser, error) {
+func getUserByID(dbx DBRunner, ctx context.Context, id int64) (*entities.DBUser, error) {
 	user := &entities.DBUser{}
-	err := dbx.QueryRowContext(context.Background(), `
+	err := dbx.QueryRowContext(ctx, `
 		SELECT id, username, password_hash FROM users
 		WHERE id = $1
 	`, id).Scan(&user.Id, &user.Username, &user.PasswordHash)
