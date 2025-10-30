@@ -40,7 +40,14 @@ CREATE TABLE IF NOT EXISTS pastmedicalhistory
 (
     id                           INTEGER NOT NULL,                       -- Use INTEGER to match the id type from admin
     vid                          INTEGER NOT NULL,                       -- Add vid to match the vid type from admin
+    cough                        BOOLEAN NOT NULL,
+    fever                        BOOLEAN NOT NULL,
+    blocked_nose                 BOOLEAN NOT NULL,
+    sore_throat                  BOOLEAN NOT NULL,
+    night_sweats                 BOOLEAN NOT NULL,
+    unintentional_weight_loss    BOOLEAN NOT NULL,
     tuberculosis                 BOOLEAN NOT NULL,
+    tuberculosis_has_been_treated BOOLEAN NOT NULL,
     diabetes                     BOOLEAN NOT NULL,
     hypertension                 BOOLEAN NOT NULL,
     hyperlipidemia               BOOLEAN NOT NULL,
@@ -83,6 +90,7 @@ CREATE TABLE IF NOT EXISTS vitalstatistics
     hr2                       NUMERIC(5, 1) NOT NULL,
     avg_hr                    NUMERIC(5, 1) NOT NULL,
     rand_blood_glucose_mmoll  NUMERIC(5, 1) NOT NULL,
+    icope_high_bp             BOOLEAN NOT NULL,
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
 );
@@ -97,6 +105,9 @@ CREATE TABLE IF NOT EXISTS heightandweight
     bmi_analysis TEXT          NOT NULL,
     paeds_height NUMERIC(5, 1),
     paeds_weight NUMERIC(5, 1),
+
+    icope_lost_weight_past_months BOOLEAN NOT NULL,
+    icope_no_desire_to_eat BOOLEAN NOT NULL,
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
 );
@@ -108,6 +119,12 @@ CREATE TABLE IF NOT EXISTS visualacuity
     l_eye_vision            INTEGER NOT NULL,
     r_eye_vision            INTEGER NOT NULL,
     additional_intervention TEXT,
+
+    sent_to_opto BOOLEAN NOT NULL,
+    referred_for_glasses BOOLEAN NOT NULL,
+    icope_eye_problem BOOLEAN NOT NULL,
+    icope_treated_for_diabetes_or_bp BOOLEAN NOT NULL,
+
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
 );
@@ -117,10 +134,17 @@ CREATE TABLE IF NOT EXISTS dental
     id                 INTEGER NOT NULL,                                 -- Use INTEGER to match the id type from admin
     vid                INTEGER NOT NULL,                                 -- Add vid to match the vid type from admin
     clean_teeth_freq   INTEGER NOT NULL CHECK (clean_teeth_freq BETWEEN 0 AND 7),
-    sugar_consume_freq INTEGER NOT NULL CHECK (sugar_consume_freq BETWEEN 0 AND 6),
-    past_year_decay    BOOLEAN NOT NULL,
-    brush_teeth_pain   BOOLEAN NOT NULL,
-    drink_other_water  BOOLEAN NOT NULL,
+    sugar_consume_freq TEXT NOT NULL,
+    bacterial_exposure BOOLEAN NOT NULL,
+    num_loss_from_tooth_decay INTEGER NOT NULL DEFAULT 0,
+    oral_symptoms BOOLEAN NOT NULL,
+    drink_other_water BOOLEAN NOT NULL,
+
+    risk_for_dental_carries TEXT NOT NULL,
+
+    icope_difficulty_chewing BOOLEAN NOT NULL,
+    icope_pain_in_mouth BOOLEAN NOT NULL,
+
     dental_notes       TEXT,
     referral_needed    BOOLEAN NOT NULL,
     referral_loc       TEXT,
@@ -168,15 +192,17 @@ CREATE TABLE IF NOT EXISTS dental
 
 CREATE TABLE IF NOT EXISTS fallrisk
 (
-    id                  INTEGER    NOT NULL,                             -- Use INTEGER to match the id type from admin
-    vid                 INTEGER    NOT NULL,                             -- Add vid to match the vid type from admin
-    fall_worries        VARCHAR(1) NOT NULL,                             -- How often do you worry about falling? (a, b, c, d)
-    fall_history        VARCHAR(1) NOT NULL,                             -- History of fall within past 12 months (a, b, c, d)
-    cognitive_status    VARCHAR(1) NOT NULL,                             -- Cognitive status (a, b, c, d)
-    continence_problems VARCHAR(1) NOT NULL,                             -- Continence problems (a, b, c, d, e)
-    safety_awareness    VARCHAR(1) NOT NULL,                             -- Safety awareness (a, b, c, d)
-    unsteadiness        VARCHAR(1) NOT NULL,                             -- Unsteadiness when standing, transferring and/or walking (a, b, c, d)
-    fall_risk_score     INTEGER    NOT NULL,                             -- Fall risk score
+    id           INTEGER       NOT NULL,                                 -- Use INTEGER to match the id type from admin
+    vid          INTEGER       NOT NULL,                                 -- Add vid to match the vid type from admin
+    side_to_side_balance INTEGER NOT NULL,
+    semi_tandem_balance INTEGER NOT NULL,
+    tandem_balance INTEGER NOT NULL,
+    gait_speed_test INTEGER NOT NULL,
+    chair_stand_test INTEGER NOT NULL,
+    fall_risk_score INTEGER NOT NULL,
+    icope_complete_chair_stands BOOLEAN NOT NULL,
+    icope_chair_stands_time BOOLEAN NOT NULL,
+                          
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
 );
@@ -268,13 +294,19 @@ VALUES ('S001', '2024-01-10', '1A', 'John Doe', '១២៣៤ ៥៦៧៨៩០
        ('S005A', '2024-01-10', '5C', 'Charlie Davis', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1982-01-10', 40, 'M', 'R1', '09876543', FALSE,
         NULL, NULL, FALSE);
 
-INSERT INTO pastmedicalhistory(id, vid, tuberculosis, diabetes, hypertension, hyperlipidemia, chronic_joint_pains,
-                               chronic_muscle_aches, sexually_transmitted_disease, specified_stds, others)
-VALUES (1, 1, TRUE, FALSE, TRUE, FALSE, FALSE, TRUE, TRUE, 'TRICHOMONAS', 'None'),
-       (2, 1, FALSE, TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, '', 'CHILDHOOD LEUKAEMIA'),
-       (3, 1, TRUE, FALSE, FALSE, FALSE, TRUE, TRUE, FALSE, '', ''),
-       (4, 1, FALSE, FALSE, TRUE, FALSE, TRUE, FALSE, TRUE, 'Syphilis', NULL),
-       (5, 1, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, '', '');
+INSERT INTO pastmedicalhistory
+  (id, vid,
+   cough, fever, blocked_nose, sore_throat, night_sweats, unintentional_weight_loss,
+   tuberculosis, tuberculosis_has_been_treated,
+   diabetes, hypertension, hyperlipidemia,
+   chronic_joint_pains, chronic_muscle_aches,
+   sexually_transmitted_disease, specified_stds, others)
+VALUES
+  (1, 1, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,  TRUE,  FALSE, FALSE, TRUE,  FALSE, FALSE, TRUE,  TRUE, 'TRICHOMONAS', 'None'),
+  (2, 1, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,  FALSE,  TRUE, TRUE,  TRUE,  FALSE, FALSE, FALSE, '', 'CHILDHOOD LEUKAEMIA'),
+  (3, 1, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,  TRUE,  FALSE, FALSE, FALSE, FALSE, TRUE,  TRUE,  FALSE, '', ''),
+  (4, 1, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,  FALSE, FALSE, TRUE,  FALSE, TRUE,  FALSE,  TRUE,  'Syphilis', NULL),
+  (5, 1, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,  FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, '','');
 
 INSERT INTO socialhistory (id, vid, past_smoking_history, no_of_years, current_smoking_history,
                            cigarettes_per_day, alcohol_history, how_regular)
@@ -285,36 +317,59 @@ VALUES (1, 1, TRUE, 15, FALSE, NULL, TRUE, 'A'),
        (5, 1, FALSE, NULL, FALSE, NULL, FALSE, NULL);
 
 INSERT INTO vitalstatistics (id, vid, temperature, spo2, systolic_bp1, diastolic_bp1, systolic_bp2, diastolic_bp2,
-                             avg_systolic_bp, avg_diastolic_bp, hr1, hr2, avg_hr, rand_blood_glucose_mmoll)
-VALUES (1, 1, 36.5, 98, 120, 80, 122, 78, 121, 79, 72, 71, 71.5, 5.4),
-       (2, 1, 37.0, 97, 130, 85, 128, 82, 129, 83, 68, 70, 69, 5.7),
-       (3, 1, 36.8, 99, 118, 78, 120, 76, 119, 77, 75, 76, 75.5, 5.6),
-       (4, 1, 36.7, 98, 125, 82, 124, 80, 124.5, 81, 70, 72, 71, 5.3);
+                             avg_systolic_bp, avg_diastolic_bp, hr1, hr2, avg_hr, rand_blood_glucose_mmoll, icope_high_bp)
+VALUES (1, 1, 36.5, 98, 120, 80, 122, 78, 121, 79, 72, 71, 71.5, 5.4, FALSE),
+       (2, 1, 37.0, 97, 130, 85, 128, 82, 129, 83, 68, 70, 69, 5.7, TRUE),
+       (3, 1, 36.8, 99, 118, 78, 120, 76, 119, 77, 75, 76, 75.5, 5.6, TRUE),
+       (4, 1, 36.7, 98, 125, 82, 124, 80, 124.5, 81, 70, 72, 71, 5.3, FALSE);
 
-INSERT INTO heightandweight (id, vid, height, weight, bmi, bmi_analysis, paeds_height, paeds_weight)
-VALUES (1, 1, 170, 70, 24.2, 'normal weight', 90, 80),
-       (2, 1, 165, 55, 20.2, 'normal weight', 95, 90),
-       (3, 1, 180, 85, 26.2, 'overweight', 80, 95);
+INSERT INTO heightandweight
+  (id, vid, height, weight, bmi, bmi_analysis, paeds_height, paeds_weight,
+   icope_lost_weight_past_months, icope_no_desire_to_eat)
+VALUES
+  (1, 1, 170, 70, 24.2, 'normal weight', 90, 80, FALSE, FALSE),
+  (2, 1, 165, 55, 20.2, 'normal weight', 95, 90, FALSE, FALSE),
+  (3, 1, 180, 85, 26.2, 'overweight',     80, 95, FALSE, FALSE);
 
-INSERT INTO visualacuity (id, vid, l_eye_vision, r_eye_vision, additional_intervention)
-VALUES (1, 1, 20, 20, 'VISUAL FIELD TEST REQUIRED'),
-       (2, 1, 15, 20, 'REFERRED TO BOC');
+INSERT INTO visualacuity
+  (id, vid, l_eye_vision, r_eye_vision, additional_intervention,
+   sent_to_opto, referred_for_glasses, icope_eye_problem, icope_treated_for_diabetes_or_bp)
+VALUES
+  (1, 1, 20, 20, 'VISUAL FIELD TEST REQUIRED', FALSE, FALSE, FALSE, FALSE),
+  (2, 1, 15, 20, 'REFERRED TO BOC',            FALSE, FALSE, FALSE, FALSE);
 
-INSERT INTO fallrisk (id, vid, fall_worries, fall_history, cognitive_status, continence_problems, safety_awareness,
-                      unsteadiness, fall_risk_score)
-VALUES (1, 1, 'a', 'a', 'b', 'e', 'd', 'c', 6),
-       (2, 1, 'b', 'd', 'd', 'c', 'b', 'a', 10);
+INSERT INTO fallrisk
+  (id, vid,
+   side_to_side_balance, semi_tandem_balance, tandem_balance,
+   gait_speed_test, chair_stand_test, fall_risk_score,
+   icope_complete_chair_stands, icope_chair_stands_time)
+VALUES
+  (1, 1, 1, 1, 2, 3, 4, 11, TRUE,  TRUE),
+  (2, 1, 0, 1, 1, 2, 0,  4, FALSE, FALSE);
 
-INSERT INTO dental (id, vid, clean_teeth_freq, sugar_consume_freq, past_year_decay, brush_teeth_pain, drink_other_water,
-                    dental_notes, referral_needed, referral_loc, tooth_11, tooth_21, tooth_22, tooth_35, tooth_47,
-                    tooth_48)
-VALUES (1, 1, 2, 3, TRUE, TRUE, FALSE, 'None', TRUE, 'Dentist',
-        TRUE, FALSE, TRUE, FALSE, TRUE, FALSE);
+-- First visit rows rewritten
+INSERT INTO dental
+  (id, vid,
+   clean_teeth_freq, sugar_consume_freq,
+   bacterial_exposure, oral_symptoms, drink_other_water,
+   risk_for_dental_carries, icope_difficulty_chewing, icope_pain_in_mouth,
+   dental_notes, referral_needed, referral_loc,
+   tooth_11, tooth_21, tooth_22, tooth_35, tooth_47, tooth_48)
+VALUES
+  (1, 1,
+   2, '2-3',
+   TRUE,  TRUE,  FALSE,
+   'Low Risk', FALSE, TRUE,
+   'None', TRUE, 'Dentist',
+   TRUE, FALSE, TRUE, FALSE, TRUE, FALSE),
 
-INSERT INTO dental (id, vid, clean_teeth_freq, sugar_consume_freq, past_year_decay, brush_teeth_pain, drink_other_water,
-                    dental_notes, referral_needed, referral_loc, tooth_15, tooth_28, tooth_33, tooth_41, tooth_48)
-VALUES (2, 1, 3, 4, FALSE, FALSE, TRUE, 'None', FALSE, NULL,
-        FALSE, FALSE, FALSE, FALSE, FALSE);
+  (2, 1,
+   3, '≥6',
+   FALSE, FALSE, TRUE,
+   'Medium RIsk',  FALSE, FALSE,
+   'None', FALSE, NULL,
+   FALSE, FALSE, FALSE, FALSE, FALSE, FALSE);
+
 
 INSERT INTO doctorsconsultation (id, vid, well, msk, cvs, respi, gu, git, eye, derm, others,
                                  consultation_notes, diagnosis, treatment, referral_needed,
@@ -361,10 +416,16 @@ VALUES (2, 'B009', '2023-10-03', 'Q125', 'Walter White', 'អាលីស ស្
     Add remaining categories for second visit for patient 1 and 2
  */
 
-INSERT INTO pastmedicalhistory(id, vid, tuberculosis, diabetes, hypertension, hyperlipidemia, chronic_joint_pains,
-                               chronic_muscle_aches, sexually_transmitted_disease, specified_stds, others)
-VALUES (1, 2, TRUE, FALSE, TRUE, FALSE, FALSE, TRUE, TRUE, 'TRICHOMONAS', 'None'),
-       (2, 2, FALSE, TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, '', 'CHILDHOOD LEUKAEMIA');
+INSERT INTO pastmedicalhistory
+  (id, vid,
+   cough, fever, blocked_nose, sore_throat, night_sweats, unintentional_weight_loss,
+   tuberculosis, tuberculosis_has_been_treated,
+   diabetes, hypertension, hyperlipidemia,
+   chronic_joint_pains, chronic_muscle_aches,
+   sexually_transmitted_disease, specified_stds, others)
+VALUES
+  (1, 2, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE,  FALSE, FALSE, TRUE,  FALSE, FALSE, TRUE,  TRUE, 'TRICHOMONAS', 'None'),
+  (2, 2, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE,  TRUE,  TRUE,  FALSE, FALSE, FALSE, '', 'CHILDHOOD LEUKAEMIA');
 
 INSERT INTO socialhistory (id, vid, past_smoking_history, no_of_years, current_smoking_history,
                            cigarettes_per_day, alcohol_history, how_regular)
@@ -372,17 +433,23 @@ VALUES (1, 2, TRUE, 15, FALSE, NULL, TRUE, 'A'),
        (2, 2, FALSE, NULL, TRUE, 10, TRUE, 'D');
 
 INSERT INTO vitalstatistics (id, vid, temperature, spo2, systolic_bp1, diastolic_bp1, systolic_bp2, diastolic_bp2,
-                             avg_systolic_bp, avg_diastolic_bp, hr1, hr2, avg_hr, rand_blood_glucose_mmoll)
-VALUES (1, 2, 36.5, 98, 120, 80, 122, 78, 121, 79, 72, 71, 71.5, 5.4),
-       (2, 2, 37.0, 97, 130, 85, 128, 82, 129, 83, 68, 70, 69, 5.7);
+                             avg_systolic_bp, avg_diastolic_bp, hr1, hr2, avg_hr, rand_blood_glucose_mmoll, icope_high_bp)
+VALUES (1, 2, 36.5, 98, 120, 80, 122, 78, 121, 79, 72, 71, 71.5, 5.4, TRUE),
+       (2, 2, 37.0, 97, 130, 85, 128, 82, 129, 83, 68, 70, 69, 5.7, FALSE);
 
-INSERT INTO heightandweight (id, vid, height, weight, bmi, bmi_analysis, paeds_height, paeds_weight)
-VALUES (1, 2, 170, 70, 24.2, 'normal weight', 90, 80),
-       (2, 2, 165, 55, 20.2, 'normal weight', 95, 90);
+INSERT INTO heightandweight
+  (id, vid, height, weight, bmi, bmi_analysis, paeds_height, paeds_weight,
+   icope_lost_weight_past_months, icope_no_desire_to_eat)
+VALUES
+  (1, 2, 170, 70, 24.2, 'normal weight', 90, 80, FALSE, FALSE),
+  (2, 2, 165, 55, 20.2, 'normal weight', 95, 90, FALSE, FALSE);
 
-INSERT INTO visualacuity (id, vid, l_eye_vision, r_eye_vision, additional_intervention)
-VALUES (1, 2, 20, 20, 'VISUAL FIELD TEST REQUIRED'),
-       (2, 2, 15, 20, 'REFERRED TO BOC');
+INSERT INTO visualacuity
+  (id, vid, l_eye_vision, r_eye_vision, additional_intervention,
+   sent_to_opto, referred_for_glasses, icope_eye_problem, icope_treated_for_diabetes_or_bp)
+VALUES
+  (1, 2, 20, 20, 'VISUAL FIELD TEST REQUIRED', FALSE, FALSE, FALSE, FALSE),
+  (2, 2, 15, 20, 'REFERRED TO BOC',            FALSE, FALSE, FALSE, FALSE);
 
 INSERT INTO doctorsconsultation (id, vid, well, msk, cvs, respi, gu, git, eye, derm, others,
                                  consultation_notes, diagnosis, treatment, referral_needed,

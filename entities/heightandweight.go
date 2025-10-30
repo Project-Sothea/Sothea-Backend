@@ -11,6 +11,9 @@ type HeightAndWeight struct {
 	BMIAnalysis *string  `json:"bmiAnalysis" binding:"required"`
 	PaedsHeight *float64 `json:"paedsHeight"`
 	PaedsWeight *float64 `json:"paedsWeight"`
+
+	IcopeLostWeightPastMonths *bool `json:"icopeLostWeightPastMonths" binding:"required"`
+	IcopeNoDesireToEat        *bool `json:"icopeNoDesireToEat" binding:"required"`
 	//AdminID      uint    `gorm:"uniqueIndex;not null"` // Foreign key referencing Admin's ID
 	//Admin        Admin
 }
@@ -31,5 +34,7 @@ func (haw HeightAndWeight) String() string {
 	result += fmt.Sprintf("BMI Analysis: %s\n", *haw.BMIAnalysis)
 	result += fmt.Sprintf("Paeds Height: %.2f\n", SafeDeref(haw.PaedsHeight))
 	result += fmt.Sprintf("Paeds Weight: %.2f\n", SafeDeref(haw.PaedsWeight))
+	result += fmt.Sprintf("Rapid Weight Lost: %t\n", SafeDeref(haw.IcopeLostWeightPastMonths))
+	result += fmt.Sprintf("No Desire to eat: %t\n", SafeDeref(haw.IcopeNoDesireToEat))
 	return result
 }
