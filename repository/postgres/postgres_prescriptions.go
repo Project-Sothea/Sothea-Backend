@@ -366,7 +366,7 @@ func (r *postgresPrescriptionRepository) AddLine(ctx context.Context, line *enti
 		line.ScheduleKind, line.EveryN, line.FrequencyPerSchedule, line.Duration).
 		Scan(&line.ID, &line.TotalToDispense, &line.IsPacked)
 	if err != nil {
-		return nil, err
+		return nil, mapPrescriptionSQLError(err)
 	}
 
 	// Return enriched line
@@ -437,7 +437,7 @@ func (r *postgresPrescriptionRepository) UpdateLine(ctx context.Context, line *e
 		line.ScheduleKind, line.EveryN, line.FrequencyPerSchedule, line.Duration).
 		Scan(&line.TotalToDispense)
 	if err != nil {
-		return nil, err
+		return nil, mapPrescriptionSQLError(err)
 	}
 
 	if own {

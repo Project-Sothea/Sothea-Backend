@@ -103,9 +103,56 @@ CREATE TRIGGER trg_lines_log
 AFTER INSERT OR UPDATE OR DELETE ON prescription_lines
 FOR EACH ROW EXECUTE FUNCTION audit_row();
 
+CREATE OR REPLACE FUNCTION ck_line_stock_possible(
+  p_presentation_id BIGINT,
+  p_required        INTEGER,
+  p_line_id         BIGINT  -- may be NULL on INSERT
+)
+RETURNS VOID
+LANGUAGE plpgsql AS $$
+DECLARE
+  allocated   INTEGER := 0;
+  need_extra  INTEGER;
+  available   INTEGER;
+BEGIN
+  -- Sum current allocations for this line (if any)
+  IF p_line_id IS NOT NULL THEN
+    SELECT COALESCE(SUM(pbi.quantity), 0)
+      INTO allocated
+      FROM prescription_batch_items pbi
+     WHERE pbi.line_id = p_line_id;
+  END IF;
+
+  -- Only the extra beyond what is already allocated must be available
+  need_extra := GREATEST(p_required - allocated, 0);
+
+  IF need_extra = 0 THEN
+    RETURN; -- no new stock required
+  END IF;
+
+  -- Total available stock for the presentation
+  SELECT COALESCE(SUM(bl.quantity), 0)
+    INTO available
+    FROM batch_locations bl
+    JOIN drug_batches b ON b.id = bl.batch_id
+   WHERE b.presentation_id = p_presentation_id;
+
+  IF available < need_extra THEN
+    RAISE EXCEPTION 'insufficient stock: total needed %, available %', p_required, available + need_extra
+      USING ERRCODE   = '23514',                 -- check_violation
+            CONSTRAINT = 'ck_insufficient_stock',
+            DETAIL     = json_build_object(
+                            'presentation_id', p_presentation_id,
+                            'total_required', p_required,
+                            'total_available', available + allocated 
+                          )::text;
+  END IF;
+END;
+$$;
+
 -- PURE calculator: returns how many to pick in the *dispense unit*
 -- Uses your new schedule fields.
-CREATE OR REPLACE FUNCTION compute_total_to_dispense_pure_v2(
+CREATE OR REPLACE FUNCTION compute_total_to_dispense_pure(
   dose_amount INT,
   dose_unit TEXT,
   schedule_kind TEXT,
@@ -193,6 +240,9 @@ CREATE OR REPLACE FUNCTION trg_set_total_to_dispense()
 RETURNS TRIGGER AS $$
 DECLARE
   dp RECORD;
+  required_qty INTEGER;
+  available_qty INTEGER;
+  must_check   BOOLEAN := (TG_OP = 'INSERT');
 BEGIN
   SELECT dispense_unit, strength_num, strength_unit_num,
          strength_den, strength_unit_den,
@@ -205,13 +255,32 @@ BEGIN
     RAISE EXCEPTION 'presentation % not found for line', NEW.presentation_id;
   END IF;
 
-  NEW.total_to_dispense := compute_total_to_dispense_pure_v2(
+  NEW.total_to_dispense := compute_total_to_dispense_pure(
     NEW.dose_amount, NEW.dose_unit,
     NEW.schedule_kind, NEW.every_n, NEW.frequency_per_schedule, NEW.duration,
     dp.dispense_unit, dp.strength_num, dp.strength_unit_num,
     dp.strength_den, dp.strength_unit_den,
     dp.piece_content_amount, dp.piece_content_unit
   );
+  required_qty := NEW.total_to_dispense;
+
+  -- Recheck for update when qty-driving fields change
+  IF TG_OP = 'UPDATE' THEN
+    must_check := must_check OR (
+      NEW.presentation_id        IS DISTINCT FROM OLD.presentation_id OR
+      NEW.dose_amount            IS DISTINCT FROM OLD.dose_amount OR
+      NEW.dose_unit              IS DISTINCT FROM OLD.dose_unit OR
+      NEW.schedule_kind          IS DISTINCT FROM OLD.schedule_kind OR
+      NEW.every_n                IS DISTINCT FROM OLD.every_n OR
+      NEW.frequency_per_schedule IS DISTINCT FROM OLD.frequency_per_schedule OR
+      NEW.duration               IS DISTINCT FROM OLD.duration
+    );
+  END IF;
+  
+  IF must_check THEN
+    PERFORM ck_line_stock_possible(NEW.presentation_id, NEW.total_to_dispense, NEW.id);
+  END IF;
+
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
