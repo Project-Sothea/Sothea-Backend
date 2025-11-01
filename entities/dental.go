@@ -16,8 +16,8 @@ type Dental struct {
 	DrinkOtherWater       *bool   `json:"drinkOtherWater" binding:"required"`
 
 	RiskForDentalCarries   *string `json:"riskForDentalCarries" binding:"required"`
-	IcopeDifficultyChewing *bool   `json:"icopeDifficultyChewing" binding:"required"`
-	IcopePainInMouth       *bool   `json:"icopePainInMouth" binding:"required"`
+	IcopeDifficultyChewing *bool   `json:"icopeDifficultyChewing"`
+	IcopePainInMouth       *bool   `json:"icopePainInMouth"`
 
 	DentalNotes    *string `json:"dentalNotes"`
 	ReferralNeeded *bool   `json:"referralNeeded" binding:"required"`
@@ -76,8 +76,8 @@ func (fr Dental) String() string {
 
 	result += fmt.Sprintf("RiskForDentalCarry: %s\n", *fr.RiskForDentalCarries)
 
-	result += fmt.Sprintf("IcopeDifficultyChewing: %t\n", *fr.IcopeDifficultyChewing)
-	result += fmt.Sprintf("IcopePainInMouth: %t\n", *fr.IcopePainInMouth)
+	result += fmt.Sprintf("IcopeDifficultyChewing: %t\n", SafeDeref(fr.IcopeDifficultyChewing))
+	result += fmt.Sprintf("IcopePainInMouth: %t\n", SafeDeref(fr.IcopePainInMouth))
 
 	result += fmt.Sprintf("DentalNotes: %s\n", SafeDeref(fr.DentalNotes))
 	result += fmt.Sprintf("ReferralNeeded: %t\n", *fr.ReferralNeeded)

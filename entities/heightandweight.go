@@ -12,8 +12,8 @@ type HeightAndWeight struct {
 	PaedsHeight *float64 `json:"paedsHeight"`
 	PaedsWeight *float64 `json:"paedsWeight"`
 
-	IcopeLostWeightPastMonths *bool `json:"icopeLostWeightPastMonths" binding:"required"`
-	IcopeNoDesireToEat        *bool `json:"icopeNoDesireToEat" binding:"required"`
+	IcopeLostWeightPastMonths *bool `json:"icopeLostWeightPastMonths"`
+	IcopeNoDesireToEat        *bool `json:"icopeNoDesireToEat"`
 	//AdminID      uint    `gorm:"uniqueIndex;not null"` // Foreign key referencing Admin's ID
 	//Admin        Admin
 }

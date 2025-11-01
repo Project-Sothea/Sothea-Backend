@@ -17,7 +17,7 @@ type VitalStatistics struct {
 	HR2                     *float64 `json:"hr2" binding:"required"`
 	AverageHR               *float64 `json:"averageHR" binding:"required"`
 	RandomBloodGlucoseMmolL *float64 `json:"randomBloodGlucoseMmolL" binding:"required"`
-	IcopeHighBp             *bool    `json:"icopeHighBp" binding:"required"`
+	IcopeHighBp             *bool    `json:"icopeHighBp"`
 	//AdminID                  uint    `gorm:"uniqueIndex;not null"` // Foreign key referencing Admin's ID
 	//Admin                    Admin
 }
@@ -44,6 +44,6 @@ func (vs VitalStatistics) String() string {
 	result += fmt.Sprintf("HR2: %.1f\n", *vs.HR2)
 	result += fmt.Sprintf("AverageHR: %.1f\n", *vs.AverageHR)
 	result += fmt.Sprintf("RandomBloodGlucoseMmolL: %.1f\n", *vs.RandomBloodGlucoseMmolL)
-	result += fmt.Sprintf("IcopeHighBp: %t\n", *vs.IcopeHighBp)
+	result += fmt.Sprintf("IcopeHighBp: %t\n", SafeDeref(vs.IcopeHighBp))
 	return result
 }

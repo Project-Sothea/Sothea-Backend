@@ -15,8 +15,8 @@ type FallRisk struct {
 	ChairStandTest    *int32 `json:"chairStandTest" binding:"required"`
 	FallRiskScore     *int32 `json:"fallRiskScore" binding:"required"`
 
-	IcopeCompleteChairStands *bool `json:"icopeCompleteChairStands" binding:"required"`
-	IcopeChairStandsTime     *bool `json:"icopeChairStandsTime" binding:"required"`
+	IcopeCompleteChairStands *bool `json:"icopeCompleteChairStands"`
+	IcopeChairStandsTime     *bool `json:"icopeChairStandsTime"`
 }
 
 // TableName specifies the table name for the FallRisk model.
@@ -35,7 +35,7 @@ func (fr FallRisk) String() string {
 	result += fmt.Sprintf("GaitSpeedTest: %d\n", *fr.GaitSpeedTest)
 	result += fmt.Sprintf("ChairStandTest: %d\n", *fr.ChairStandTest)
 	result += fmt.Sprintf("FallRiskScore: %d\n", *fr.FallRiskScore)
-	result += fmt.Sprintf("IcopeCompleteChairStands: %t\n", *fr.IcopeCompleteChairStands)
-	result += fmt.Sprintf("IcopeChairStandsTime: %t\n", *fr.IcopeChairStandsTime)
+	result += fmt.Sprintf("IcopeCompleteChairStands: %t\n", SafeDeref(fr.IcopeCompleteChairStands))
+	result += fmt.Sprintf("IcopeChairStandsTime: %t\n", SafeDeref(fr.IcopeChairStandsTime))
 	return result
 }

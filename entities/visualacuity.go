@@ -12,8 +12,8 @@ type VisualAcuity struct {
 	AdditionalIntervention      *string `json:"additionalIntervention"`
 	SentToOpto                  *bool   `json:"sentToOpto" binding:"required"`
 	ReferredForGlasses          *bool   `json:"referredForGlasses" binding:"required"`
-	IcopeEyeProblem             *bool   `json:"icopeEyeProblem" binding:"required"`
-	IcopeTreatedForDiabetesOrBp *bool   `json:"icopeTreatedForDiabetesOrBp" binding:"required"`
+	IcopeEyeProblem             *bool   `json:"icopeEyeProblem"`
+	IcopeTreatedForDiabetesOrBp *bool   `json:"icopeTreatedForDiabetesOrBp"`
 	//AdminID              uint   `gorm:"uniqueIndex;not null"` // Foreign key referencing Admin's ID
 	//Admin                Admin
 }
@@ -33,8 +33,8 @@ func (va VisualAcuity) String() string {
 
 	result += fmt.Sprintf("Sent to Optometrist: %t\n", *va.SentToOpto)
 	result += fmt.Sprintf("Referred For Glasses: %t\n", *va.ReferredForGlasses)
-	result += fmt.Sprintf("Any Eye Problem (ICOPE): %t\n", *va.IcopeEyeProblem)
-	result += fmt.Sprintf("Treated For Diabetes/BP (ICOPE): %t\n", *va.IcopeTreatedForDiabetesOrBp)
+	result += fmt.Sprintf("Any Eye Problem (ICOPE): %t\n", SafeDeref(va.IcopeEyeProblem))
+	result += fmt.Sprintf("Treated For Diabetes/BP (ICOPE): %t\n", SafeDeref(va.IcopeTreatedForDiabetesOrBp))
 
 	result += fmt.Sprintf("Additional Intervention: %s\n", SafeDeref(va.AdditionalIntervention))
 	return result

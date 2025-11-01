@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS vitalstatistics
     hr2                       NUMERIC(5, 1) NOT NULL,
     avg_hr                    NUMERIC(5, 1) NOT NULL,
     rand_blood_glucose_mmoll  NUMERIC(5, 1) NOT NULL,
-    icope_high_bp             BOOLEAN NOT NULL,
+    icope_high_bp             BOOLEAN,
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
 );
@@ -106,8 +106,8 @@ CREATE TABLE IF NOT EXISTS heightandweight
     paeds_height NUMERIC(5, 1),
     paeds_weight NUMERIC(5, 1),
 
-    icope_lost_weight_past_months BOOLEAN NOT NULL,
-    icope_no_desire_to_eat BOOLEAN NOT NULL,
+    icope_lost_weight_past_months BOOLEAN,
+    icope_no_desire_to_eat BOOLEAN,
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
 );
@@ -122,8 +122,8 @@ CREATE TABLE IF NOT EXISTS visualacuity
 
     sent_to_opto BOOLEAN NOT NULL,
     referred_for_glasses BOOLEAN NOT NULL,
-    icope_eye_problem BOOLEAN NOT NULL,
-    icope_treated_for_diabetes_or_bp BOOLEAN NOT NULL,
+    icope_eye_problem BOOLEAN,
+    icope_treated_for_diabetes_or_bp BOOLEAN,
 
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
@@ -142,8 +142,8 @@ CREATE TABLE IF NOT EXISTS dental
 
     risk_for_dental_carries TEXT NOT NULL,
 
-    icope_difficulty_chewing BOOLEAN NOT NULL,
-    icope_pain_in_mouth BOOLEAN NOT NULL,
+    icope_difficulty_chewing BOOLEAN,
+    icope_pain_in_mouth BOOLEAN,
 
     dental_notes       TEXT,
     referral_needed    BOOLEAN NOT NULL,
@@ -200,8 +200,8 @@ CREATE TABLE IF NOT EXISTS fallrisk
     gait_speed_test INTEGER NOT NULL,
     chair_stand_test INTEGER NOT NULL,
     fall_risk_score INTEGER NOT NULL,
-    icope_complete_chair_stands BOOLEAN NOT NULL,
-    icope_chair_stands_time BOOLEAN NOT NULL,
+    icope_complete_chair_stands BOOLEAN,
+    icope_chair_stands_time BOOLEAN,
                           
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
