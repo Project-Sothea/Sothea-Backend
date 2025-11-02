@@ -5,13 +5,14 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"log"
+	"os"
+	"time"
+
 	"github.com/jieqiboh/sothea_backend/entities"
 	"github.com/jieqiboh/sothea_backend/util"
 	"github.com/joho/sqltocsv"
 	_ "github.com/lib/pq"
-	"log"
-	"os"
-	"time"
 )
 
 type postgresPatientRepository struct {
@@ -67,7 +68,17 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 	err = rows.Scan(
 		&pastmedicalhistory.ID,
 		&pastmedicalhistory.VID,
+
+		&pastmedicalhistory.Cough,
+		&pastmedicalhistory.Fever,
+		&pastmedicalhistory.BlockedNose,
+		&pastmedicalhistory.SoreThroat,
+		&pastmedicalhistory.NightSweats,
+		&pastmedicalhistory.UnintentionalWeightLoss,
+
 		&pastmedicalhistory.Tuberculosis,
+		&pastmedicalhistory.TuberculosisHasBeenTreated,
+
 		&pastmedicalhistory.Diabetes,
 		&pastmedicalhistory.Hypertension,
 		&pastmedicalhistory.Hyperlipidemia,
@@ -77,7 +88,7 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 		&pastmedicalhistory.SpecifiedSTDs,
 		&pastmedicalhistory.Others,
 	)
-	if errors.Is(sql.ErrNoRows, err) { // no pastmedicalhistory found
+	if errors.Is(err, sql.ErrNoRows) { // no pastmedicalhistory found
 		pastmedicalhistory = nil
 	} else if err != nil { // unknown error
 		return nil, err
@@ -95,7 +106,7 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 		&socialhistory.AlcoholHistory,
 		&socialhistory.HowRegular,
 	)
-	if errors.Is(sql.ErrNoRows, err) { // no socialhistory found
+	if errors.Is(err, sql.ErrNoRows) { // no socialhistory found
 		socialhistory = nil
 	} else if err != nil { // unknown error
 		return nil, err
@@ -118,8 +129,9 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 		&vitalstatistics.HR2,
 		&vitalstatistics.AverageHR,
 		&vitalstatistics.RandomBloodGlucoseMmolL,
+		&vitalstatistics.IcopeHighBp,
 	)
-	if errors.Is(sql.ErrNoRows, err) { // no vitalstatistics found
+	if errors.Is(err, sql.ErrNoRows) { // no vitalstatistics found
 		vitalstatistics = nil
 	} else if err != nil { // unknown error
 		return nil, err
@@ -136,8 +148,10 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 		&heightandweight.BMIAnalysis,
 		&heightandweight.PaedsHeight,
 		&heightandweight.PaedsWeight,
+		&heightandweight.IcopeLostWeightPastMonths,
+		&heightandweight.IcopeNoDesireToEat,
 	)
-	if errors.Is(sql.ErrNoRows, err) { // no heightandweight found
+	if errors.Is(err, sql.ErrNoRows) { // no heightandweight found
 		heightandweight = nil
 	} else if err != nil { // unknown error
 		return nil, err
@@ -151,8 +165,12 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 		&visualacuity.LEyeVision,
 		&visualacuity.REyeVision,
 		&visualacuity.AdditionalIntervention,
+		&visualacuity.SentToOpto,
+		&visualacuity.ReferredForGlasses,
+		&visualacuity.IcopeEyeProblem,
+		&visualacuity.IcopeTreatedForDiabetesOrBp,
 	)
-	if errors.Is(sql.ErrNoRows, err) { // no visualacuity found
+	if errors.Is(err, sql.ErrNoRows) { // no visualacuity found
 		visualacuity = nil
 	} else if err != nil { // unknown error
 		return nil, err
@@ -163,15 +181,16 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 	err = rows.Scan(
 		&fallrisk.ID,
 		&fallrisk.VID,
-		&fallrisk.FallWorries,
-		&fallrisk.FallHistory,
-		&fallrisk.CognitiveStatus,
-		&fallrisk.ContinenceProblems,
-		&fallrisk.SafetyAwareness,
-		&fallrisk.Unsteadiness,
+		&fallrisk.SideToSideBalance,
+		&fallrisk.SemiTandemBalance,
+		&fallrisk.TandemBalance,
+		&fallrisk.GaitSpeedTest,
+		&fallrisk.ChairStandTest,
 		&fallrisk.FallRiskScore,
+		&fallrisk.IcopeCompleteChairStands,
+		&fallrisk.IcopeChairStandsTime,
 	)
-	if errors.Is(sql.ErrNoRows, err) { // no fallrisk found
+	if errors.Is(err, sql.ErrNoRows) { // no fallrisk found
 		fallrisk = nil
 	} else if err != nil { // unknown error
 		return nil, err
@@ -184,9 +203,13 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 		&dental.VID,
 		&dental.CleanTeethFreq,
 		&dental.SugarConsumeFreq,
-		&dental.PastYearDecay,
-		&dental.BrushTeethPain,
+		&dental.BacterialExposure,
+		&dental.NumLossFromToothDecay,
+		&dental.OralSymptoms,
 		&dental.DrinkOtherWater,
+		&dental.RiskForDentalCarries,
+		&dental.IcopeDifficultyChewing,
+		&dental.IcopePainInMouth,
 		&dental.DentalNotes,
 		&dental.ReferralNeeded,
 		&dental.ReferralLoc,
@@ -223,7 +246,7 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 		&dental.Tooth47,
 		&dental.Tooth48,
 	)
-	if errors.Is(sql.ErrNoRows, err) { // no dental found
+	if errors.Is(err, sql.ErrNoRows) { // no dental found
 		dental = nil
 	} else if err != nil { // unknown error
 		return nil, err
@@ -244,7 +267,7 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 		&physiotherapy.AnxiousLowMood,
 		&physiotherapy.MedicationManageSymptoms,
 	)
-	if errors.Is(sql.ErrNoRows, err) { // no physiotherapy found
+	if errors.Is(err, sql.ErrNoRows) { // no physiotherapy found
 		physiotherapy = nil
 	} else if err != nil { // unknown error
 		return nil, err
@@ -271,7 +294,7 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 		&doctorsconsultation.ReferralLoc,
 		&doctorsconsultation.Remarks,
 	)
-	if errors.Is(sql.ErrNoRows, err) { // no doctorsconsultation found
+	if errors.Is(err, sql.ErrNoRows) { // no doctorsconsultation found
 		doctorsconsultation = nil
 	} else if err != nil { // unknown error
 		return nil, err
@@ -347,7 +370,7 @@ func (p *postgresPatientRepository) CreatePatientVisit(ctx context.Context, id i
 	doesPatientExist, err := p.checkPatientExists(ctx, id)
 	if err != nil { // query error
 		return -1, err
-	} else if doesPatientExist == false { // no query error, and patient doesn't exist
+	} else if !doesPatientExist { // no query error, and patient doesn't exist
 		return -1, entities.ErrPatientNotFound
 	}
 
@@ -414,6 +437,10 @@ func (p *postgresPatientRepository) DeletePatientVisit(ctx context.Context, id i
 	if err != nil {
 		return err
 	}
+	_, err = tx.Exec("DELETE FROM prescriptions WHERE prescriptions.id = $1 AND prescriptions.vid = $2;", id, vid)
+	if err != nil {
+		return err
+	}
 	_, err = tx.Exec("DELETE FROM admin WHERE id = $1 AND vid = $2", id, vid)
 	if err != nil {
 		return err
@@ -442,7 +469,7 @@ func (p *postgresPatientRepository) UpdatePatientVisit(ctx context.Context, id i
 	doesPatientVisitExist, err := p.checkPatientVisitExists(ctx, id, vid)
 	if err != nil {
 		return err
-	} else if doesPatientVisitExist == false {
+	} else if !doesPatientVisitExist {
 		return entities.ErrPatientVisitNotFound
 	}
 
@@ -467,22 +494,37 @@ func (p *postgresPatientRepository) UpdatePatientVisit(ctx context.Context, id i
 	}
 	if pmh != nil { // Update pastmedicalhistory, use insert into on conflict update because not it isn't guaranteed to exist
 		_, err = tx.ExecContext(ctx, `
-		INSERT INTO pastmedicalhistory (id, vid, tuberculosis, diabetes, hypertension, hyperlipidemia, chronic_joint_pains,
-										 chronic_muscle_aches, sexually_transmitted_disease, specified_stds, others) 
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
+		INSERT INTO pastmedicalhistory (
+			id, vid,
+			cough, fever, blocked_nose, sore_throat, night_sweats, unintentional_weight_loss,
+			tuberculosis, tuberculosis_has_been_treated,
+			diabetes, hypertension, hyperlipidemia, chronic_joint_pains,
+			chronic_muscle_aches, sexually_transmitted_disease, specified_stds, others) 
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) 
 		ON CONFLICT (id, vid) DO UPDATE SET
-			tuberculosis = $3, 
-			diabetes = $4,
-			hypertension = $5,
-			hyperlipidemia = $6,
-			chronic_joint_pains = $7,
-			chronic_muscle_aches = $8,
-			sexually_transmitted_disease = $9,
-			specified_stds = $10,
-			others = $11
-		`, id, vid, pmh.Tuberculosis, pmh.Diabetes, pmh.Hypertension, pmh.Hyperlipidemia,
-			pmh.ChronicJointPains, pmh.ChronicMuscleAches, pmh.SexuallyTransmittedDisease,
-			pmh.SpecifiedSTDs, pmh.Others)
+			cough = $3, 
+			fever = $4,
+			blocked_nose = $5,
+			sore_throat = $6,
+			night_sweats = $7,
+			unintentional_weight_loss = $8,
+			tuberculosis = $9,
+			tuberculosis_has_been_treated = $10,
+			diabetes = $11,
+			hypertension = $12,
+			hyperlipidemia = $13,
+			chronic_joint_pains = $14,
+			chronic_muscle_aches = $15,
+			sexually_transmitted_disease = $16,
+			specified_stds = $17,
+			others = $18
+		`,
+			id, vid,
+			pmh.Cough, pmh.Fever, pmh.BlockedNose, pmh.SoreThroat, pmh.NightSweats, pmh.UnintentionalWeightLoss,
+			pmh.Tuberculosis, pmh.TuberculosisHasBeenTreated,
+			pmh.Diabetes, pmh.Hypertension, pmh.Hyperlipidemia, pmh.ChronicJointPains,
+			pmh.ChronicMuscleAches, pmh.SexuallyTransmittedDisease, pmh.SpecifiedSTDs, pmh.Others,
+		)
 		if err != nil {
 			return err
 		}
@@ -508,13 +550,17 @@ func (p *postgresPatientRepository) UpdatePatientVisit(ctx context.Context, id i
 	}
 	if vs != nil {
 		_, err = tx.ExecContext(ctx, `
-		INSERT INTO vitalstatistics (id, vid, temperature, spO2, systolic_bp1, diastolic_bp1, systolic_bp2, diastolic_bp2, 
-		avg_systolic_bp, avg_diastolic_bp, hr1, hr2, avg_hr, rand_blood_glucose_mmoll) 
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) 
+		INSERT INTO vitalstatistics (
+			id, vid,
+			temperature, spO2, systolic_bp1, diastolic_bp1, systolic_bp2, diastolic_bp2, 
+			avg_systolic_bp, avg_diastolic_bp, hr1, hr2, avg_hr, rand_blood_glucose_mmoll,
+			icope_high_bp
+		) 
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) 
 		ON CONFLICT (id, vid) DO UPDATE SET
 			temperature = $3,
 			spO2 = $4,
-			systolic_bp1 = $4,
+			systolic_bp1 = $5,
 			diastolic_bp1 = $6,
 			systolic_bp2 = $7,
 			diastolic_bp2 = $8,
@@ -523,9 +569,14 @@ func (p *postgresPatientRepository) UpdatePatientVisit(ctx context.Context, id i
 			hr1 = $11,
 			hr2 = $12,
 			avg_hr = $13,
-			rand_blood_glucose_mmoll = $14
-		`, id, vid, vs.Temperature, vs.SpO2, vs.SystolicBP1, vs.DiastolicBP1, vs.SystolicBP2, vs.DiastolicBP2,
-			vs.AverageSystolicBP, vs.AverageDiastolicBP, vs.HR1, vs.HR2, vs.AverageHR, vs.RandomBloodGlucoseMmolL)
+			rand_blood_glucose_mmoll = $14,
+			icope_high_bp = $15
+		`,
+			id, vid,
+			vs.Temperature, vs.SpO2, vs.SystolicBP1, vs.DiastolicBP1, vs.SystolicBP2, vs.DiastolicBP2,
+			vs.AverageSystolicBP, vs.AverageDiastolicBP, vs.HR1, vs.HR2, vs.AverageHR, vs.RandomBloodGlucoseMmolL,
+			vs.IcopeHighBp,
+		)
 
 		if err != nil {
 			return err
@@ -533,16 +584,22 @@ func (p *postgresPatientRepository) UpdatePatientVisit(ctx context.Context, id i
 	}
 	if haw != nil {
 		_, err = tx.ExecContext(ctx, `
-		INSERT INTO heightandweight (id, vid, height, weight, bmi, bmi_analysis, paeds_height, paeds_weight) 
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
+		INSERT INTO heightandweight (
+			id, vid,
+			height, weight, bmi, bmi_analysis, paeds_height, paeds_weight,
+			icope_lost_weight_past_months, icope_no_desire_to_eat
+		) 
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
 		ON CONFLICT (id, vid) DO UPDATE SET
 			height = $3,
 			weight = $4,
 			bmi = $5,
 			bmi_analysis = $6,
 			paeds_height = $7,
-			paeds_weight = $8
-		`, id, vid, haw.Height, haw.Weight, haw.BMI, haw.BMIAnalysis, haw.PaedsHeight, haw.PaedsWeight)
+			paeds_weight = $8,
+			icope_lost_weight_past_months = $9,
+			icope_no_desire_to_eat = $10
+		`, id, vid, haw.Height, haw.Weight, haw.BMI, haw.BMIAnalysis, haw.PaedsHeight, haw.PaedsWeight, haw.IcopeLostWeightPastMonths, haw.IcopeNoDesireToEat)
 
 		if err != nil {
 			return err
@@ -550,13 +607,23 @@ func (p *postgresPatientRepository) UpdatePatientVisit(ctx context.Context, id i
 	}
 	if va != nil {
 		_, err = tx.ExecContext(ctx, `
-		INSERT INTO visualacuity (id, vid, l_eye_vision, r_eye_vision, additional_intervention) 
-		VALUES ($1, $2, $3, $4, $5) 
+		INSERT INTO visualacuity (
+			id, vid,
+			l_eye_vision, r_eye_vision, additional_intervention,
+			sent_to_opto, referred_for_glasses,
+			icope_eye_problem, icope_treated_for_diabetes_or_bp
+		) 
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
 		ON CONFLICT (id, vid) DO UPDATE SET
 			l_eye_vision = $3,
 			r_eye_vision = $4,
-			additional_intervention = $5
-		`, id, vid, va.LEyeVision, va.REyeVision, va.AdditionalIntervention)
+			additional_intervention = $5,
+			sent_to_opto = $6,
+			referred_for_glasses = $7,
+			icope_eye_problem = $8,
+			icope_treated_for_diabetes_or_bp = $9
+		`, id, vid, va.LEyeVision, va.REyeVision, va.AdditionalIntervention,
+			va.SentToOpto, va.ReferredForGlasses, va.IcopeEyeProblem, va.IcopeTreatedForDiabetesOrBp)
 
 		if err != nil {
 			return err
@@ -564,17 +631,31 @@ func (p *postgresPatientRepository) UpdatePatientVisit(ctx context.Context, id i
 	}
 	if fr != nil {
 		_, err = tx.ExecContext(ctx, `
-		INSERT INTO fallrisk (id, vid, fall_worries, fall_history, cognitive_status, continence_problems, safety_awareness, unsteadiness, fall_risk_score) 
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+		INSERT INTO fallrisk (
+			id, vid,
+			side_to_side_balance, semi_tandem_balance, tandem_balance,
+			gait_speed_test, chair_stand_test,
+			fall_risk_score,
+			icope_complete_chair_stands, icope_chair_stands_time
+		) 
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
 		ON CONFLICT (id, vid) DO UPDATE SET
-		    fall_worries = $3,
-		    fall_history = $4,
-			cognitive_status = $5,
-			continence_problems = $6,
-			safety_awareness= $7,
-			unsteadiness = $8,
-			fall_risk_score = $9
-		`, id, vid, fr.FallWorries, fr.FallHistory, fr.CognitiveStatus, fr.ContinenceProblems, fr.SafetyAwareness, fr.Unsteadiness, fr.FallRiskScore)
+		    side_to_side_balance = $3,
+		    semi_tandem_balance = $4,
+			tandem_balance = $5,
+			gait_speed_test = $6,
+			chair_stand_test = $7,
+			fall_risk_score= $8,
+			icope_complete_chair_stands = $9,
+			icope_chair_stands_time = $10
+		`,
+			id, vid,
+			fr.SideToSideBalance, fr.SemiTandemBalance, fr.TandemBalance,
+			fr.GaitSpeedTest, fr.ChairStandTest,
+			fr.FallRiskScore,
+			fr.IcopeCompleteChairStands,
+			fr.IcopeChairStandsTime,
+		)
 
 		if err != nil {
 			return err
@@ -582,54 +663,77 @@ func (p *postgresPatientRepository) UpdatePatientVisit(ctx context.Context, id i
 	}
 	if d != nil {
 		_, err = tx.ExecContext(ctx, `
-		INSERT INTO dental (id, vid, clean_teeth_freq, sugar_consume_freq, past_year_decay, brush_teeth_pain, drink_other_water, 
-		dental_notes, referral_needed, referral_loc, tooth_11, tooth_12, tooth_13, tooth_14, tooth_15, tooth_16, tooth_17, tooth_18, 
-		tooth_21, tooth_22, tooth_23, tooth_24, tooth_25, tooth_26, tooth_27, tooth_28, tooth_31, tooth_32, tooth_33, tooth_34, tooth_35, 
-		tooth_36, tooth_37, tooth_38, tooth_41, tooth_42, tooth_43, tooth_44, tooth_45, tooth_46, tooth_47, tooth_48) 
+		INSERT INTO dental (
+			id, vid,
+			clean_teeth_freq, sugar_consume_freq, bacterial_exposure, num_loss_from_tooth_decay, oral_symptoms, drink_other_water,
+			risk_for_dental_carries,
+			icope_difficulty_chewing, icope_pain_in_mouth,
+			dental_notes, referral_needed, referral_loc,
+			tooth_11, tooth_12, tooth_13, tooth_14, tooth_15, tooth_16, tooth_17, tooth_18, 
+			tooth_21, tooth_22, tooth_23, tooth_24, tooth_25, tooth_26, tooth_27, tooth_28, tooth_31, tooth_32, tooth_33, tooth_34, tooth_35, 
+			tooth_36, tooth_37, tooth_38, tooth_41, tooth_42, tooth_43, tooth_44, tooth_45, tooth_46, tooth_47, tooth_48
+		) 
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, 
-		$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42) 
+		$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42,$43, $44, $45, $46) 
 		ON CONFLICT (id, vid) DO UPDATE SET
 			clean_teeth_freq = $3,
 			sugar_consume_freq = $4,
-			past_year_decay = $5,
-			brush_teeth_pain = $6,
-			drink_other_water = $7,
-			dental_notes = $8,
-			referral_needed = $9,
-			referral_loc = $10,
-			tooth_11 = $11,
-			tooth_12 = $12,
-			tooth_13 = $13,
-			tooth_14 = $14,
-			tooth_15 = $15,
-			tooth_16 = $16,
-			tooth_17 = $17,
-			tooth_18 = $18,
-			tooth_21 = $19,
-			tooth_22 = $20,
-			tooth_23 = $21,
-			tooth_24 = $22,
-			tooth_25 = $23,
-			tooth_26 = $24,
-			tooth_27 = $25,
-			tooth_28 = $26,
-			tooth_31 = $27,
-			tooth_32 = $28,
-			tooth_33 = $29,
-			tooth_34 = $30,
-			tooth_35 = $31,
-			tooth_36 = $32,
-			tooth_37 = $33,
-			tooth_38 = $34,
-			tooth_41 = $35,
-			tooth_42 = $36,
-			tooth_43 = $37,
-			tooth_44 = $38,
-			tooth_45 = $39,
-			tooth_46 = $40,
-			tooth_47 = $41,
-			tooth_48 = $42
-		`, id, vid, d.CleanTeethFreq, d.SugarConsumeFreq, d.PastYearDecay, d.BrushTeethPain, d.DrinkOtherWater, d.DentalNotes, d.ReferralNeeded, d.ReferralLoc, d.Tooth11, d.Tooth12, d.Tooth13, d.Tooth14, d.Tooth15, d.Tooth16, d.Tooth17, d.Tooth18, d.Tooth21, d.Tooth22, d.Tooth23, d.Tooth24, d.Tooth25, d.Tooth26, d.Tooth27, d.Tooth28, d.Tooth31, d.Tooth32, d.Tooth33, d.Tooth34, d.Tooth35, d.Tooth36, d.Tooth37, d.Tooth38, d.Tooth41, d.Tooth42, d.Tooth43, d.Tooth44, d.Tooth45, d.Tooth46, d.Tooth47, d.Tooth48)
+			bacterial_exposure = $5,
+			num_loss_from_tooth_decay = $6,
+			oral_symptoms =  $7,
+			drink_other_water = $8,
+			risk_for_dental_carries = $9,
+			icope_difficulty_chewing = $10,
+			icope_pain_in_mouth = $11,
+			dental_notes = $12,
+			referral_needed = $13,
+			referral_loc = $14,
+			tooth_11 = $15,
+			tooth_12 = $16,
+			tooth_13 = $17,
+			tooth_14 = $18,
+			tooth_15 = $19,
+			tooth_16 = $20,
+			tooth_17 = $21,
+			tooth_18 = $22,
+			tooth_21 = $23,
+			tooth_22 = $24,
+			tooth_23 = $25,
+			tooth_24 = $26,
+			tooth_25 = $27,
+			tooth_26 = $28,
+			tooth_27 = $29,
+			tooth_28 = $30,
+			tooth_31 = $31,
+			tooth_32 = $32,
+			tooth_33 = $33,
+			tooth_34 = $34,
+			tooth_35 = $35,
+			tooth_36 = $36,
+			tooth_37 = $37,
+			tooth_38 = $38,
+			tooth_41 = $39,
+			tooth_42 = $40,
+			tooth_43 = $41,
+			tooth_44 = $42,
+			tooth_45 = $43,
+			tooth_46 = $44,
+			tooth_47 = $45,
+			tooth_48 = $46
+		`,
+			id, vid,
+			d.CleanTeethFreq, d.SugarConsumeFreq, d.BacterialExposure, d.NumLossFromToothDecay, d.OralSymptoms, d.DrinkOtherWater,
+			d.RiskForDentalCarries,
+			d.IcopeDifficultyChewing, d.IcopePainInMouth,
+			d.DentalNotes, d.ReferralNeeded, d.ReferralLoc,
+			d.Tooth11, d.Tooth12, d.Tooth13, d.Tooth14, d.Tooth15, d.Tooth16, d.Tooth17, d.Tooth18,
+			d.Tooth21, d.Tooth22, d.Tooth23, d.Tooth24, d.Tooth25, d.Tooth26, d.Tooth27, d.Tooth28, d.Tooth31, d.Tooth32, d.Tooth33, d.Tooth34, d.Tooth35,
+			d.Tooth36, d.Tooth37, d.Tooth38, d.Tooth41, d.Tooth42, d.Tooth43, d.Tooth44, d.Tooth45, d.Tooth46, d.Tooth47, d.Tooth48,
+		)
+
+		if err != nil {
+			return err
+		}
 	}
 	if phy != nil {
 		_, err = tx.ExecContext(ctx, `
@@ -694,7 +798,7 @@ func (p *postgresPatientRepository) GetPatientMeta(ctx context.Context, id int32
 	doesPatientExist, err := p.checkPatientExists(ctx, id)
 	if err != nil { // query error
 		return nil, err
-	} else if doesPatientExist == false { // no query error, and patient doesn't exist
+	} else if !doesPatientExist { // no query error, and patient doesn't exist
 		return nil, entities.ErrPatientNotFound
 	}
 
@@ -1006,8 +1110,8 @@ func (p *postgresPatientRepository) GetDBUser(ctx context.Context, username stri
 	user := entities.DBUser{}
 
 	// Get latest row
-	latestRow := p.Conn.QueryRowContext(ctx, `SELECT username, password_hash FROM users WHERE username = $1`, username)
-	err := latestRow.Scan(&user.Username, &user.PasswordHash)
+	latestRow := p.Conn.QueryRowContext(ctx, `SELECT id, username, password_hash FROM users WHERE username = $1`, username)
+	err := latestRow.Scan(&user.Id, &user.Username, &user.PasswordHash)
 	if err != nil {
 		return nil, err
 	}

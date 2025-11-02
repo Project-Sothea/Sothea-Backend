@@ -4,16 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
+	"os"
+	"testing"
+	"time"
+
 	"github.com/jieqiboh/sothea_backend/entities"
 	"github.com/jieqiboh/sothea_backend/util"
 	_ "github.com/lib/pq"
 	"github.com/ory/dockertest/v3"
 	"github.com/ory/dockertest/v3/docker"
 	"github.com/stretchr/testify/assert"
-	"log"
-	"os"
-	"testing"
-	"time"
 
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 )
@@ -34,7 +35,16 @@ var admin = entities.Admin{
 	SentToID:      entities.PtrTo(false),
 }
 var pastmedicalhistory = entities.PastMedicalHistory{
+	Cough:                   entities.PtrTo(true),
+	Fever:                   entities.PtrTo(false),
+	BlockedNose:             entities.PtrTo(true),
+	SoreThroat:              entities.PtrTo(true),
+	NightSweats:             entities.PtrTo(false),
+	UnintentionalWeightLoss: entities.PtrTo(true),
+
 	Tuberculosis:               entities.PtrTo(true),
+	TuberculosisHasBeenTreated: entities.PtrTo(true),
+
 	Diabetes:                   entities.PtrTo(false),
 	Hypertension:               entities.PtrTo(true),
 	Hyperlipidemia:             entities.PtrTo(false),
@@ -65,70 +75,85 @@ var vitalstatistics = entities.VitalStatistics{
 	HR2:                     entities.PtrTo(71.0),
 	AverageHR:               entities.PtrTo(71.5),
 	RandomBloodGlucoseMmolL: entities.PtrTo(5.4),
+	IcopeHighBp:             entities.PtrTo(true),
 }
 var heightandweight = entities.HeightAndWeight{
-	Height:      entities.PtrTo(170.0),
-	Weight:      entities.PtrTo(70.0),
-	BMI:         entities.PtrTo(24.2),
-	BMIAnalysis: entities.PtrTo("normal weight"),
-	PaedsHeight: entities.PtrTo(90.0),
-	PaedsWeight: entities.PtrTo(80.0),
+	Height:                    entities.PtrTo(170.0),
+	Weight:                    entities.PtrTo(70.0),
+	BMI:                       entities.PtrTo(24.2),
+	BMIAnalysis:               entities.PtrTo("normal weight"),
+	PaedsHeight:               entities.PtrTo(90.0),
+	PaedsWeight:               entities.PtrTo(80.0),
+	IcopeLostWeightPastMonths: entities.PtrTo(true),
+	IcopeNoDesireToEat:        entities.PtrTo(false),
 }
 var visualacuity = entities.VisualAcuity{
-	LEyeVision:             entities.PtrTo(int32(20)),
-	REyeVision:             entities.PtrTo(int32(20)),
-	AdditionalIntervention: entities.PtrTo("VISUAL FIELD TEST REQUIRED"),
+	LEyeVision:                  entities.PtrTo(int32(20)),
+	REyeVision:                  entities.PtrTo(int32(20)),
+	AdditionalIntervention:      entities.PtrTo("VISUAL FIELD TEST REQUIRED"),
+	SentToOpto:                  entities.PtrTo(false),
+	ReferredForGlasses:          entities.PtrTo(true),
+	IcopeEyeProblem:             entities.PtrTo(true),
+	IcopeTreatedForDiabetesOrBp: entities.PtrTo(false),
 }
 var fallrisk = entities.FallRisk{
-	FallWorries:        entities.PtrTo("a"),
-	FallHistory:        entities.PtrTo("a"),
-	CognitiveStatus:    entities.PtrTo("b"),
-	ContinenceProblems: entities.PtrTo("c"),
-	SafetyAwareness:    entities.PtrTo("d"),
-	Unsteadiness:       entities.PtrTo("b"),
-	FallRiskScore:      entities.PtrTo(int32(6)),
+	SideToSideBalance:        entities.PtrTo(int32(1)),
+	SemiTandemBalance:        entities.PtrTo(int32(0)),
+	TandemBalance:            entities.PtrTo(int32(1)),
+	GaitSpeedTest:            entities.PtrTo(int32(0)),
+	ChairStandTest:           entities.PtrTo(int32(1)),
+	FallRiskScore:            entities.PtrTo(int32(3)),
+	IcopeCompleteChairStands: entities.PtrTo(false),
+	IcopeChairStandsTime:     entities.PtrTo(true),
 }
 var dental = entities.Dental{
-	CleanTeethFreq:   entities.PtrTo(1),
-	SugarConsumeFreq: entities.PtrTo(2),
-	PastYearDecay:    entities.PtrTo(true),
-	BrushTeethPain:   entities.PtrTo(false),
-	DrinkOtherWater:  entities.PtrTo(true),
-	DentalNotes:      entities.PtrTo("NONE"),
-	ReferralNeeded:   entities.PtrTo(false),
-	ReferralLoc:      nil,
-	Tooth11:          entities.PtrTo(true),
-	Tooth12:          entities.PtrTo(true),
-	Tooth13:          entities.PtrTo(true),
-	Tooth14:          entities.PtrTo(true),
-	Tooth15:          entities.PtrTo(true),
-	Tooth16:          entities.PtrTo(true),
-	Tooth17:          entities.PtrTo(true),
-	Tooth18:          entities.PtrTo(true),
-	Tooth21:          entities.PtrTo(true),
-	Tooth22:          entities.PtrTo(true),
-	Tooth23:          entities.PtrTo(true),
-	Tooth24:          entities.PtrTo(true),
-	Tooth25:          entities.PtrTo(true),
-	Tooth26:          entities.PtrTo(true),
-	Tooth27:          entities.PtrTo(true),
-	Tooth28:          entities.PtrTo(true),
-	Tooth31:          entities.PtrTo(true),
-	Tooth32:          entities.PtrTo(true),
-	Tooth33:          entities.PtrTo(true),
-	Tooth34:          entities.PtrTo(true),
-	Tooth35:          entities.PtrTo(true),
-	Tooth36:          entities.PtrTo(true),
-	Tooth37:          entities.PtrTo(true),
-	Tooth38:          entities.PtrTo(true),
-	Tooth41:          entities.PtrTo(true),
-	Tooth42:          entities.PtrTo(true),
-	Tooth43:          entities.PtrTo(true),
-	Tooth44:          entities.PtrTo(true),
-	Tooth45:          entities.PtrTo(true),
-	Tooth46:          entities.PtrTo(true),
-	Tooth47:          entities.PtrTo(true),
-	Tooth48:          entities.PtrTo(true),
+	CleanTeethFreq:        entities.PtrTo(1),
+	SugarConsumeFreq:      entities.PtrTo("2-3"),
+	BacterialExposure:     entities.PtrTo(true),
+	NumLossFromToothDecay: entities.PtrTo(2),
+	OralSymptoms:          entities.PtrTo(true),
+	DrinkOtherWater:       entities.PtrTo(false),
+
+	RiskForDentalCarries: entities.PtrTo("Middle Risk"),
+
+	IcopeDifficultyChewing: entities.PtrTo(false),
+	IcopePainInMouth:       entities.PtrTo(false),
+
+	DentalNotes:    entities.PtrTo("NONE"),
+	ReferralNeeded: entities.PtrTo(false),
+	ReferralLoc:    nil,
+	Tooth11:        entities.PtrTo(true),
+	Tooth12:        entities.PtrTo(true),
+	Tooth13:        entities.PtrTo(true),
+	Tooth14:        entities.PtrTo(true),
+	Tooth15:        entities.PtrTo(true),
+	Tooth16:        entities.PtrTo(true),
+	Tooth17:        entities.PtrTo(true),
+	Tooth18:        entities.PtrTo(true),
+	Tooth21:        entities.PtrTo(true),
+	Tooth22:        entities.PtrTo(true),
+	Tooth23:        entities.PtrTo(true),
+	Tooth24:        entities.PtrTo(true),
+	Tooth25:        entities.PtrTo(true),
+	Tooth26:        entities.PtrTo(true),
+	Tooth27:        entities.PtrTo(true),
+	Tooth28:        entities.PtrTo(true),
+	Tooth31:        entities.PtrTo(true),
+	Tooth32:        entities.PtrTo(true),
+	Tooth33:        entities.PtrTo(true),
+	Tooth34:        entities.PtrTo(true),
+	Tooth35:        entities.PtrTo(true),
+	Tooth36:        entities.PtrTo(true),
+	Tooth37:        entities.PtrTo(true),
+	Tooth38:        entities.PtrTo(true),
+	Tooth41:        entities.PtrTo(true),
+	Tooth42:        entities.PtrTo(true),
+	Tooth43:        entities.PtrTo(true),
+	Tooth44:        entities.PtrTo(true),
+	Tooth45:        entities.PtrTo(true),
+	Tooth46:        entities.PtrTo(true),
+	Tooth47:        entities.PtrTo(true),
+	Tooth48:        entities.PtrTo(true),
 }
 var physiotherapy = entities.Physiotherapy{
 	PainStiffnessDay:         entities.PtrTo(int32(1)),

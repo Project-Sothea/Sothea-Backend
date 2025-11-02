@@ -5,48 +5,56 @@ import (
 )
 
 type Dental struct {
-	ID               int32   `json:"id" binding:"-"`
-	VID              int32   `json:"vid" binding:"-"`
-	CleanTeethFreq   *int    `json:"cleanTeethFreq" binding:"required"`
-	SugarConsumeFreq *int    `json:"sugarConsumeFreq" binding:"required"`
-	PastYearDecay    *bool   `json:"pastYearDecay" binding:"required"`
-	BrushTeethPain   *bool   `json:"brushTeethPain" binding:"required"`
-	DrinkOtherWater  *bool   `json:"drinkOtherWater" binding:"required"`
-	DentalNotes      *string `json:"dentalNotes"`
-	ReferralNeeded   *bool   `json:"referralNeeded" binding:"required"`
-	ReferralLoc      *string `json:"referralLoc"`
-	Tooth11          *bool   `json:"tooth11"`
-	Tooth12          *bool   `json:"tooth12"`
-	Tooth13          *bool   `json:"tooth13"`
-	Tooth14          *bool   `json:"tooth14"`
-	Tooth15          *bool   `json:"tooth15"`
-	Tooth16          *bool   `json:"tooth16"`
-	Tooth17          *bool   `json:"tooth17"`
-	Tooth18          *bool   `json:"tooth18"`
-	Tooth21          *bool   `json:"tooth21"`
-	Tooth22          *bool   `json:"tooth22"`
-	Tooth23          *bool   `json:"tooth23"`
-	Tooth24          *bool   `json:"tooth24"`
-	Tooth25          *bool   `json:"tooth25"`
-	Tooth26          *bool   `json:"tooth26"`
-	Tooth27          *bool   `json:"tooth27"`
-	Tooth28          *bool   `json:"tooth28"`
-	Tooth31          *bool   `json:"tooth31"`
-	Tooth32          *bool   `json:"tooth32"`
-	Tooth33          *bool   `json:"tooth33"`
-	Tooth34          *bool   `json:"tooth34"`
-	Tooth35          *bool   `json:"tooth35"`
-	Tooth36          *bool   `json:"tooth36"`
-	Tooth37          *bool   `json:"tooth37"`
-	Tooth38          *bool   `json:"tooth38"`
-	Tooth41          *bool   `json:"tooth41"`
-	Tooth42          *bool   `json:"tooth42"`
-	Tooth43          *bool   `json:"tooth43"`
-	Tooth44          *bool   `json:"tooth44"`
-	Tooth45          *bool   `json:"tooth45"`
-	Tooth46          *bool   `json:"tooth46"`
-	Tooth47          *bool   `json:"tooth47"`
-	Tooth48          *bool   `json:"tooth48"`
+	ID  int32 `json:"id" binding:"-"`
+	VID int32 `json:"vid" binding:"-"`
+
+	CleanTeethFreq        *int    `json:"cleanTeethFreq" binding:"required"`
+	SugarConsumeFreq      *string `json:"sugarConsumeFreq" binding:"required"`
+	BacterialExposure     *bool   `json:"bacterialExposure" binding:"required"`
+	NumLossFromToothDecay *int    `json:"numLossFromToothDecay" binding:"required"`
+	OralSymptoms          *bool   `json:"oralSymptoms" binding:"required"`
+	DrinkOtherWater       *bool   `json:"drinkOtherWater" binding:"required"`
+
+	RiskForDentalCarries   *string `json:"riskForDentalCarries" binding:"required"`
+	IcopeDifficultyChewing *bool   `json:"icopeDifficultyChewing"`
+	IcopePainInMouth       *bool   `json:"icopePainInMouth"`
+
+	DentalNotes    *string `json:"dentalNotes"`
+	ReferralNeeded *bool   `json:"referralNeeded" binding:"required"`
+	ReferralLoc    *string `json:"referralLoc"`
+
+	Tooth11 *bool `json:"tooth11"`
+	Tooth12 *bool `json:"tooth12"`
+	Tooth13 *bool `json:"tooth13"`
+	Tooth14 *bool `json:"tooth14"`
+	Tooth15 *bool `json:"tooth15"`
+	Tooth16 *bool `json:"tooth16"`
+	Tooth17 *bool `json:"tooth17"`
+	Tooth18 *bool `json:"tooth18"`
+	Tooth21 *bool `json:"tooth21"`
+	Tooth22 *bool `json:"tooth22"`
+	Tooth23 *bool `json:"tooth23"`
+	Tooth24 *bool `json:"tooth24"`
+	Tooth25 *bool `json:"tooth25"`
+	Tooth26 *bool `json:"tooth26"`
+	Tooth27 *bool `json:"tooth27"`
+	Tooth28 *bool `json:"tooth28"`
+	Tooth31 *bool `json:"tooth31"`
+	Tooth32 *bool `json:"tooth32"`
+	Tooth33 *bool `json:"tooth33"`
+	Tooth34 *bool `json:"tooth34"`
+	Tooth35 *bool `json:"tooth35"`
+	Tooth36 *bool `json:"tooth36"`
+	Tooth37 *bool `json:"tooth37"`
+	Tooth38 *bool `json:"tooth38"`
+	Tooth41 *bool `json:"tooth41"`
+	Tooth42 *bool `json:"tooth42"`
+	Tooth43 *bool `json:"tooth43"`
+	Tooth44 *bool `json:"tooth44"`
+	Tooth45 *bool `json:"tooth45"`
+	Tooth46 *bool `json:"tooth46"`
+	Tooth47 *bool `json:"tooth47"`
+	Tooth48 *bool `json:"tooth48"`
 }
 
 // TableName specifies the table name for the Dental model.
@@ -60,10 +68,17 @@ func (fr Dental) String() string {
 	result += fmt.Sprintf("ID: %d\n", fr.ID)
 	result += fmt.Sprintf("VID: %d\n", fr.VID)
 	result += fmt.Sprintf("CleanTeethFreq: %d\n", *fr.CleanTeethFreq)
-	result += fmt.Sprintf("SugarConsumeFreq: %d\n", *fr.SugarConsumeFreq)
-	result += fmt.Sprintf("PastYearDecay: %t\n", *fr.PastYearDecay)
-	result += fmt.Sprintf("BrushTeethPain: %t\n", *fr.BrushTeethPain)
-	result += fmt.Sprintf("DrinkOtherWater: %t\n", *fr.DrinkOtherWater)
+	result += fmt.Sprintf("SugarConsumeFreq: %s\n", *fr.SugarConsumeFreq)
+	result += fmt.Sprintf("BacterialExposure: %t\n", *fr.BacterialExposure)
+	result += fmt.Sprintf("NumLossFromToothDecay: %d\n", *fr.NumLossFromToothDecay)
+	result += fmt.Sprintf("OralSymptoms: %t\n", *fr.OralSymptoms)
+	result += fmt.Sprintf("DrinkOtherThanWater: %t\n", *fr.DrinkOtherWater)
+
+	result += fmt.Sprintf("RiskForDentalCarry: %s\n", *fr.RiskForDentalCarries)
+
+	result += fmt.Sprintf("IcopeDifficultyChewing: %t\n", SafeDeref(fr.IcopeDifficultyChewing))
+	result += fmt.Sprintf("IcopePainInMouth: %t\n", SafeDeref(fr.IcopePainInMouth))
+
 	result += fmt.Sprintf("DentalNotes: %s\n", SafeDeref(fr.DentalNotes))
 	result += fmt.Sprintf("ReferralNeeded: %t\n", *fr.ReferralNeeded)
 	result += fmt.Sprintf("ReferralLoc: %s\n", SafeDeref(fr.ReferralLoc))

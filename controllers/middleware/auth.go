@@ -2,43 +2,61 @@ package middleware
 
 import (
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 )
 
-func CreateToken(username string, secretKey []byte) (string, error) {
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256,
-		jwt.MapClaims{
-			"username": username,
-			"exp":      time.Now().Add(time.Hour * 10).Unix(),
-		})
-	tokenString, err := token.SignedString(secretKey)
+type Claims struct {
+	UserID   int64  `json:"userID"`   // user ID
+	Username string `json:"username"` // for convenience
+	jwt.RegisteredClaims
+}
+
+func CreateToken(userID int64, username string, secretKey []byte) (string, error) {
+	claims := Claims{
+		UserID:   userID,
+		Username: username,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(10 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Issuer:    "sothea",
+			Audience:  []string{"sothea"},
+		},
+	}
+
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := tok.SignedString(secretKey)
 	if err != nil {
-		return "", nil
+		return "", err
 	}
 	return tokenString, nil
 }
 
-func VerifyToken(tokenString string, secretKey []byte) error {
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+func VerifyToken(tokenString string, secretKey []byte) (*Claims, error) {
+	parser := jwt.NewParser(jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
+	token, err := parser.ParseWithClaims(tokenString, &Claims{}, func(t *jwt.Token) (interface{}, error) {
 		return secretKey, nil
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !token.Valid {
-		return fmt.Errorf("Invalid token")
+		return nil, fmt.Errorf("invalid token")
 	}
-	return nil
+	claims, ok := token.Claims.(*Claims)
+	if !ok {
+		return nil, fmt.Errorf("invalid claims")
+	}
+	// RegisteredClaims.Valid() has already run during ParseWithClaims, including exp check.
+	return claims, nil
 }
 
-// AuthRequired is a middleware function that checks for the JWT token in the Authorization header
 func AuthRequired(secretKey []byte) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Get the Authorization header
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header required"})
@@ -46,26 +64,33 @@ func AuthRequired(secretKey []byte) gin.HandlerFunc {
 			return
 		}
 
-		// Check if the header format is correct
-		bearerToken := strings.Split(authHeader, " ")
-		if len(bearerToken) != 2 {
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid Authorization header format"})
 			c.Abort()
 			return
 		}
 
-		// Extract the token
-		tokenString := bearerToken[1]
-
-		// Validate the token
-		err := VerifyToken(tokenString, secretKey)
+		claims, err := VerifyToken(parts[1], secretKey)
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
 			c.Abort()
 			return
 		}
 
-		// Proceed with the request
+		// Stash for downstream code
+		c.Set("userID", claims.UserID)
+		c.Set("username", claims.Username)
+
 		c.Next()
 	}
+}
+
+func GetUserID(c *gin.Context) (int64, bool) {
+	v, ok := c.Get("userID")
+	if !ok {
+		return 0, false
+	}
+	id, ok := v.(int64)
+	return id, ok
 }
