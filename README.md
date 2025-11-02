@@ -693,8 +693,6 @@ Export all patient data to a CSV file.
 
 ```plaintext
 GET /export-db
-
-GET /export-db?includePhoto=true
 ```
 
 #### Is Valid Token

@@ -2,8 +2,9 @@ package usecases
 
 import (
 	"context"
-	"github.com/jieqiboh/sothea_backend/entities"
 	"time"
+
+	"github.com/jieqiboh/sothea_backend/entities"
 )
 
 type patientUsecase struct {
@@ -68,9 +69,9 @@ func (p *patientUsecase) GetAllPatientVisitMeta(ctx context.Context, date time.T
 	return p.patientRepo.GetAllPatientVisitMeta(ctx, date)
 }
 
-func (p *patientUsecase) ExportDatabaseToCSV(ctx context.Context, includePhoto bool) error {
+func (p *patientUsecase) ExportDatabaseToCSV(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, p.contextTimeout)
 	defer cancel()
 
-	return p.patientRepo.ExportDatabaseToCSV(ctx, includePhoto)
+	return p.patientRepo.ExportDatabaseToCSV(ctx)
 }
