@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"errors"
 	"log"
 	"os"
@@ -37,7 +36,6 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 
 	rows := tx.QueryRowContext(ctx, "SELECT * FROM admin WHERE id = $1 AND vid = $2;", id, vid)
 	admin := entities.Admin{}
-	var photoBytes []byte
 	err = rows.Scan(
 		&admin.ID,
 		&admin.VID,
@@ -55,10 +53,7 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 		&admin.LastMenstrualPeriod,
 		&admin.DrugAllergies,
 		&admin.SentToID,
-		&photoBytes,
 	)
-	photoBase64 := base64.StdEncoding.EncodeToString(photoBytes)
-	admin.Photo = &photoBase64
 	if err != nil { // no admin found
 		return nil, entities.ErrPatientVisitNotFound
 	}
@@ -336,10 +331,10 @@ func (p *postgresPatientRepository) CreatePatient(ctx context.Context, admin *en
 		return -1, entities.ErrMissingAdminCategory
 	}
 	rows := tx.QueryRowContext(ctx, `INSERT INTO admin (family_group, reg_date, queue_no, name, khmer_name, dob, age, gender, village, 
-	contact_no, pregnant, last_menstrual_period, drug_allergies, sent_to_id, photo) 
-	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id`,
-		admin.FamilyGroup, admin.RegDate, admin.QueueNo, admin.Name, admin.KhmerName, admin.Dob, admin.Age, admin.Gender, admin.Village, admin.ContactNo,
-		admin.Pregnant, admin.LastMenstrualPeriod, admin.DrugAllergies, admin.SentToID, admin.Photo)
+		contact_no, pregnant, last_menstrual_period, drug_allergies, sent_to_id) 
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
+	    admin.FamilyGroup, admin.RegDate, admin.QueueNo, admin.Name, admin.KhmerName, admin.Dob, admin.Age, admin.Gender, admin.Village, admin.ContactNo,
+	    admin.Pregnant, admin.LastMenstrualPeriod, admin.DrugAllergies, admin.SentToID)
 	err = rows.Scan(&patientid)
 	if err != nil { // error inserting admin
 		return -1, err
@@ -375,10 +370,10 @@ func (p *postgresPatientRepository) CreatePatientVisit(ctx context.Context, id i
 	}
 
 	rows := tx.QueryRowContext(ctx, `INSERT INTO admin (id, family_group, reg_date, queue_no, name, khmer_name, dob, age, gender, village, 
-	contact_no, pregnant, last_menstrual_period, drug_allergies, sent_to_id, photo) 
-	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING vid`,
-		id, admin.FamilyGroup, admin.RegDate, admin.QueueNo, admin.Name, admin.KhmerName, admin.Dob, admin.Age, admin.Gender, admin.Village, admin.ContactNo,
-		admin.Pregnant, admin.LastMenstrualPeriod, admin.DrugAllergies, admin.SentToID, admin.Photo)
+		contact_no, pregnant, last_menstrual_period, drug_allergies, sent_to_id) 
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING vid`,
+	    id, admin.FamilyGroup, admin.RegDate, admin.QueueNo, admin.Name, admin.KhmerName, admin.Dob, admin.Age, admin.Gender, admin.Village, admin.ContactNo,
+	    admin.Pregnant, admin.LastMenstrualPeriod, admin.DrugAllergies, admin.SentToID)
 	err = rows.Scan(&patientid)
 	if err != nil { // error inserting admin
 		return -1, err
@@ -484,10 +479,10 @@ func (p *postgresPatientRepository) UpdatePatientVisit(ctx context.Context, id i
 	phy := patient.Physiotherapy
 	dc := patient.DoctorsConsultation
 	if a != nil { // Update admin
-		_, err = tx.ExecContext(ctx, `UPDATE admin SET family_group = $1, reg_date = $2, queue_no = $3, name = $4, khmer_name = $5, dob = $6, age = $7, 
+        _, err = tx.ExecContext(ctx, `UPDATE admin SET family_group = $1, reg_date = $2, queue_no = $3, name = $4, khmer_name = $5, dob = $6, age = $7, 
 		gender = $8, village = $9, contact_no = $10, pregnant = $11, last_menstrual_period = $12, drug_allergies = $13,
-		sent_to_id = $14, photo = $15 WHERE id = $16 AND vid = $17`, a.FamilyGroup, a.RegDate, a.QueueNo, a.Name, a.KhmerName, a.Dob, a.Age, a.Gender, a.Village, a.ContactNo,
-			a.Pregnant, a.LastMenstrualPeriod, a.DrugAllergies, a.SentToID, a.Photo, id, vid)
+		sent_to_id = $14 WHERE id = $15 AND vid = $16`, a.FamilyGroup, a.RegDate, a.QueueNo, a.Name, a.KhmerName, a.Dob, a.Age, a.Gender, a.Village, a.ContactNo,
+            a.Pregnant, a.LastMenstrualPeriod, a.DrugAllergies, a.SentToID, id, vid)
 		if err != nil {
 			return err
 		}
@@ -917,8 +912,8 @@ func (p *postgresPatientRepository) GetAllPatientVisitMeta(ctx context.Context, 
 	return result, nil
 }
 
-func (p *postgresPatientRepository) ExportDatabaseToCSV(ctx context.Context, includePhoto bool) error {
-	// Base query without the photo field
+func (p *postgresPatientRepository) ExportDatabaseToCSV(ctx context.Context) error {
+	// Base query
 	query := `SELECT
         a.id,
         a.vid,
@@ -1041,7 +1036,7 @@ func (p *postgresPatientRepository) ExportDatabaseToCSV(ctx context.Context, inc
         dc.treatment AS dc_treatment,
         dc.referral_needed AS dc_referral_needed,
         dc.referral_loc AS dc_referral_loc,
-        dc.remarks AS dc_remarks,
+		dc.remarks AS dc_remarks,
 		-- Physiotherapy
 		p.pain_stiffness_day AS p_pain_stiffness_day,
 		p.pain_stiffness_night AS p_pain_stiffness_night,
@@ -1051,17 +1046,8 @@ func (p *postgresPatientRepository) ExportDatabaseToCSV(ctx context.Context, inc
 		p.trouble_sleep_symptoms AS p_trouble_sleep_symptoms,
 		p.how_much_fatigue AS p_how_much_fatigue,
 		p.anxious_low_mood AS p_anxious_low_mood,
-		p.medication_manage_symptoms AS p_medication_manage_symptoms`
-
-	// Conditionally add the photo field at the end of the query
-	if includePhoto {
-		query += `, a.photo`
-	} else {
-		query += `, NULL AS a_photo`
-	}
-
-	// Now query will include a.photo at the end if includePhoto is true, or NULL if false
-	query += ` FROM
+		p.medication_manage_symptoms AS p_medication_manage_symptoms
+		FROM
         admin a
     LEFT JOIN
         pastmedicalhistory pmh ON a.id = pmh.id AND a.vid = pmh.vid
@@ -1079,8 +1065,8 @@ func (p *postgresPatientRepository) ExportDatabaseToCSV(ctx context.Context, inc
         fallrisk fr ON a.id = fr.id AND a.vid = fr.vid
 	LEFT JOIN
 		physiotherapy p ON a.id = p.id AND a.vid = p.vid
-    LEFT JOIN
-        doctorsconsultation dc ON a.id = dc.id AND a.vid = dc.vid`
+	LEFT JOIN
+		doctorsconsultation dc ON a.id = dc.id AND a.vid = dc.vid`
 
 	// Execute the query
 	rows, err := p.Conn.QueryContext(ctx, query)

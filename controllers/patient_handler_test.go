@@ -562,20 +562,17 @@ func TestGetAllPatientVisitMeta_BadRequest_Failure(t *testing.T) {
 // Success - 200 OK
 func TestExportDatabaseToCSV_Success(t *testing.T) {
 	var mockUsecase mocks.PatientUseCase
-	// Set up the mock to expect the `includePhoto` parameter
-	mockUsecase.On("ExportDatabaseToCSV", context.Background(), false).Return(nil)
+	mockUsecase.On("ExportDatabaseToCSV", context.Background()).Return(nil)
 
 	router := gin.Default()
 	newTestPatientHandler(router, &mockUsecase)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/export-db?includePhoto=false", nil)
+	req, _ := http.NewRequest("GET", "/export-db", nil)
 
-	// Serve the HTTP request
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// Assert that the mock usecase method was called with the correct parameters
-	mockUsecase.AssertCalled(t, "ExportDatabaseToCSV", context.Background(), false)
+	mockUsecase.AssertCalled(t, "ExportDatabaseToCSV", context.Background())
 }

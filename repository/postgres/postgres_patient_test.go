@@ -457,7 +457,7 @@ func TestPostgresPatientRepository_ExportDatabaseToCSV(t *testing.T) {
 		log.Fatal("Failed to assert repo")
 	}
 
-	err := patient_repo.ExportDatabaseToCSV(context.Background(), false)
+	err := patient_repo.ExportDatabaseToCSV(context.Background())
 	assert.Nil(t, err)
 	// Assert that file exists
 	_, err = os.Stat(util.MustGitPath("repository/tmp/output.csv"))

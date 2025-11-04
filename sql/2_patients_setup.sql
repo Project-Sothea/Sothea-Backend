@@ -16,24 +16,23 @@ Create the schema and Load Extensions
 
 CREATE TABLE IF NOT EXISTS admin
 (
-    id                    SERIAL, -- Use SERIAL to auto-increment the ID
-    vid                   INTEGER    NOT NULL,
-    family_group          TEXT       NOT NULL,
-    reg_date              DATE       NOT NULL,
-    queue_no              TEXT       NOT NULL,
-    name                  TEXT       NOT NULL,
-    khmer_name            TEXT       NOT NULL,
-    dob                   DATE,
-    age                   INTEGER,
-    gender                VARCHAR(1) NOT NULL,
-    village               TEXT       NOT NULL,
-    contact_no            TEXT       NOT NULL,
-    pregnant              BOOLEAN    NOT NULL,
-    last_menstrual_period Date,
-    drug_allergies        TEXT,
-    sent_to_id            BOOLEAN    NOT NULL,
-    photo                 BYTEA,
-    PRIMARY KEY (id, vid)         -- Composite primary key
+  id                    SERIAL, -- Use SERIAL to auto-increment the ID
+  vid                   INTEGER    NOT NULL,
+  family_group          TEXT       NOT NULL,
+  reg_date              DATE       NOT NULL,
+  queue_no              TEXT       NOT NULL,
+  name                  TEXT       NOT NULL,
+  khmer_name            TEXT       NOT NULL,
+  dob                   DATE,
+  age                   INTEGER,
+  gender                VARCHAR(1) NOT NULL,
+  village               TEXT       NOT NULL,
+  contact_no            TEXT       NOT NULL,
+  pregnant              BOOLEAN    NOT NULL,
+  last_menstrual_period Date,
+  drug_allergies        TEXT,
+  sent_to_id            BOOLEAN    NOT NULL,
+  PRIMARY KEY (id, vid)         -- Composite primary key
 );
 
 CREATE TABLE IF NOT EXISTS pastmedicalhistory
@@ -388,29 +387,28 @@ VALUES (1, 1, 3, 2, 'Sometimes', 'Often', 'Sometimes', 'Sometimes', 3, 2, 'Somet
     Add additional entries for patient 1 and 2
  */
 INSERT INTO admin (id, family_group, reg_date, queue_no, name, khmer_name, dob, age, gender, village, contact_no,
-                   pregnant, last_menstrual_period, drug_allergies, sent_to_id, photo)
-VALUES (1, 'Family 1', '2025-07-01', 'Q123', 'John Doe', 'ខេមរ', '1990-01-01', 34, 'M', 'Village 1', '123456789', false,
-        '2023-06-01', 'None', false, NULL);
+       pregnant, last_menstrual_period, drug_allergies, sent_to_id)
+VALUES (1, 'Family 1', '2025-07-01', 'Q123', 'John Doe', 'ខេមរ', '1990-01-01', 34, 'M', 'Village 1', '123456789', false, '2023-06-01', 'None', false);
 
 INSERT INTO admin (id, family_group, reg_date, queue_no, name, khmer_name, dob, age, gender, village, contact_no,
-                   pregnant, last_menstrual_period, drug_allergies, sent_to_id, photo)
+       pregnant, last_menstrual_period, drug_allergies, sent_to_id)
 VALUES (1, 'Family 2', '2024-12-02', 'Q124', 'Jane Doe', 'ចន ឌូ', '1990-01-11', 34, 'F', 'Village 2', '987654321',
-        true, '2023-06-15', 'Penicillin', true, NULL);
+  true, '2023-06-15', 'Penicillin', true);
 
 INSERT INTO admin (id, family_group, reg_date, queue_no, name, khmer_name, dob, age, gender, village, contact_no,
-                   pregnant, last_menstrual_period, drug_allergies, sent_to_id, photo)
+       pregnant, last_menstrual_period, drug_allergies, sent_to_id)
 VALUES (1, 'Family 1', '2023-07-03', 'Q125', 'Alice Doe', 'អាលីស ស្ម៊ីត', '1990-01-01', 35, 'F', 'Village 1',
-        '555666777', false, '2023-05-01', 'None', false, NULL);
+  '555666777', false, '2023-05-01', 'None', false);
 
 INSERT INTO admin (id, family_group, reg_date, queue_no, name, khmer_name, dob, age, gender, village, contact_no,
-                   pregnant, last_menstrual_period, drug_allergies, sent_to_id, photo)
+       pregnant, last_menstrual_period, drug_allergies, sent_to_id)
 VALUES (2, 'B009', '2024-12-03', 'Q125', 'Walter White', 'អាលីស ស្ម៊ីត', '1990-01-01', 52, 'M', 'ABQ',
-        '555666777', false, '2023-05-01', 'None', false, NULL);
+  '555666777', false, '2023-05-01', 'None', false);
 
 INSERT INTO admin (id, family_group, reg_date, queue_no, name, khmer_name, dob, age, gender, village, contact_no,
-                   pregnant, last_menstrual_period, drug_allergies, sent_to_id, photo)
+       pregnant, last_menstrual_period, drug_allergies, sent_to_id)
 VALUES (2, 'B009', '2023-10-03', 'Q125', 'Walter White', 'អាលីស ស្ម៊ីត', '1990-01-01', 52, 'M', 'ABQ',
-        '555666777', false, '2023-05-01', 'None', false, NULL);
+  '555666777', false, '2023-05-01', 'None', false);
 
 /*******************
     Add remaining categories for second visit for patient 1 and 2

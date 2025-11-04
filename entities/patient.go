@@ -27,7 +27,7 @@ type PatientUseCase interface {
 	UpdatePatientVisit(ctx context.Context, id int32, vid int32, patient *Patient) error    // Updates a Patient Visit
 	GetPatientMeta(ctx context.Context, id int32) (*PatientMeta, error)                     // Returns a Patient's Meta Data
 	GetAllPatientVisitMeta(ctx context.Context, date time.Time) ([]PatientVisitMeta, error) // Returns all Patient's Visit's Meta Data
-	ExportDatabaseToCSV(ctx context.Context, includePhoto bool) error
+	ExportDatabaseToCSV(ctx context.Context) error
 }
 
 type PatientRepository interface {
@@ -38,6 +38,6 @@ type PatientRepository interface {
 	UpdatePatientVisit(ctx context.Context, id int32, vid int32, patient *Patient) error    // Takes ID and VID, and updates a Patient's Visit
 	GetPatientMeta(ctx context.Context, id int32) (*PatientMeta, error)                     // Returns a Patient's Meta Data
 	GetAllPatientVisitMeta(ctx context.Context, date time.Time) ([]PatientVisitMeta, error) // Returns all Patient's Visit's Meta Data
-	ExportDatabaseToCSV(ctx context.Context, includePhoto bool) error
+	ExportDatabaseToCSV(ctx context.Context) error
 	GetDBUser(ctx context.Context, username string) (*DBUser, error)
 }
