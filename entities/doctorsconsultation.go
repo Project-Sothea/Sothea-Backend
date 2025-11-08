@@ -7,19 +7,19 @@ import (
 type DoctorsConsultation struct {
 	ID                int32   `json:"id" binding:"-"`
 	VID               int32   `json:"vid" binding:"-"`
-	Well              *bool   `json:"well" binding:"required"`
-	Msk               *bool   `json:"msk" binding:"required"`
-	Cvs               *bool   `json:"cvs" binding:"required"`
-	Respi             *bool   `json:"respi" binding:"required"`
-	Gu                *bool   `json:"gu" binding:"required"`
-	Git               *bool   `json:"git" binding:"required"`
-	Eye               *bool   `json:"eye" binding:"required"`
-	Derm              *bool   `json:"derm" binding:"required"`
-	Others            *string `json:"others" binding:"required"`
+	Well              *bool   `json:"well"`
+	Msk               *bool   `json:"msk"`
+	Cvs               *bool   `json:"cvs"`
+	Respi             *bool   `json:"respi"`
+	Gu                *bool   `json:"gu"`
+	Git               *bool   `json:"git"`
+	Eye               *bool   `json:"eye"`
+	Derm              *bool   `json:"derm"`
+	Others            *string `json:"others"`
 	ConsultationNotes *string `json:"consultationNotes"`
 	Diagnosis         *string `json:"diagnosis"`
 	Treatment         *string `json:"treatment"`
-	ReferralNeeded    *bool   `json:"referralNeeded" binding:"required"`
+	ReferralNeeded    *bool   `json:"referralNeeded"`
 	ReferralLoc       *string `json:"referralLoc"`
 	Remarks           *string `json:"remarks"`
 	// AdminID           uint    // Foreign key referencing Admin's ID

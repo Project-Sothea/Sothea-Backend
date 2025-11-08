@@ -101,11 +101,12 @@ func (p *PatientHandler) GetPatientPhoto(c *gin.Context) {
 
 	// Detect content type using first up to 512 bytes
 	probeLen := len(data)
-	if probeLen > 512 { probeLen = 512 }
+	if probeLen > 512 {
+		probeLen = 512
+	}
 	mime := http.DetectContentType(data[:probeLen])
 	c.Data(http.StatusOK, mime, data)
 }
-
 
 func (p *PatientHandler) CreatePatient(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -437,4 +438,3 @@ func readUploadedFile(c *gin.Context, field string) ([]byte, bool, error) {
 	}
 	return data, true, nil
 }
-
