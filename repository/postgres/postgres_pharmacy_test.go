@@ -1090,7 +1090,7 @@ func Test_displayHelpers(t *testing.T) {
 	// solid with strength
 	p1 := entities.DrugPresentation{
 		DosageFormCode: "TAB", RouteCode: "PO",
-		StrengthNum: intPtr(500), StrengthUnitNum: strPtr("mg"),
+		StrengthNum: floatPtr(500), StrengthUnitNum: strPtr("mg"),
 		DispenseUnit: "tab",
 	}
 	assert.Equal(t, "500 mg TAB", displayStrength(p1))
@@ -1099,8 +1099,8 @@ func Test_displayHelpers(t *testing.T) {
 	// liquid with denominator
 	p2 := entities.DrugPresentation{
 		DosageFormCode: "SYR", RouteCode: "PO",
-		StrengthNum: intPtr(250), StrengthUnitNum: strPtr("mg"),
-		StrengthDen: intPtr(5), StrengthUnitDen: strPtr("mL"),
+		StrengthNum: floatPtr(250), StrengthUnitNum: strPtr("mg"),
+		StrengthDen: floatPtr(5), StrengthUnitDen: strPtr("mL"),
 		DispenseUnit: "mL",
 	}
 	assert.Equal(t, "250 mg/5 mL SYR", displayStrength(p2))
@@ -1109,7 +1109,7 @@ func Test_displayHelpers(t *testing.T) {
 	// bottle with piece content
 	p3 := p2
 	p3.DispenseUnit = "bottle"
-	p3.PieceContentAmount = intPtr(100)
+	p3.PieceContentAmount = floatPtr(100)
 	p3.PieceContentUnit = strPtr("mL")
 	assert.Equal(t, "PCM 250 mg/5 mL SYR (PO) - bottle 100 mL", displayLabel("PCM", p3))
 
@@ -1118,4 +1118,5 @@ func Test_displayHelpers(t *testing.T) {
 	assert.Equal(t, "TAB", displayStrength(p4))
 }
 
-func intPtr(i int) *int { return &i }
+func intPtr(i int) *int           { return &i }
+func floatPtr(i float64) *float64 { return &i }

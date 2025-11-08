@@ -1,11 +1,12 @@
 package controllers
 
 import (
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/jieqiboh/sothea_backend/controllers/middleware"
 	"github.com/jieqiboh/sothea_backend/entities"
-	"net/http"
 )
 
 // LoginHandler represent the httphandler for patient
@@ -51,10 +52,8 @@ func (l *LoginHandler) Login(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"token": tokenString})
-	return
 }
 
 func (l *LoginHandler) IsValidToken(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Valid Token"})
-	return
 }

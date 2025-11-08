@@ -155,17 +155,6 @@ func (h *PrescriptionHandler) DeletePrescription(c *gin.Context) {
 //  Lines
 // -----------------------------------------------------------------------------
 
-type addLineReq struct {
-	PresentationID       int64   `json:"presentationId" binding:"required"`
-	Remarks              *string `json:"remarks"`
-	DoseAmount           int     `json:"doseAmount" binding:"required,gt=0"`
-	DoseUnit             string  `json:"doseUnit" binding:"required"`
-	ScheduleKind         string  `json:"scheduleKind" binding:"required,oneof=hour day week month"`
-	EveryN               int     `json:"everyN" binding:"required,gt=0"`               // e.g. every 2 days
-	FrequencyPerSchedule float64 `json:"frequencyPerSchedule" binding:"required,gt=0"` // e.g. 3 doses per 'day' window
-	Duration             float64 `json:"duration" binding:"required,gt=0"`             // in units of ScheduleKind * EveryN
-}
-
 func (h *PrescriptionHandler) AddLine(c *gin.Context) {
 	prescriptionID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -173,7 +162,7 @@ func (h *PrescriptionHandler) AddLine(c *gin.Context) {
 		return
 	}
 
-	var req addLineReq
+	var req entities.AddLineReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		handleBindErr(c, err)
 		return
@@ -189,6 +178,7 @@ func (h *PrescriptionHandler) AddLine(c *gin.Context) {
 		EveryN:               req.EveryN,
 		FrequencyPerSchedule: req.FrequencyPerSchedule,
 		Duration:             req.Duration,
+		DurationUnit:         req.DurationUnit,
 	}
 
 	ctx := c.Request.Context()
@@ -207,7 +197,7 @@ func (h *PrescriptionHandler) UpdateLine(c *gin.Context) {
 		return
 	}
 
-	var req addLineReq // same payload shape as AddLine
+	var req entities.AddLineReq // same payload shape as AddLine
 	if err := c.ShouldBindJSON(&req); err != nil {
 		handleBindErr(c, err)
 		return
@@ -223,6 +213,7 @@ func (h *PrescriptionHandler) UpdateLine(c *gin.Context) {
 		EveryN:               req.EveryN,
 		FrequencyPerSchedule: req.FrequencyPerSchedule,
 		Duration:             req.Duration,
+		DurationUnit:         req.DurationUnit,
 	}
 
 	ctx := c.Request.Context()
@@ -252,13 +243,6 @@ func (h *PrescriptionHandler) RemoveLine(c *gin.Context) {
 //  Allocations (replace-all)
 // -----------------------------------------------------------------------------
 
-type setAllocReq struct {
-	Allocations []struct {
-		BatchLocationID int64 `json:"batchLocationId" validate:"required"`
-		Quantity        int   `json:"quantity" validate:"gt=0"`
-	} `json:"allocations" validate:"dive"`
-}
-
 func (h *PrescriptionHandler) ListLineAllocations(c *gin.Context) {
 	lineID, err := strconv.ParseInt(c.Param("lineId"), 10, 64)
 	if err != nil {
@@ -280,7 +264,7 @@ func (h *PrescriptionHandler) SetLineAllocations(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid line id"})
 		return
 	}
-	var req setAllocReq
+	var req entities.SetAllocReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		handleBindErr(c, err)
 		return

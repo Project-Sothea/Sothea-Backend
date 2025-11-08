@@ -407,9 +407,6 @@ func (h *PharmacyHandler) DeleteBatchLocation(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// -----------------------------------------------------------------------------
-//  Helpers (same style as yours)
-// -----------------------------------------------------------------------------
 
 func handleBindErr(c *gin.Context, err error) {
 	if ve, ok := err.(validator.ValidationErrors); ok && len(ve) > 0 {

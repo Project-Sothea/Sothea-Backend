@@ -2,7 +2,7 @@
  Create Foundational Vocab
 ********************/
 
--- === Units (use integer “smallest units” everywhere) =========================
+-- === Units (use numeric with 1 decimal place for amounts) =========================
 CREATE TABLE IF NOT EXISTS units (
   code TEXT PRIMARY KEY,                  -- 'mg','g','mcg','mL','L','IU','tab','cap','drop','g'
   is_mass   BOOLEAN NOT NULL DEFAULT FALSE,
@@ -84,15 +84,15 @@ CREATE TABLE drug_presentations (
   -- Strength/concentration:
   -- Solids:  strength_num / piece (e.g., 500 mg per tab) => den* fields NULL
   -- Liquids/creams: strength_num / strength_den (e.g., 250 mg / 5 mL, or 1 g / 100 g)
-  strength_num        INTEGER,                   -- numerator amount (integer, smallest unit)
+  strength_num        NUMERIC(10,1),                   -- numerator amount (up to 1 decimal place)
   strength_unit_num   TEXT REFERENCES units(code),
-  strength_den        INTEGER,                   -- denominator amount (NULL for solids)
+  strength_den        NUMERIC(10,1),                   -- denominator amount (NULL for solids, up to 1 decimal place)
   strength_unit_den   TEXT REFERENCES units(code),
 
   -- What pharmacy counts down (inventory base unit):
   dispense_unit       TEXT NOT NULL REFERENCES units(code),
 
-  piece_content_amount INTEGER,
+  piece_content_amount NUMERIC(10,1),
   piece_content_unit   TEXT REFERENCES units(code),
 
   is_fractional_allowed BOOLEAN DEFAULT FALSE,
@@ -113,7 +113,7 @@ CREATE TABLE drug_presentations (
   -- Either solid OR liquid/cream style is valid:
   CONSTRAINT ck_presentation_style CHECK (
     (strength_den IS NULL AND strength_unit_den IS NULL AND strength_num IS NOT NULL AND strength_unit_num IS NOT NULL)
-    OR
+      OR
     (strength_den IS NOT NULL AND strength_unit_den IS NOT NULL AND strength_num IS NOT NULL AND strength_unit_num IS NOT NULL)
   ),
 
@@ -124,6 +124,7 @@ CREATE TABLE drug_presentations (
       AND dispense_unit IN ('bottle')                     -- add 'tube' later if you use it
       AND piece_content_amount IS NOT NULL
       AND piece_content_unit   IS NOT NULL
+      AND piece_content_unit IN (strength_unit_num, strength_unit_den)
     )
     OR
     (
@@ -300,7 +301,7 @@ ON CONFLICT (generic_name, brand_name) DO NOTHING;
 -- ---------------------------------------------------------------------------
 -- 2) PRESENTATIONS
 --    Note: use SELECT to bind to existing drug IDs. All numeric strengths
---    are integers in smallest units; strength_den NULL for solids.
+--    support up to 1 decimal place; strength_den NULL for solids.
 -- ---------------------------------------------------------------------------
 
 -- Paracetamol 500 mg TAB PO (solid → tab piece, no denominator)
