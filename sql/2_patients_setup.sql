@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS vitalstatistics
     hr1                       NUMERIC(5, 1) NOT NULL,
     hr2                       NUMERIC(5, 1) NOT NULL,
     avg_hr                    NUMERIC(5, 1) NOT NULL,
-    rand_blood_glucose_mmoll  NUMERIC(5, 1) NOT NULL,
+    rand_blood_glucose_mmoll  NUMERIC(5, 1),
     icope_high_bp             BOOLEAN,
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
@@ -130,60 +130,17 @@ CREATE TABLE IF NOT EXISTS visualacuity
 
 CREATE TABLE IF NOT EXISTS dental
 (
-    id                 INTEGER NOT NULL,                                 -- Use INTEGER to match the id type from admin
-    vid                INTEGER NOT NULL,                                 -- Add vid to match the vid type from admin
-    clean_teeth_freq   INTEGER NOT NULL CHECK (clean_teeth_freq BETWEEN 0 AND 7),
-    sugar_consume_freq TEXT NOT NULL,
-    bacterial_exposure BOOLEAN NOT NULL,
-    num_loss_from_tooth_decay INTEGER NOT NULL DEFAULT 0,
-    oral_symptoms BOOLEAN NOT NULL,
-    drink_other_water BOOLEAN NOT NULL,
-
+    id                   INTEGER NOT NULL, -- Use INTEGER to match the id type from admin
+    vid                  INTEGER NOT NULL,
+    fluoride_exposure    TEXT    NOT NULL,
+    diet                 TEXT    NOT NULL,
+    bacterial_exposure   TEXT    NOT NULL,
+    oral_symptoms        BOOLEAN NOT NULL,
+    drink_other_water    BOOLEAN NOT NULL,
     risk_for_dental_carries TEXT NOT NULL,
-
     icope_difficulty_chewing BOOLEAN,
-    icope_pain_in_mouth BOOLEAN,
-
-    dental_notes       TEXT,
-    referral_needed    BOOLEAN NOT NULL,
-    referral_loc       TEXT,
-
-    -- Teeth Chart (FDI numbering), True if cavity exists
-    tooth_11           BOOLEAN,                                          -- Right Upper
-    tooth_12           BOOLEAN,
-    tooth_13           BOOLEAN,
-    tooth_14           BOOLEAN,
-    tooth_15           BOOLEAN,
-    tooth_16           BOOLEAN,
-    tooth_17           BOOLEAN,
-    tooth_18           BOOLEAN,
-
-    tooth_21           BOOLEAN,                                          -- Left Upper
-    tooth_22           BOOLEAN,
-    tooth_23           BOOLEAN,
-    tooth_24           BOOLEAN,
-    tooth_25           BOOLEAN,
-    tooth_26           BOOLEAN,
-    tooth_27           BOOLEAN,
-    tooth_28           BOOLEAN,
-
-    tooth_31           BOOLEAN,                                          -- Left Lower
-    tooth_32           BOOLEAN,
-    tooth_33           BOOLEAN,
-    tooth_34           BOOLEAN,
-    tooth_35           BOOLEAN,
-    tooth_36           BOOLEAN,
-    tooth_37           BOOLEAN,
-    tooth_38           BOOLEAN,
-
-    tooth_41           BOOLEAN,                                          -- Right Lower
-    tooth_42           BOOLEAN,
-    tooth_43           BOOLEAN,
-    tooth_44           BOOLEAN,
-    tooth_45           BOOLEAN,
-    tooth_46           BOOLEAN,
-    tooth_47           BOOLEAN,
-    tooth_48           BOOLEAN,
+    icope_pain_in_mouth  BOOLEAN,
+    dental_notes         TEXT,
 
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
@@ -349,25 +306,22 @@ VALUES
 -- First visit rows rewritten
 INSERT INTO dental
   (id, vid,
-   clean_teeth_freq, sugar_consume_freq,
-   bacterial_exposure, oral_symptoms, drink_other_water,
+   fluoride_exposure, diet, bacterial_exposure,
+   oral_symptoms, drink_other_water,
    risk_for_dental_carries, icope_difficulty_chewing, icope_pain_in_mouth,
-   dental_notes, referral_needed, referral_loc,
-   tooth_11, tooth_21, tooth_22, tooth_35, tooth_47, tooth_48)
+   dental_notes)
 VALUES
   (1, 1,
-   2, '2-3',
-   TRUE,  TRUE,  FALSE,
+   '6, 7', '2-3', 'None in last 2 years',
+   TRUE,  FALSE,
    'Low Risk', FALSE, TRUE,
-   'None', TRUE, 'Dentist',
-   TRUE, FALSE, TRUE, FALSE, TRUE, FALSE),
+   'None'),
 
   (2, 1,
-   3, '≥6',
-   FALSE, FALSE, TRUE,
-   'Medium RIsk',  FALSE, FALSE,
-   'None', FALSE, NULL,
-   FALSE, FALSE, FALSE, FALSE, FALSE, FALSE);
+   '5, 4, 3', '≥4', 'Yes in last 7 - 23 months',
+   FALSE, TRUE,
+   'Middle Risk',  FALSE, FALSE,
+   'None');
 
 
 INSERT INTO doctorsconsultation (id, vid, well, msk, cvs, respi, gu, git, eye, derm, others,

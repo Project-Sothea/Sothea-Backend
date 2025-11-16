@@ -16,7 +16,7 @@ type VitalStatistics struct {
 	HR1                     *float64 `json:"hr1" binding:"required"`
 	HR2                     *float64 `json:"hr2" binding:"required"`
 	AverageHR               *float64 `json:"averageHR" binding:"required"`
-	RandomBloodGlucoseMmolL *float64 `json:"randomBloodGlucoseMmolL" binding:"required"`
+	RandomBloodGlucoseMmolL *float64 `json:"randomBloodGlucoseMmolL"`
 	IcopeHighBp             *bool    `json:"icopeHighBp"`
 	//AdminID                  uint    `gorm:"uniqueIndex;not null"` // Foreign key referencing Admin's ID
 	//Admin                    Admin

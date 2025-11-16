@@ -191,55 +191,27 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 		return nil, err
 	}
 
-	rows = tx.QueryRowContext(ctx, "SELECT * FROM dental WHERE dental.id = $1 AND dental.vid = $2;", id, vid)
+	rows = tx.QueryRowContext(ctx, `
+		SELECT id, vid,
+		       fluoride_exposure, diet, bacterial_exposure,
+		       oral_symptoms, drink_other_water,
+		       risk_for_dental_carries, icope_difficulty_chewing, icope_pain_in_mouth,
+		       dental_notes
+		FROM dental
+		WHERE dental.id = $1 AND dental.vid = $2;`, id, vid)
 	dental := &entities.Dental{}
 	err = rows.Scan(
 		&dental.ID,
 		&dental.VID,
-		&dental.CleanTeethFreq,
-		&dental.SugarConsumeFreq,
+		&dental.FluorideExposure,
+		&dental.Diet,
 		&dental.BacterialExposure,
-		&dental.NumLossFromToothDecay,
 		&dental.OralSymptoms,
 		&dental.DrinkOtherWater,
 		&dental.RiskForDentalCarries,
 		&dental.IcopeDifficultyChewing,
 		&dental.IcopePainInMouth,
 		&dental.DentalNotes,
-		&dental.ReferralNeeded,
-		&dental.ReferralLoc,
-		&dental.Tooth11,
-		&dental.Tooth12,
-		&dental.Tooth13,
-		&dental.Tooth14,
-		&dental.Tooth15,
-		&dental.Tooth16,
-		&dental.Tooth17,
-		&dental.Tooth18,
-		&dental.Tooth21,
-		&dental.Tooth22,
-		&dental.Tooth23,
-		&dental.Tooth24,
-		&dental.Tooth25,
-		&dental.Tooth26,
-		&dental.Tooth27,
-		&dental.Tooth28,
-		&dental.Tooth31,
-		&dental.Tooth32,
-		&dental.Tooth33,
-		&dental.Tooth34,
-		&dental.Tooth35,
-		&dental.Tooth36,
-		&dental.Tooth37,
-		&dental.Tooth38,
-		&dental.Tooth41,
-		&dental.Tooth42,
-		&dental.Tooth43,
-		&dental.Tooth44,
-		&dental.Tooth45,
-		&dental.Tooth46,
-		&dental.Tooth47,
-		&dental.Tooth48,
 	)
 	if errors.Is(err, sql.ErrNoRows) { // no dental found
 		dental = nil
@@ -333,8 +305,8 @@ func (p *postgresPatientRepository) CreatePatient(ctx context.Context, admin *en
 	rows := tx.QueryRowContext(ctx, `INSERT INTO admin (family_group, reg_date, queue_no, name, khmer_name, dob, age, gender, village, 
 		contact_no, pregnant, last_menstrual_period, drug_allergies, sent_to_id) 
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
-	    admin.FamilyGroup, admin.RegDate, admin.QueueNo, admin.Name, admin.KhmerName, admin.Dob, admin.Age, admin.Gender, admin.Village, admin.ContactNo,
-	    admin.Pregnant, admin.LastMenstrualPeriod, admin.DrugAllergies, admin.SentToID)
+		admin.FamilyGroup, admin.RegDate, admin.QueueNo, admin.Name, admin.KhmerName, admin.Dob, admin.Age, admin.Gender, admin.Village, admin.ContactNo,
+		admin.Pregnant, admin.LastMenstrualPeriod, admin.DrugAllergies, admin.SentToID)
 	err = rows.Scan(&patientid)
 	if err != nil { // error inserting admin
 		return -1, err
@@ -372,8 +344,8 @@ func (p *postgresPatientRepository) CreatePatientVisit(ctx context.Context, id i
 	rows := tx.QueryRowContext(ctx, `INSERT INTO admin (id, family_group, reg_date, queue_no, name, khmer_name, dob, age, gender, village, 
 		contact_no, pregnant, last_menstrual_period, drug_allergies, sent_to_id) 
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING vid`,
-	    id, admin.FamilyGroup, admin.RegDate, admin.QueueNo, admin.Name, admin.KhmerName, admin.Dob, admin.Age, admin.Gender, admin.Village, admin.ContactNo,
-	    admin.Pregnant, admin.LastMenstrualPeriod, admin.DrugAllergies, admin.SentToID)
+		id, admin.FamilyGroup, admin.RegDate, admin.QueueNo, admin.Name, admin.KhmerName, admin.Dob, admin.Age, admin.Gender, admin.Village, admin.ContactNo,
+		admin.Pregnant, admin.LastMenstrualPeriod, admin.DrugAllergies, admin.SentToID)
 	err = rows.Scan(&patientid)
 	if err != nil { // error inserting admin
 		return -1, err
@@ -479,10 +451,10 @@ func (p *postgresPatientRepository) UpdatePatientVisit(ctx context.Context, id i
 	phy := patient.Physiotherapy
 	dc := patient.DoctorsConsultation
 	if a != nil { // Update admin
-        _, err = tx.ExecContext(ctx, `UPDATE admin SET family_group = $1, reg_date = $2, queue_no = $3, name = $4, khmer_name = $5, dob = $6, age = $7, 
+		_, err = tx.ExecContext(ctx, `UPDATE admin SET family_group = $1, reg_date = $2, queue_no = $3, name = $4, khmer_name = $5, dob = $6, age = $7, 
 		gender = $8, village = $9, contact_no = $10, pregnant = $11, last_menstrual_period = $12, drug_allergies = $13,
 		sent_to_id = $14 WHERE id = $15 AND vid = $16`, a.FamilyGroup, a.RegDate, a.QueueNo, a.Name, a.KhmerName, a.Dob, a.Age, a.Gender, a.Village, a.ContactNo,
-            a.Pregnant, a.LastMenstrualPeriod, a.DrugAllergies, a.SentToID, id, vid)
+			a.Pregnant, a.LastMenstrualPeriod, a.DrugAllergies, a.SentToID, id, vid)
 		if err != nil {
 			return err
 		}
@@ -660,70 +632,30 @@ func (p *postgresPatientRepository) UpdatePatientVisit(ctx context.Context, id i
 		_, err = tx.ExecContext(ctx, `
 		INSERT INTO dental (
 			id, vid,
-			clean_teeth_freq, sugar_consume_freq, bacterial_exposure, num_loss_from_tooth_decay, oral_symptoms, drink_other_water,
+			fluoride_exposure, diet, bacterial_exposure,
+			oral_symptoms, drink_other_water,
 			risk_for_dental_carries,
 			icope_difficulty_chewing, icope_pain_in_mouth,
-			dental_notes, referral_needed, referral_loc,
-			tooth_11, tooth_12, tooth_13, tooth_14, tooth_15, tooth_16, tooth_17, tooth_18, 
-			tooth_21, tooth_22, tooth_23, tooth_24, tooth_25, tooth_26, tooth_27, tooth_28, tooth_31, tooth_32, tooth_33, tooth_34, tooth_35, 
-			tooth_36, tooth_37, tooth_38, tooth_41, tooth_42, tooth_43, tooth_44, tooth_45, tooth_46, tooth_47, tooth_48
+			dental_notes
 		) 
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, 
-		$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42,$43, $44, $45, $46) 
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
 		ON CONFLICT (id, vid) DO UPDATE SET
-			clean_teeth_freq = $3,
-			sugar_consume_freq = $4,
+			fluoride_exposure = $3,
+			diet = $4,
 			bacterial_exposure = $5,
-			num_loss_from_tooth_decay = $6,
-			oral_symptoms =  $7,
-			drink_other_water = $8,
-			risk_for_dental_carries = $9,
-			icope_difficulty_chewing = $10,
-			icope_pain_in_mouth = $11,
-			dental_notes = $12,
-			referral_needed = $13,
-			referral_loc = $14,
-			tooth_11 = $15,
-			tooth_12 = $16,
-			tooth_13 = $17,
-			tooth_14 = $18,
-			tooth_15 = $19,
-			tooth_16 = $20,
-			tooth_17 = $21,
-			tooth_18 = $22,
-			tooth_21 = $23,
-			tooth_22 = $24,
-			tooth_23 = $25,
-			tooth_24 = $26,
-			tooth_25 = $27,
-			tooth_26 = $28,
-			tooth_27 = $29,
-			tooth_28 = $30,
-			tooth_31 = $31,
-			tooth_32 = $32,
-			tooth_33 = $33,
-			tooth_34 = $34,
-			tooth_35 = $35,
-			tooth_36 = $36,
-			tooth_37 = $37,
-			tooth_38 = $38,
-			tooth_41 = $39,
-			tooth_42 = $40,
-			tooth_43 = $41,
-			tooth_44 = $42,
-			tooth_45 = $43,
-			tooth_46 = $44,
-			tooth_47 = $45,
-			tooth_48 = $46
+			oral_symptoms =  $6,
+			drink_other_water = $7,
+			risk_for_dental_carries = $8,
+			icope_difficulty_chewing = $9,
+			icope_pain_in_mouth = $10,
+			dental_notes = $11
 		`,
 			id, vid,
-			d.CleanTeethFreq, d.SugarConsumeFreq, d.BacterialExposure, d.NumLossFromToothDecay, d.OralSymptoms, d.DrinkOtherWater,
+			d.FluorideExposure, d.Diet, d.BacterialExposure,
+			d.OralSymptoms, d.DrinkOtherWater,
 			d.RiskForDentalCarries,
 			d.IcopeDifficultyChewing, d.IcopePainInMouth,
-			d.DentalNotes, d.ReferralNeeded, d.ReferralLoc,
-			d.Tooth11, d.Tooth12, d.Tooth13, d.Tooth14, d.Tooth15, d.Tooth16, d.Tooth17, d.Tooth18,
-			d.Tooth21, d.Tooth22, d.Tooth23, d.Tooth24, d.Tooth25, d.Tooth26, d.Tooth27, d.Tooth28, d.Tooth31, d.Tooth32, d.Tooth33, d.Tooth34, d.Tooth35,
-			d.Tooth36, d.Tooth37, d.Tooth38, d.Tooth41, d.Tooth42, d.Tooth43, d.Tooth44, d.Tooth45, d.Tooth46, d.Tooth47, d.Tooth48,
+			d.DentalNotes,
 		)
 
 		if err != nil {
@@ -839,33 +771,122 @@ func (p *postgresPatientRepository) GetAllPatientVisitMeta(ctx context.Context, 
 	result := make([]entities.PatientVisitMeta, 0)
 
 	if date.IsZero() { // Date is empty
-		rows, err = p.Conn.QueryContext(ctx, `WITH LatestDates AS (SELECT id, MAX(reg_date) AS latest_reg_date FROM admin GROUP BY id)
-													SELECT DISTINCT ON (a.id) 
-														a.id, a.vid, a.family_group, a.reg_date, a.queue_no, a.name, 
-														a.khmer_name, a.gender, a.village, a.contact_no, a.drug_allergies, 
-														a.sent_to_id, dc.referral_needed
-													FROM 
-														admin a
-													LEFT JOIN 
-														doctorsconsultation dc
-													ON 
-														a.id = dc.id AND a.vid = dc.vid -- assuming the foreign key relationship
-													INNER JOIN 
-														LatestDates ld
-													ON 
-														a.id = ld.id AND a.reg_date = ld.latest_reg_date
-													ORDER BY 
-														a.id, 
-														a.vid DESC;`)
+		rows, err = p.Conn.QueryContext(ctx, `WITH LatestDates AS (
+													SELECT id, MAX(reg_date) AS latest_reg_date
+													FROM admin
+													GROUP BY id
+												)
+												SELECT DISTINCT ON (a.id) 
+													a.id,
+													a.vid,
+													a.family_group,
+													a.reg_date,
+													a.queue_no,
+													a.name,
+													a.khmer_name,
+													a.gender,
+													a.village,
+													a.contact_no,
+													a.drug_allergies,
+													a.sent_to_id,
+													dc.referral_needed,
+													-- Has at least one prescription line (i.e. at least one drug) for this visit
+													EXISTS (
+														SELECT 1
+														FROM prescriptions pr
+														JOIN prescription_lines pl ON pl.prescription_id = pr.id
+														WHERE pr.patient_id = a.id
+														  AND pr.vid = a.vid
+													) AS has_prescription_with_drug,
+													-- If there are lines, TRUE only when none are unpacked
+													CASE
+														WHEN EXISTS (
+															SELECT 1
+															FROM prescriptions pr
+															JOIN prescription_lines pl ON pl.prescription_id = pr.id
+															WHERE pr.patient_id = a.id
+															  AND pr.vid = a.vid
+														) THEN NOT EXISTS (
+															SELECT 1
+															FROM prescriptions pr
+															JOIN prescription_lines pl ON pl.prescription_id = pr.id
+															WHERE pr.patient_id = a.id
+															  AND pr.vid = a.vid
+															  AND (pl.is_packed IS NOT TRUE)
+														)
+														ELSE FALSE
+													END AS all_prescription_drugs_packed,
+													-- Any prescription for this visit has been dispensed
+													EXISTS (
+														SELECT 1
+														FROM prescriptions pr
+														WHERE pr.patient_id = a.id
+														  AND pr.vid = a.vid
+														  AND pr.is_dispensed = TRUE
+													) AS prescription_dispensed
+												FROM 
+													admin a
+												LEFT JOIN 
+													doctorsconsultation dc
+												ON 
+													a.id = dc.id AND a.vid = dc.vid -- assuming the foreign key relationship
+												INNER JOIN 
+													LatestDates ld
+												ON 
+													a.id = ld.id AND a.reg_date = ld.latest_reg_date
+												ORDER BY 
+													a.id, 
+													a.vid DESC;`)
 		if err != nil {
 			return nil, err
 		}
 	} else { // Date is non-empty
 		formattedDate := date.Format("2006-01-02")
 		rows, err = p.Conn.QueryContext(ctx, `SELECT DISTINCT ON (a.id) 
-													a.id, a.vid, a.family_group, a.reg_date, a.queue_no, a.name, 
-													a.khmer_name, a.gender, a.village, a.contact_no, a.drug_allergies, 
-													a.sent_to_id, dc.referral_needed
+													a.id,
+													a.vid,
+													a.family_group,
+													a.reg_date,
+													a.queue_no,
+													a.name,
+													a.khmer_name,
+													a.gender,
+													a.village,
+													a.contact_no,
+													a.drug_allergies,
+													a.sent_to_id,
+													dc.referral_needed,
+													EXISTS (
+														SELECT 1
+														FROM prescriptions pr
+														JOIN prescription_lines pl ON pl.prescription_id = pr.id
+														WHERE pr.patient_id = a.id
+														  AND pr.vid = a.vid
+													) AS has_prescription_with_drug,
+													CASE
+														WHEN EXISTS (
+															SELECT 1
+															FROM prescriptions pr
+															JOIN prescription_lines pl ON pl.prescription_id = pr.id
+															WHERE pr.patient_id = a.id
+															  AND pr.vid = a.vid
+														) THEN NOT EXISTS (
+															SELECT 1
+															FROM prescriptions pr
+															JOIN prescription_lines pl ON pl.prescription_id = pr.id
+															WHERE pr.patient_id = a.id
+															  AND pr.vid = a.vid
+															  AND (pl.is_packed IS NOT TRUE)
+														)
+														ELSE FALSE
+													END AS all_prescription_drugs_packed,
+													EXISTS (
+														SELECT 1
+														FROM prescriptions pr
+														WHERE pr.patient_id = a.id
+														  AND pr.vid = a.vid
+														  AND pr.is_dispensed = TRUE
+													) AS prescription_dispensed
 												FROM 
 													admin a
 												LEFT JOIN 
@@ -899,7 +920,10 @@ func (p *postgresPatientRepository) GetAllPatientVisitMeta(ctx context.Context, 
 			&patientVisitMeta.ContactNo,
 			&patientVisitMeta.DrugAllergies,
 			&patientVisitMeta.SentToID,
-			&patientVisitMeta.ReferralNeeded)
+			&patientVisitMeta.ReferralNeeded,
+			&patientVisitMeta.HasPrescriptionWithDrug,
+			&patientVisitMeta.AllPrescriptionDrugsPacked,
+			&patientVisitMeta.PrescriptionDispensed)
 		if err != nil {
 			return nil, err
 		}
@@ -972,47 +996,16 @@ func (p *postgresPatientRepository) ExportDatabaseToCSV(ctx context.Context) err
         va.l_eye_vision AS va_l_eye_vision,
         va.r_eye_vision AS va_r_eye_vision,
         va.additional_intervention AS va_additional_intervention,
-		-- Dental
-        d.clean_teeth_freq AS d_clean_teeth_freq,
-        d.sugar_consume_freq AS d_sugar_consume_freq,
-        d.past_year_decay AS d_past_year_decay,
-        d.brush_teeth_pain AS d_brush_teeth_pain,
+        -- Dental
+        d.fluoride_exposure AS d_fluoride_exposure,
+        d.diet AS d_diet,
+        d.bacterial_exposure AS d_bacterial_exposure,
+        d.oral_symptoms AS d_oral_symptoms,
         d.drink_other_water AS d_drink_other_water,
+        d.risk_for_dental_carries AS d_risk_for_dental_carries,
+        d.icope_difficulty_chewing AS d_icope_difficulty_chewing,
+        d.icope_pain_in_mouth AS d_icope_pain_in_mouth,
         d.dental_notes AS d_dental_notes,
-        d.referral_needed AS d_referral_needed,
-        d.referral_loc AS d_referral_loc,
-        d.tooth_11 AS d_tooth_11,
-        d.tooth_12 AS d_tooth_12,
-        d.tooth_13 AS d_tooth_13,
-        d.tooth_14 AS d_tooth_14,
-        d.tooth_15 AS d_tooth_15,
-        d.tooth_16 AS d_tooth_16,
-        d.tooth_17 AS d_tooth_17,
-        d.tooth_18 AS d_tooth_18, -- Right Upper
-        d.tooth_21 AS d_tooth_21,
-        d.tooth_22 AS d_tooth_22,
-        d.tooth_23 AS d_tooth_23,
-        d.tooth_24 AS d_tooth_24,
-        d.tooth_25 AS d_tooth_25,
-        d.tooth_26 AS d_tooth_26,
-        d.tooth_27 AS d_tooth_27,
-        d.tooth_28 AS d_tooth_28, -- Left Upper
-        d.tooth_31 AS d_tooth_31,
-        d.tooth_32 AS d_tooth_32,
-        d.tooth_33 AS d_tooth_33,
-        d.tooth_34 AS d_tooth_34,
-        d.tooth_35 AS d_tooth_35,
-        d.tooth_36 AS d_tooth_36,
-        d.tooth_37 AS d_tooth_37,
-        d.tooth_38 AS d_tooth_38, -- Left Lower
-        d.tooth_41 AS d_tooth_41,
-        d.tooth_42 AS d_tooth_42,
-        d.tooth_43 AS d_tooth_43,
-        d.tooth_44 AS d_tooth_44,
-        d.tooth_45 AS d_tooth_45,
-        d.tooth_46 AS d_tooth_46,
-        d.tooth_47 AS d_tooth_47,
-        d.tooth_48 AS d_tooth_48,  -- Right Lower
         -- Fall Risk
         fr.fall_worries AS fr_fall_worries,
         fr.fall_history AS fr_fall_history,
