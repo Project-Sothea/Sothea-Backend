@@ -34,7 +34,7 @@ func newTestPharmacyHandlerNoAuth(r *gin.Engine, uc entities.PharmacyUseCase) {
 		grp.DELETE("/drugs/:drugId", h.DeleteDrug)
 
 		// PRESENTATIONS
-		grp.GET("/drugs/:drugId/presentations", h.ListPresentationsForDrug)
+		grp.GET("/drugs/:drugId/presentations", h.ListPresentations)
 		grp.POST("/drugs/:drugId/presentations", h.CreatePresentation)
 
 		grp.GET("/presentations/:presentationId", h.GetPresentation)
