@@ -71,7 +71,7 @@ func main() {
 	}()
 
 	router := gin.Default()
-	router.Static("/", "./dist")
+	router.Static("/app", "./dist")
 
 	// Root router group for all public API endpoints
 	api := router.Group("/api")

@@ -1,6 +1,6 @@
 {
   "server": {
-    "address": "192.168.0.100:9090"
+    "address": "0.0.0.0:9090"
   },
   "database": {
     "host": "localhost",
