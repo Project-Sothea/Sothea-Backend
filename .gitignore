@@ -5,6 +5,7 @@ logfile.txt
 **/.idea
 /data
 /uploads
+/dist
 tmp/*
 
 # Executables
