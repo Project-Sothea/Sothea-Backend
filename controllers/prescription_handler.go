@@ -19,7 +19,7 @@ type PrescriptionHandler struct {
 	Usecase entities.PrescriptionUseCase
 }
 
-func NewPrescriptionHandler(r *gin.Engine, uc entities.PrescriptionUseCase, secretKey []byte, db *sql.DB) {
+func NewPrescriptionHandler(r gin.IRouter, uc entities.PrescriptionUseCase, secretKey []byte, db *sql.DB) {
 	h := &PrescriptionHandler{Usecase: uc}
 
 	grp := r.Group("/prescriptions")
