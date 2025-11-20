@@ -32,26 +32,26 @@ func displayStrength(p entities.DrugPresentation) string {
 	if p.StrengthDen == nil || p.StrengthUnitDen == nil {
 		// solids (no denominator), e.g. "500 mg TAB"
 		if p.StrengthNum != nil && p.StrengthUnitNum != nil {
-			return fmt.Sprintf("%d %s %s", *p.StrengthNum, *p.StrengthUnitNum, p.DosageFormCode)
+			return fmt.Sprintf("%g %s %s", *p.StrengthNum, *p.StrengthUnitNum, p.DosageFormCode)
 		}
 		return p.DosageFormCode
 	}
 	// liquids/creams, e.g. "250 mg/5 mL SYR"
-	return fmt.Sprintf("%d %s/%d %s %s",
-		derefInt(p.StrengthNum), derefStr(p.StrengthUnitNum),
-		derefInt(p.StrengthDen), derefStr(p.StrengthUnitDen),
+	return fmt.Sprintf("%g %s/%g %s %s",
+		derefFloat(p.StrengthNum), derefStr(p.StrengthUnitNum),
+		derefFloat(p.StrengthDen), derefStr(p.StrengthUnitDen),
 		p.DosageFormCode)
 }
 
 func displayLabel(drugName string, p entities.DrugPresentation) string {
 	base := fmt.Sprintf("%s %s (%s)", drugName, displayStrength(p), p.RouteCode)
 	if p.DispenseUnit == "bottle" && p.PieceContentAmount != nil && p.PieceContentUnit != nil {
-		return fmt.Sprintf("%s - bottle %d %s", base, *p.PieceContentAmount, *p.PieceContentUnit)
+		return fmt.Sprintf("%s - bottle %g %s", base, *p.PieceContentAmount, *p.PieceContentUnit)
 	}
 	return base
 }
 
-func derefInt(p *int) int {
+func derefFloat(p *float64) float64 {
 	if p == nil {
 		return 0
 	}

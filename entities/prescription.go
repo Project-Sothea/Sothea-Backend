@@ -51,8 +51,8 @@ type PrescriptionLine struct {
 	Remarks        *string `json:"remarks,omitempty"` // SIG / instructions
 
 	// Clinical dose input (per administration)
-	DoseAmount int    `json:"doseAmount"` // integer in smallest clinical unit (mg, mL, tab, bottle, etc.)
-	DoseUnit   string `json:"doseUnit"`   // "mg","mL","tab","bottle", etc.
+	DoseAmount float64 `json:"doseAmount"`
+	DoseUnit   string  `json:"doseUnit"` // "mg","mL","tab","bottle", etc.
 
 	// Periodic schedule model:
 	// periods = ceil(duration / everyN); doses = periods * frequencyPerSchedule
@@ -64,7 +64,9 @@ type PrescriptionLine struct {
 	ScheduleKind         string  `json:"scheduleKind"`         // "hour" | "day" | "week" | "month"
 	EveryN               int     `json:"everyN"`               // > 0
 	FrequencyPerSchedule float64 `json:"frequencyPerSchedule"` // administrations per schedule period
-	Duration             float64 `json:"duration"`             // in units of scheduleKind
+
+	Duration     float64 `json:"duration"`     // in units of scheduleKind
+	DurationUnit string  `json:"durationUnit"` // "hour" | "day" | "week" | "month"
 
 	// Computed by backend (in presentation’s dispense unit)
 	TotalToDispense int    `json:"totalToDispense"`
@@ -89,6 +91,18 @@ type PrescriptionLine struct {
 	Allocations []LineAllocation `json:"allocations"`
 }
 
+type AddLineReq struct {
+	PresentationID       int64   `json:"presentationId" binding:"required"`
+	Remarks              *string `json:"remarks"`
+	DoseAmount           float64 `json:"doseAmount" binding:"required,gt=0"`
+	DoseUnit             string  `json:"doseUnit" binding:"required"`
+	ScheduleKind         string  `json:"scheduleKind" binding:"required,oneof=hour day week month"`
+	EveryN               int     `json:"everyN" binding:"required,gt=0"`               // e.g. every 2 days
+	FrequencyPerSchedule float64 `json:"frequencyPerSchedule" binding:"required,gt=0"` // e.g. 3 doses per 'day' window
+	Duration             float64 `json:"duration" binding:"required,gt=0"`             // in units of ScheduleKind * EveryN
+	DurationUnit         string  `json:"durationUnit" binding:"required,oneof=hour day week month"`
+}
+
 type LineAllocation struct {
 	ID              int64     `json:"id"`
 	LineID          int64     `json:"lineId"`
@@ -101,6 +115,13 @@ type LineAllocation struct {
 	BatchNumber string     `json:"batchNumber,omitempty"`
 	Location    string     `json:"location,omitempty"`
 	ExpiryDate  *time.Time `json:"expiryDate,omitempty"`
+}
+
+type SetAllocReq struct {
+	Allocations []struct {
+		BatchLocationID int64 `json:"batchLocationId" validate:"required"`
+		Quantity        int   `json:"quantity" validate:"gt=0"`
+	} `json:"allocations" validate:"dive"`
 }
 
 // -----------------------------------------------------------------------------

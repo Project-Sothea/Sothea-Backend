@@ -19,6 +19,11 @@ type PatientVisitMeta struct {
 	DrugAllergies  *string    `json:"drugAllergies"`
 	SentToID       *bool      `json:"sentToId" binding:"required"`
 	ReferralNeeded *bool      `json:"referralNeeded" binding:"required"`
+
+	// Derived visit-level prescription / dispensing flags
+	HasPrescriptionWithDrug    *bool `json:"hasPrescriptionWithDrug" binding:"required"`
+	AllPrescriptionDrugsPacked *bool `json:"allPrescriptionDrugsPacked" binding:"required"`
+	PrescriptionDispensed      *bool `json:"prescriptionDispensed" binding:"required"`
 }
 
 // TableName specifies the table name for the PatientVisitMeta model.
@@ -42,5 +47,8 @@ func (pvm PatientVisitMeta) String() string {
 	result += fmt.Sprintf("DrugAllergies: %v\n", SafeDeref(pvm.DrugAllergies))
 	result += fmt.Sprintf("SentToID: %t\n", *pvm.SentToID)
 	result += fmt.Sprintf("ReferralNeeded: %t\n", *pvm.ReferralNeeded)
+	result += fmt.Sprintf("HasPrescriptionWithDrug: %t\n", SafeDeref(pvm.HasPrescriptionWithDrug))
+	result += fmt.Sprintf("AllPrescriptionDrugsPacked: %t\n", SafeDeref(pvm.AllPrescriptionDrugsPacked))
+	result += fmt.Sprintf("PrescriptionDispensed: %t\n", SafeDeref(pvm.PrescriptionDispensed))
 	return result
 }

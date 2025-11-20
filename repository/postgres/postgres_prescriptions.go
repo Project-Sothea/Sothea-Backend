@@ -103,7 +103,8 @@ func (r *postgresPrescriptionRepository) GetPrescriptionByID(ctx context.Context
 	SELECT
 		pl.id, pl.prescription_id, pl.presentation_id, pl.remarks,
 		pl.dose_amount, pl.dose_unit,
-		pl.schedule_kind, pl.every_n, pl.frequency_per_schedule, pl.duration,
+		pl.schedule_kind, pl.every_n, pl.frequency_per_schedule,
+		pl.duration, pl.duration_unit,
 		pl.total_to_dispense, pl.is_packed, pl.packed_by, pl.packed_at,
 		u1.name AS packer_name,
 		u2.name AS updater_name,
@@ -138,7 +139,8 @@ func (r *postgresPrescriptionRepository) GetPrescriptionByID(ctx context.Context
 		if err := rows.Scan(
 			&l.ID, &l.PrescriptionID, &l.PresentationID, &l.Remarks,
 			&l.DoseAmount, &l.DoseUnit,
-			&l.ScheduleKind, &l.EveryN, &l.FrequencyPerSchedule, &l.Duration,
+			&l.ScheduleKind, &l.EveryN, &l.FrequencyPerSchedule,
+			&l.Duration, &l.DurationUnit,
 			&l.TotalToDispense, &l.IsPacked, &l.PackedBy, &l.PackedAt,
 			&packerName, &updaterName,
 			&l.DrugName, &l.DisplayRoute, &l.DispenseUnit, &l.DisplayStrength,
@@ -357,13 +359,19 @@ func (r *postgresPrescriptionRepository) AddLine(ctx context.Context, line *enti
 	  INSERT INTO prescription_lines (
 	    prescription_id, presentation_id, remarks,
 	    dose_amount, dose_unit,
-	    schedule_kind, every_n, frequency_per_schedule, duration
+	    schedule_kind, every_n, frequency_per_schedule,
+		duration, duration_unit
 	  )
-	  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+	  VALUES (
+	  	$1,$2,$3,
+		$4,$5,
+		$6,$7,$8,
+		$9,$10)
 	  RETURNING id, total_to_dispense, is_packed
 	`, line.PrescriptionID, line.PresentationID, line.Remarks,
 		line.DoseAmount, line.DoseUnit,
-		line.ScheduleKind, line.EveryN, line.FrequencyPerSchedule, line.Duration).
+		line.ScheduleKind, line.EveryN, line.FrequencyPerSchedule,
+		line.Duration, line.DurationUnit).
 		Scan(&line.ID, &line.TotalToDispense, &line.IsPacked)
 	if err != nil {
 		return nil, mapPrescriptionSQLError(err)
@@ -405,11 +413,19 @@ func (r *postgresPrescriptionRepository) UpdateLine(ctx context.Context, line *e
 	// Load current values to detect what changed (lock the row for the rest of the tx)
 	var cur entities.PrescriptionLine
 	if err := tx.QueryRowContext(ctx, `
-		SELECT presentation_id, dose_amount, dose_unit, schedule_kind, every_n, frequency_per_schedule, duration, remarks
+		SELECT presentation_id,
+		dose_amount, dose_unit,
+		schedule_kind, every_n, frequency_per_schedule,
+		duration, duration_unit,
+		remarks
 		FROM prescription_lines
 		WHERE id=$1 FOR UPDATE
 	`, line.ID).Scan(
-		&cur.PresentationID, &cur.DoseAmount, &cur.DoseUnit, &cur.ScheduleKind, &cur.EveryN, &cur.FrequencyPerSchedule, &cur.Duration, &cur.Remarks,
+		&cur.PresentationID,
+		&cur.DoseAmount, &cur.DoseUnit,
+		&cur.ScheduleKind, &cur.EveryN, &cur.FrequencyPerSchedule,
+		&cur.Duration, &cur.DurationUnit,
+		&cur.Remarks,
 	); err != nil {
 		return nil, err
 	}
@@ -427,14 +443,16 @@ func (r *postgresPrescriptionRepository) UpdateLine(ctx context.Context, line *e
 	  UPDATE prescription_lines SET
 	    presentation_id=$2, remarks=$3,
 	    dose_amount=$4, dose_unit=$5,
-	    schedule_kind=$6, every_n=$7, frequency_per_schedule=$8, duration=$9,
+	    schedule_kind=$6, every_n=$7, frequency_per_schedule=$8,
+		duration=$9, duration_unit=$10,
 	    is_packed=FALSE, packed_by=NULL, packed_at=NULL,
 	    updated_at=NOW()
 	  WHERE id=$1
 	  RETURNING total_to_dispense
 	`, line.ID, line.PresentationID, line.Remarks,
 		line.DoseAmount, line.DoseUnit,
-		line.ScheduleKind, line.EveryN, line.FrequencyPerSchedule, line.Duration).
+		line.ScheduleKind, line.EveryN, line.FrequencyPerSchedule,
+		line.Duration, line.DurationUnit).
 		Scan(&line.TotalToDispense)
 	if err != nil {
 		return nil, mapPrescriptionSQLError(err)

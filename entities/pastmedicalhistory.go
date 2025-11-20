@@ -16,7 +16,7 @@ type PastMedicalHistory struct {
 	UnintentionalWeightLoss *bool `json:"unintentionalWeightLoss" binding:"required"`
 
 	Tuberculosis               *bool `json:"tuberculosis" binding:"required"`
-	TuberculosisHasBeenTreated *bool `json:"tuberculosisHasBeenTreated" binding:"required"`
+	TuberculosisHasBeenTreated *bool `json:"tuberculosisHasBeenTreated"`
 
 	Diabetes                   *bool   `json:"diabetes" binding:"required"`
 	Hypertension               *bool   `json:"hypertension" binding:"required"`

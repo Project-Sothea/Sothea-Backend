@@ -26,17 +26,17 @@ type DrugPresentation struct {
 	RouteCode      string `json:"routeCode"`      // e.g. "PO","TOP"
 
 	// Strength / concentration
-	StrengthNum     *int    `json:"strengthNum,omitempty"`     // e.g. 500
-	StrengthUnitNum *string `json:"strengthUnitNum,omitempty"` // e.g. "mg"
-	StrengthDen     *int    `json:"strengthDen,omitempty"`     // e.g. 5 (mL)
-	StrengthUnitDen *string `json:"strengthUnitDen,omitempty"` // e.g. "mL"
+	StrengthNum     *float64 `json:"strengthNum,omitempty"`     // e.g. 500.0 (supports 1 decimal place)
+	StrengthUnitNum *string  `json:"strengthUnitNum,omitempty"` // e.g. "mg"
+	StrengthDen     *float64 `json:"strengthDen,omitempty"`     // e.g. 5.0 (mL) (supports 1 decimal place)
+	StrengthUnitDen *string  `json:"strengthUnitDen,omitempty"` // e.g. "mL"
 
 	// Inventory base unit (what we actually deduct)
 	DispenseUnit string `json:"dispenseUnit"` // "tab","mL","g","bottle"
 
 	// Only for piece-dispensed liquids/creams (e.g., bottles/tubes)
-	PieceContentAmount *int    `json:"pieceContentAmount,omitempty"` // e.g. 100 (mL per bottle)
-	PieceContentUnit   *string `json:"pieceContentUnit,omitempty"`   // e.g. "mL"
+	PieceContentAmount *float64 `json:"pieceContentAmount,omitempty"` // e.g. 100.0 (mL per bottle) (supports 1 decimal place)
+	PieceContentUnit   *string  `json:"pieceContentUnit,omitempty"`   // e.g. "mL"
 
 	IsFractionalAllowed bool `json:"isFractionalAllowed"`
 

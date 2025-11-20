@@ -35,6 +35,30 @@ CREATE TABLE schedule_kinds (
 INSERT INTO schedule_kinds(code) VALUES
   ('hour'), ('day'), ('week'), ('month');
 
+-- converts any duration unit to hours
+CREATE OR REPLACE FUNCTION duration_to_hours(
+  duration NUMERIC,
+  duration_unit TEXT
+) RETURNS NUMERIC AS $$
+BEGIN
+  IF duration_unit = 'hour' THEN
+    RETURN duration;
+
+  ELSIF duration_unit = 'day' THEN
+    RETURN duration * 24;
+
+  ELSIF duration_unit = 'week' THEN
+    RETURN duration * 24 * 7;          -- 168
+
+  ELSIF duration_unit = 'month' THEN
+    RETURN duration * 730;             -- your chosen avg
+
+  ELSE
+    RAISE EXCEPTION 'Unsupported duration_unit: %', duration_unit;
+  END IF;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
 -- How many administrations occur, given the periodic schedule
 -- periods = ceil(duration / every_n)
 -- doses   = periods * frequency_per_schedule
@@ -42,19 +66,29 @@ CREATE OR REPLACE FUNCTION dose_count_periodic_pure(
   schedule_kind TEXT,
   every_n INT,
   frequency_per_schedule NUMERIC,
-  duration NUMERIC
+  duration NUMERIC,
+  duration_unit TEXT
 ) RETURNS INT AS $$
 DECLARE
+  duration_hours NUMERIC;
+  every_n_hours NUMERIC;
   periods NUMERIC;
 BEGIN
   IF schedule_kind NOT IN ('hour','day','week','month') THEN
-    RAISE EXCEPTION 'Unknown schedule_kind %', schedule_kind;
+    RAISE EXCEPTION 'Unknown schedule_kind: %', schedule_kind;
+  END IF;
+
+  IF duration_unit NOT IN ('hour','day','week','month') THEN
+    RAISE EXCEPTION 'Unknown duration_unit: %', duration_unit;
   END IF;
   IF every_n <= 0 OR frequency_per_schedule <= 0 OR duration <= 0 THEN
     RAISE EXCEPTION 'every_n, frequency_per_schedule, duration must be > 0';
   END IF;
 
-  periods := CEIL(duration / every_n::NUMERIC);
+  -- standardise durtion in same unit as schedule_kind
+  duration_hours := duration_to_hours(duration, duration_unit);
+  every_n_hours := duration_to_hours(every_n, schedule_kind);
+  periods := CEIL(duration_hours / every_n_hours);
   RETURN CEIL(periods * frequency_per_schedule);
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
@@ -71,13 +105,15 @@ CREATE TABLE prescription_lines (
   remarks            TEXT,
 
   -- Clinical dose:
-  dose_amount        INTEGER NOT NULL,            -- smallest clinical unit
+  dose_amount        NUMERIC(10,2) NOT NULL,            -- smallest clinical unit, up to 2 decimal places
   dose_unit          TEXT NOT NULL REFERENCES units(code),
 
   schedule_kind      TEXT NOT NULL REFERENCES schedule_kinds(code),
   every_n INTEGER NOT NULL DEFAULT 1 CHECK (every_n > 0),
   frequency_per_schedule  NUMERIC(6,2) NOT NULL,       -- e.g., 3 for TDS
-  duration      NUMERIC(6,2) NOT NULL,       -- in same unit a schedule
+
+  duration      NUMERIC(6,2) NOT NULL,
+  duration_unit TEXT NOT NULL REFERENCES schedule_kinds(code), 
 
   -- Computed target to pick (in dispense_unit of the presentation):
   total_to_dispense  INTEGER NOT NULL,            -- set by trigger
@@ -153,18 +189,19 @@ $$;
 -- PURE calculator: returns how many to pick in the *dispense unit*
 -- Uses your new schedule fields.
 CREATE OR REPLACE FUNCTION compute_total_to_dispense_pure(
-  dose_amount INT,
+  dose_amount NUMERIC(10,2),
   dose_unit TEXT,
   schedule_kind TEXT,
   every_n INT,
   frequency_per_schedule NUMERIC,
   duration NUMERIC,
+  duration_unit TEXT,
   dispense_unit TEXT,
-  strength_num INT,
+  strength_num NUMERIC(10,1),
   strength_unit_num TEXT,
-  strength_den INT,                  -- NULL for solids
+  strength_den NUMERIC(10,1),                  -- NULL for solids
   strength_unit_den TEXT,            -- NULL for solids
-  piece_content_amount INT,          -- only for bottle/tube; NULL otherwise
+  piece_content_amount NUMERIC(10,1),          -- only for bottle/tube; NULL otherwise
   piece_content_unit TEXT            -- as above (e.g., 'mL' or 'g')
 ) RETURNS INT AS $$
 DECLARE
@@ -175,7 +212,7 @@ DECLARE
   total             NUMERIC;
 BEGIN
   -- 1) Compute how many administrations
-  total_doses := dose_count_periodic_pure(schedule_kind, every_n, frequency_per_schedule, duration);
+  total_doses := dose_count_periodic_pure(schedule_kind, every_n, frequency_per_schedule, duration, duration_unit);
 
   -- 2) Per-administration conversion to "dispense unit"
   IF dose_unit = dispense_unit THEN
@@ -184,25 +221,30 @@ BEGIN
   ELSIF strength_den IS NULL THEN
     -- SOLID: e.g., 500 mg / tab; dispense_unit must be a piece ('tab','cap','drop',...)
     IF dose_unit = strength_unit_num THEN
-      per_dose_dispense := CEIL(dose_amount::NUMERIC / NULLIF(strength_num,0));
+      per_dose_dispense := CEIL((dose_amount::NUMERIC / NULLIF(strength_num,0)) * 100) / 100;
     ELSE
       RAISE EXCEPTION 'Unsupported dose_unit % for solid presentation', dose_unit;
     END IF;
 
   ELSE
     -- LIQUID/SEMI-SOLID with concentration, e.g., 250 mg / 5 mL
-    IF dispense_unit IN ('mL','g') THEN
-      -- continuous pick
-      IF dose_unit = strength_unit_den THEN
-        per_dose_dispense := dose_amount;  -- already mL/g
-      ELSIF dose_unit = strength_unit_num THEN
-        per_dose_dispense := CEIL(dose_amount::NUMERIC * strength_den / NULLIF(strength_num,0));
+    IF dispense_unit <> 'bottle' THEN
+      -- For continuous dispense, dispense_unit must be one of strength_unit_num or strength_unit_den
+      -- Handle cross-conversions between numerator and denominator units
+      IF dose_unit = strength_unit_den AND dispense_unit = strength_unit_num THEN
+        -- Example: 5 mL dose, 250 mg/5 mL, dispense_unit = mg → 5 * 250 / 5 = 250 mg
+        per_dose_dispense := CEIL((dose_amount::NUMERIC * strength_num / NULLIF(strength_den,0)) * 100) / 100;
+      ELSIF dose_unit = strength_unit_num AND dispense_unit = strength_unit_den THEN
+        -- Example: 250 mg dose, 250 mg/5 mL, dispense_unit = mL → 250 * 5 / 250 = 5 mL
+        per_dose_dispense := CEIL((dose_amount::NUMERIC * strength_den / NULLIF(strength_num,0)) * 100) / 100;
       ELSE
-        RAISE EXCEPTION 'Unsupported dose_unit % for continuous dispense', dose_unit;
+        -- dose_unit = dispense_unit is already handled at line 218
+        -- Any other combination is invalid for continuous dispense
+        RAISE EXCEPTION 'Unsupported conversion dose_unit % -> dispense_unit % for continuous dispense', dose_unit, dispense_unit;
       END IF;
 
     ELSIF dispense_unit = 'bottle' THEN
-      -- Bottled liquids (no fractional bottles)
+      -- Bottled liquids (no fractional bottles) - use CEIL
       IF dose_unit = 'bottle' THEN
         -- doctor prescribed in whole bottles per administration
         RETURN CEIL(dose_amount * total_doses);
@@ -212,16 +254,19 @@ BEGIN
         RAISE EXCEPTION 'piece_content_* required for bottle dispense';
       END IF;
 
-      -- Convert dose to the content unit inside one bottle (mL/g)
+      -- Round to 2dp for accuracy in intermediate calculation
       IF dose_unit = piece_content_unit THEN
         per_dose_liquid := dose_amount;
-      ELSIF dose_unit = strength_unit_num THEN
-        per_dose_liquid := CEIL(dose_amount::NUMERIC * strength_den / NULLIF(strength_num,0));
+      ELSIF dose_unit = strength_unit_num AND piece_content_unit = strength_unit_den THEN
+        per_dose_liquid := CEIL((dose_amount::NUMERIC * strength_den / NULLIF(strength_num,0)) * 100) / 100;
+      ELSIF dose_unit = strength_unit_den AND piece_content_unit = strength_unit_num THEN
+        per_dose_liquid := CEIL((dose_amount::NUMERIC * strength_num / NULLIF(strength_den,0)) * 100) / 100;
       ELSE
-        RAISE EXCEPTION 'Unsupported dose_unit % for bottle dispense', dose_unit;
+        RAISE EXCEPTION 'Unsupported conversion dose_unit % -> piece_content_unit % for bottle dispense', dose_unit, piece_content_unit;
       END IF;
 
       total_liquid := per_dose_liquid * total_doses;
+      -- CEIL when converting to bottles (can't have fractional bottles)
       RETURN CEIL(total_liquid / NULLIF(piece_content_amount,0));
 
     ELSE
@@ -257,7 +302,8 @@ BEGIN
 
   NEW.total_to_dispense := compute_total_to_dispense_pure(
     NEW.dose_amount, NEW.dose_unit,
-    NEW.schedule_kind, NEW.every_n, NEW.frequency_per_schedule, NEW.duration,
+    NEW.schedule_kind, NEW.every_n, NEW.frequency_per_schedule,
+    NEW.duration, NEW.duration_unit,
     dp.dispense_unit, dp.strength_num, dp.strength_unit_num,
     dp.strength_den, dp.strength_unit_den,
     dp.piece_content_amount, dp.piece_content_unit

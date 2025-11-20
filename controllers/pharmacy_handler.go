@@ -36,7 +36,7 @@ func NewPharmacyHandler(r *gin.Engine, uc entities.PharmacyUseCase, secretKey []
 	grp.DELETE("/drugs/:drugId", h.DeleteDrug)
 
 	// ------------- PRESENTATIONS -----------
-	grp.GET("/drugs/:drugId/presentations", h.ListPresentationsForDrug)
+	grp.GET("/drugs/presentations", h.ListPresentations)
 	grp.POST("/drugs/:drugId/presentations", h.CreatePresentation)
 
 	grp.GET("/presentations/:presentationId", h.GetPresentation)
@@ -46,6 +46,8 @@ func NewPharmacyHandler(r *gin.Engine, uc entities.PharmacyUseCase, secretKey []
 	// ---------------- BATCHES ---------------
 	grp.GET("/presentations/:presentationId/batches", h.ListBatches)
 	grp.POST("/presentations/:presentationId/batches", h.CreateBatch)
+
+	grp.GET("/presentations/batches", h.ListAllBatches)
 
 	grp.GET("/batches/:batchId", h.GetBatch)
 	grp.PATCH("/batches/:batchId", h.UpdateBatch)
@@ -147,19 +149,43 @@ func (h *PharmacyHandler) DeleteDrug(c *gin.Context) {
 //  PRESENTATION endpoints
 // -----------------------------------------------------------------------------
 
-func (h *PharmacyHandler) ListPresentationsForDrug(c *gin.Context) {
-	drugID, err := strconv.ParseInt(c.Param("drugId"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid drugId"})
+func (h *PharmacyHandler) ListPresentations(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	// If drugId query param is provided, behave like the previous per-drug endpoint
+	if drugIDStr := c.Query("drugId"); drugIDStr != "" {
+		drugID, err := strconv.ParseInt(drugIDStr, 10, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid drugId"})
+			return
+		}
+		dto, err := h.Usecase.GetDrugWithPresentations(ctx, drugID)
+		if err != nil {
+			c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, dto.Presentations)
 		return
 	}
-	ctx := c.Request.Context()
-	dto, err := h.Usecase.GetDrugWithPresentations(ctx, drugID)
+
+	// No drugId → list presentations for all drugs
+	drugs, err := h.Usecase.ListDrugs(ctx, nil)
 	if err != nil {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, dto.Presentations)
+
+	all := make([]entities.DrugPresentationView, 0, 128)
+	for _, d := range drugs {
+		dto, err := h.Usecase.GetDrugWithPresentations(ctx, d.ID)
+		if err != nil {
+			c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
+			return
+		}
+		all = append(all, dto.Presentations...)
+	}
+
+	c.JSON(http.StatusOK, all)
 }
 
 func (h *PharmacyHandler) CreatePresentation(c *gin.Context) {
@@ -277,6 +303,42 @@ func (h *PharmacyHandler) CreateBatch(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, detail)
+}
+
+// ListAllBatches aggregates batches for all presentations of all drugs.
+// Route: GET /pharmacy/presentations/batches
+func (h *PharmacyHandler) ListAllBatches(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	// Get all drugs
+	drugs, err := h.Usecase.ListDrugs(ctx, nil)
+	if err != nil {
+		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
+		return
+	}
+
+	all := make([]entities.BatchDetail, 0, 128)
+
+	for _, d := range drugs {
+		// For each drug, get its presentations
+		dto, err := h.Usecase.GetDrugWithPresentations(ctx, d.ID)
+		if err != nil {
+			c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
+			return
+		}
+
+		// For each presentation, get its batches
+		for _, p := range dto.Presentations {
+			batches, err := h.Usecase.ListBatches(ctx, p.ID)
+			if err != nil {
+				c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
+				return
+			}
+			all = append(all, batches...)
+		}
+	}
+
+	c.JSON(http.StatusOK, all)
 }
 
 func (h *PharmacyHandler) GetBatch(c *gin.Context) {
@@ -406,10 +468,6 @@ func (h *PharmacyHandler) DeleteBatchLocation(c *gin.Context) {
 	}
 	c.Status(http.StatusNoContent)
 }
-
-// -----------------------------------------------------------------------------
-//  Helpers (same style as yours)
-// -----------------------------------------------------------------------------
 
 func handleBindErr(c *gin.Context, err error) {
 	if ve, ok := err.(validator.ValidationErrors); ok && len(ve) > 0 {
