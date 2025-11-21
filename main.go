@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -92,6 +93,13 @@ func main() {
 	prescriptionRepo := _postgresRepository.NewPostgresPrescriptionRepository(db)
 	prescriptionUseCase := _useCase.NewPrescriptionUsecase(prescriptionRepo, pharmacyRepo, 2*time.Second)
 	_httpDelivery.NewPrescriptionHandler(api, prescriptionUseCase, secretKey, db)
+
+	router.NoRoute(func(c *gin.Context) {
+		// Only serve index.html for non-API requests
+		if !strings.HasPrefix(c.Request.URL.Path, "/api") {
+			c.File("./dist/index.html")
+		}
+	})
 
 	router.Run(address)
 }
