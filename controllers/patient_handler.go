@@ -24,13 +24,13 @@ type PatientHandler struct {
 }
 
 // NewPatientHandler will initialize the patients/ resources endpoint
-func NewPatientHandler(e *gin.Engine, us entities.PatientUseCase, secretKey []byte) {
+func NewPatientHandler(r gin.IRouter, us entities.PatientUseCase, secretKey []byte) {
 	handler := &PatientHandler{
 		Usecase: us,
 	}
 
 	// Protected routes
-	authorized := e.Group("/")
+	authorized := r.Group("/")
 	authorized.Use(middleware.AuthRequired(secretKey))
 	{
 		authorized.GET("/patient/:id/:vid", handler.GetPatientVisit)

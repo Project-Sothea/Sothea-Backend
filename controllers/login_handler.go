@@ -16,12 +16,12 @@ type LoginHandler struct {
 }
 
 // NewLoginHandler will initialize the resources endpoint
-func NewLoginHandler(e *gin.Engine, us entities.LoginUseCase, secretKey []byte) {
+func NewLoginHandler(r gin.IRouter, us entities.LoginUseCase, secretKey []byte) {
 	handler := &LoginHandler{
 		Usecase: us,
 	}
-	e.POST("/login", handler.Login)
-	e.GET("/login/is-valid-token", middleware.AuthRequired(secretKey), handler.IsValidToken)
+	r.POST("/login", handler.Login)
+	r.GET("/login/is-valid-token", middleware.AuthRequired(secretKey), handler.IsValidToken)
 }
 
 func (l *LoginHandler) Login(c *gin.Context) {

@@ -5,9 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
-	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	_httpDelivery "github.com/jieqiboh/sothea_backend/controllers"
 	_postgresRepository "github.com/jieqiboh/sothea_backend/repository/postgres"
@@ -72,29 +72,34 @@ func main() {
 	}()
 
 	router := gin.Default()
-	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173", "*"},
-		AllowHeaders:     []string{"Origin", "Authorization", "Content-Type"},
-		AllowMethods:     []string{"GET", "POST", "DELETE", "PATCH", "PUT"},
-		AllowCredentials: true,
-		MaxAge:           12 * time.Hour,
-	}))
+	router.Static("/app", "./dist")
+
+	// Root router group for all public API endpoints
+	api := router.Group("/api")
+
 	patientRepo := _postgresRepository.NewPostgresPatientRepository(db)
 	// Set up login routes
 	loginUseCase := _useCase.NewLoginUseCase(patientRepo, 5*time.Second, secretKey)
-	_httpDelivery.NewLoginHandler(router, loginUseCase, secretKey)
+	_httpDelivery.NewLoginHandler(api, loginUseCase, secretKey)
 
 	// Set up patient routes
 	patientUseCase := _useCase.NewPatientUsecase(patientRepo, 2*time.Second)
-	_httpDelivery.NewPatientHandler(router, patientUseCase, secretKey)
+	_httpDelivery.NewPatientHandler(api, patientUseCase, secretKey)
 
 	pharmacyRepo := _postgresRepository.NewPostgresPharmacyRepository(db)
 	pharmacyUseCase := _useCase.NewPharmacyUsecase(pharmacyRepo, 2*time.Second)
-	_httpDelivery.NewPharmacyHandler(router, pharmacyUseCase, secretKey, db)
+	_httpDelivery.NewPharmacyHandler(api, pharmacyUseCase, secretKey, db)
 
 	prescriptionRepo := _postgresRepository.NewPostgresPrescriptionRepository(db)
 	prescriptionUseCase := _useCase.NewPrescriptionUsecase(prescriptionRepo, pharmacyRepo, 2*time.Second)
-	_httpDelivery.NewPrescriptionHandler(router, prescriptionUseCase, secretKey, db)
+	_httpDelivery.NewPrescriptionHandler(api, prescriptionUseCase, secretKey, db)
+
+	router.NoRoute(func(c *gin.Context) {
+		// Only serve index.html for non-API requests
+		if !strings.HasPrefix(c.Request.URL.Path, "/api") {
+			c.File("./dist/index.html")
+		}
+	})
 
 	router.Run(address)
 }

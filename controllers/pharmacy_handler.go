@@ -21,7 +21,7 @@ type PharmacyHandler struct {
 }
 
 // Registers /pharmacy/* routes and applies JWT + Tx middlewares.
-func NewPharmacyHandler(r *gin.Engine, uc entities.PharmacyUseCase, secretKey []byte, db *sql.DB) {
+func NewPharmacyHandler(r gin.IRouter, uc entities.PharmacyUseCase, secretKey []byte, db *sql.DB) {
 	h := &PharmacyHandler{Usecase: uc}
 
 	grp := r.Group("/pharmacy")
