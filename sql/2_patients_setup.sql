@@ -39,20 +39,20 @@ CREATE TABLE IF NOT EXISTS pastmedicalhistory
 (
     id                           INTEGER NOT NULL,                       -- Use INTEGER to match the id type from admin
     vid                          INTEGER NOT NULL,                       -- Add vid to match the vid type from admin
-    cough                        BOOLEAN NOT NULL,
-    fever                        BOOLEAN NOT NULL,
-    blocked_nose                 BOOLEAN NOT NULL,
-    sore_throat                  BOOLEAN NOT NULL,
-    night_sweats                 BOOLEAN NOT NULL,
-    unintentional_weight_loss    BOOLEAN NOT NULL,
-    tuberculosis                 BOOLEAN NOT NULL,
-    tuberculosis_has_been_treated BOOLEAN NOT NULL,
-    diabetes                     BOOLEAN NOT NULL,
-    hypertension                 BOOLEAN NOT NULL,
-    hyperlipidemia               BOOLEAN NOT NULL,
-    chronic_joint_pains          BOOLEAN NOT NULL,
-    chronic_muscle_aches         BOOLEAN NOT NULL,
-    sexually_transmitted_disease BOOLEAN NOT NULL,
+    cough                        BOOLEAN,                               -- Allow NULL for 'Nil' option
+    fever                        BOOLEAN,                               -- Allow NULL for 'Nil' option
+    blocked_nose                 BOOLEAN,                               -- Allow NULL for 'Nil' option
+    sore_throat                  BOOLEAN,                               -- Allow NULL for 'Nil' option
+    night_sweats                 BOOLEAN,                               -- Allow NULL for 'Nil' option
+    unintentional_weight_loss    BOOLEAN,                               -- Allow NULL for 'Nil' option
+    tuberculosis                 BOOLEAN,                               -- Allow NULL for 'Nil' option
+    tuberculosis_has_been_treated BOOLEAN,                              -- Allow NULL for 'Nil' option
+    diabetes                     BOOLEAN,                               -- Allow NULL for 'Nil' option
+    hypertension                 BOOLEAN,                               -- Allow NULL for 'Nil' option
+    hyperlipidemia               BOOLEAN,                               -- Allow NULL for 'Nil' option
+    chronic_joint_pains          BOOLEAN,                               -- Allow NULL for 'Nil' option
+    chronic_muscle_aches         BOOLEAN,                               -- Allow NULL for 'Nil' option
+    sexually_transmitted_disease BOOLEAN,                               -- Allow NULL for 'Nil' option
     specified_stds               TEXT,
     others                       TEXT,
     PRIMARY KEY (id, vid),                                               -- Composite primary key

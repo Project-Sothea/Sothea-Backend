@@ -8,22 +8,22 @@ type PastMedicalHistory struct {
 	ID  int32 `json:"id" binding:"-"`
 	VID int32 `json:"vid" binding:"-"`
 
-	Cough                   *bool `json:"cough" binding:"required"`
-	Fever                   *bool `json:"fever" binding:"required"`
-	BlockedNose             *bool `json:"blockedNose" binding:"required"`
-	SoreThroat              *bool `json:"soreThroat" binding:"required"`
-	NightSweats             *bool `json:"nightSweats" binding:"required"`
-	UnintentionalWeightLoss *bool `json:"unintentionalWeightLoss" binding:"required"`
+	Cough                   *bool `json:"cough"`                   // Allow null for 'Nil' option
+	Fever                   *bool `json:"fever"`                   // Allow null for 'Nil' option
+	BlockedNose             *bool `json:"blockedNose"`             // Allow null for 'Nil' option
+	SoreThroat              *bool `json:"soreThroat"`              // Allow null for 'Nil' option
+	NightSweats             *bool `json:"nightSweats"`             // Allow null for 'Nil' option
+	UnintentionalWeightLoss *bool `json:"unintentionalWeightLoss"` // Allow null for 'Nil' option
 
-	Tuberculosis               *bool `json:"tuberculosis" binding:"required"`
-	TuberculosisHasBeenTreated *bool `json:"tuberculosisHasBeenTreated"`
+	Tuberculosis               *bool `json:"tuberculosis"`               // Allow null for 'Nil' option
+	TuberculosisHasBeenTreated *bool `json:"tuberculosisHasBeenTreated"` // Allow null for 'Nil' option
 
-	Diabetes                   *bool   `json:"diabetes" binding:"required"`
-	Hypertension               *bool   `json:"hypertension" binding:"required"`
-	Hyperlipidemia             *bool   `json:"hyperlipidemia" binding:"required"`
-	ChronicJointPains          *bool   `json:"chronicJointPains" binding:"required"`
-	ChronicMuscleAches         *bool   `json:"chronicMuscleAches" binding:"required"`
-	SexuallyTransmittedDisease *bool   `json:"sexuallyTransmittedDisease" binding:"required"`
+	Diabetes                   *bool   `json:"diabetes"`                   // Allow null for 'Nil' option
+	Hypertension               *bool   `json:"hypertension"`               // Allow null for 'Nil' option
+	Hyperlipidemia             *bool   `json:"hyperlipidemia"`             // Allow null for 'Nil' option
+	ChronicJointPains          *bool   `json:"chronicJointPains"`          // Allow null for 'Nil' option
+	ChronicMuscleAches         *bool   `json:"chronicMuscleAches"`         // Allow null for 'Nil' option
+	SexuallyTransmittedDisease *bool   `json:"sexuallyTransmittedDisease"` // Allow null for 'Nil' option
 	SpecifiedSTDs              *string `json:"specifiedSTDs"`
 	Others                     *string `json:"others"`
 	//AdminID                    uint `gorm:"uniqueIndex;not null"` // Foreign key referencing Admin's ID
@@ -41,22 +41,22 @@ func (pmh PastMedicalHistory) String() string {
 	result += fmt.Sprintf("ID: %d\n", pmh.ID)
 	result += fmt.Sprintf("VID: %d\n", pmh.VID)
 
-	result += fmt.Sprintf("Cough: %t\n", *pmh.Cough)
-	result += fmt.Sprintf("Fever %t\n", *pmh.Fever)
-	result += fmt.Sprintf("Blocked Nose: %t\n", *pmh.BlockedNose)
-	result += fmt.Sprintf("Sore Throat: %t\n", *pmh.SoreThroat)
-	result += fmt.Sprintf("Night Sweats: %t\n", *pmh.NightSweats)
-	result += fmt.Sprintf("Unintentional Weight Loss: %t\n", *pmh.UnintentionalWeightLoss)
+	result += fmt.Sprintf("Cough: %s\n", SafeDerefBool(pmh.Cough))
+	result += fmt.Sprintf("Fever: %s\n", SafeDerefBool(pmh.Fever))
+	result += fmt.Sprintf("Blocked Nose: %s\n", SafeDerefBool(pmh.BlockedNose))
+	result += fmt.Sprintf("Sore Throat: %s\n", SafeDerefBool(pmh.SoreThroat))
+	result += fmt.Sprintf("Night Sweats: %s\n", SafeDerefBool(pmh.NightSweats))
+	result += fmt.Sprintf("Unintentional Weight Loss: %s\n", SafeDerefBool(pmh.UnintentionalWeightLoss))
 
-	result += fmt.Sprintf("Tuberculosis: %t\n", *pmh.Tuberculosis)
-	result += fmt.Sprintf("Has Tuberculosis been treated?: %t\n", *pmh.TuberculosisHasBeenTreated)
+	result += fmt.Sprintf("Tuberculosis: %s\n", SafeDerefBool(pmh.Tuberculosis))
+	result += fmt.Sprintf("Has Tuberculosis been treated?: %s\n", SafeDerefBool(pmh.TuberculosisHasBeenTreated))
 
-	result += fmt.Sprintf("Diabetes: %t\n", *pmh.Diabetes)
-	result += fmt.Sprintf("Hypertension: %t\n", *pmh.Hypertension)
-	result += fmt.Sprintf("Hyperlipidemia: %t\n", *pmh.Hyperlipidemia)
-	result += fmt.Sprintf("ChronicJointPains: %t\n", *pmh.ChronicJointPains)
-	result += fmt.Sprintf("ChronicMuscleAches: %t\n", *pmh.ChronicMuscleAches)
-	result += fmt.Sprintf("SexuallyTransmittedDisease: %t\n", *pmh.SexuallyTransmittedDisease)
+	result += fmt.Sprintf("Diabetes: %s\n", SafeDerefBool(pmh.Diabetes))
+	result += fmt.Sprintf("Hypertension: %s\n", SafeDerefBool(pmh.Hypertension))
+	result += fmt.Sprintf("Hyperlipidemia: %s\n", SafeDerefBool(pmh.Hyperlipidemia))
+	result += fmt.Sprintf("ChronicJointPains: %s\n", SafeDerefBool(pmh.ChronicJointPains))
+	result += fmt.Sprintf("ChronicMuscleAches: %s\n", SafeDerefBool(pmh.ChronicMuscleAches))
+	result += fmt.Sprintf("SexuallyTransmittedDisease: %s\n", SafeDerefBool(pmh.SexuallyTransmittedDisease))
 	result += fmt.Sprintf("SpecifiedSTDs: %s\n", SafeDeref(pmh.SpecifiedSTDs))
 	result += fmt.Sprintf("Others: %s\n", SafeDeref(pmh.Others))
 	return result

@@ -24,3 +24,14 @@ func SafeDerefTime(p *time.Time) time.Time {
 	}
 	return *p
 }
+
+// SafeDerefBool safely dereferences a *bool, returning "Nil" if nil, otherwise "true" or "false"
+func SafeDerefBool(p *bool) string {
+	if p == nil {
+		return "Nil"
+	}
+	if *p {
+		return "true"
+	}
+	return "false"
+}
