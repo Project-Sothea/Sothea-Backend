@@ -44,7 +44,7 @@ CREATE TABLE routes (
 
 INSERT INTO routes(code,label) VALUES
   ('PO','Oral'),('IV','Intravenous'),('IM','Intramuscular'),
-  ('TOP','Topical'),('OTIC','Ear'),('OPH','Eye'),('INH','Inhalation');
+  ('TOP','Topical'),('OTIC','Ear'),('OPH','Eye'),('INH','Inhalation'), ('NAS','Nasal');
 
 
 /*******************
