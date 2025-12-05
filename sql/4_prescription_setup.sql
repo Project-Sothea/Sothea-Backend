@@ -123,7 +123,7 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 CREATE TABLE prescription_lines (
   id                 BIGSERIAL PRIMARY KEY,
   prescription_id    BIGINT NOT NULL REFERENCES prescriptions(id) ON DELETE CASCADE,
-  presentation_id    BIGINT NOT NULL REFERENCES drug_presentations(id),
+  drug_id            BIGINT NOT NULL REFERENCES drugs(id),
   remarks            TEXT,
   prn                BOOLEAN NOT NULL DEFAULT FALSE, -- pro re nata (as needed)
 
@@ -151,7 +151,7 @@ CREATE TABLE prescription_lines (
 );
 
 CREATE INDEX idx_lines_rx ON prescription_lines (prescription_id);
-CREATE INDEX idx_lines_presentation ON prescription_lines (presentation_id);
+CREATE INDEX idx_lines_drug ON prescription_lines (drug_id);
 
 CREATE TRIGGER trg_lines_audit
 BEFORE INSERT OR UPDATE ON prescription_lines
@@ -162,7 +162,7 @@ AFTER INSERT OR UPDATE OR DELETE ON prescription_lines
 FOR EACH ROW EXECUTE FUNCTION audit_row();
 
 CREATE OR REPLACE FUNCTION ck_line_stock_possible(
-  p_presentation_id BIGINT,
+  p_drug_id         BIGINT,
   p_required        INTEGER,
   p_line_id         BIGINT  -- may be NULL on INSERT
 )
@@ -193,14 +193,14 @@ BEGIN
     INTO available
     FROM batch_locations bl
     JOIN drug_batches b ON b.id = bl.batch_id
-   WHERE b.presentation_id = p_presentation_id;
+   WHERE b.drug_id = p_drug_id;
 
   IF available < need_extra THEN
     RAISE EXCEPTION 'insufficient stock: total needed %, available %', p_required, available + need_extra
       USING ERRCODE   = '23514',                 -- check_violation
             CONSTRAINT = 'ck_insufficient_stock',
             DETAIL     = json_build_object(
-                            'presentation_id', p_presentation_id,
+                            'drug_id', p_drug_id,
                             'total_required', p_required,
                             'total_available', available + allocated 
                           )::text;
@@ -223,8 +223,8 @@ CREATE OR REPLACE FUNCTION compute_total_to_dispense_pure(
   strength_unit_num TEXT,
   strength_den NUMERIC(10,1),                  -- NULL for solids
   strength_unit_den TEXT,            -- NULL for solids
-  piece_content_amount NUMERIC(10,1),          -- only for bottle/tube; NULL otherwise
-  piece_content_unit TEXT            -- as above (e.g., 'mL' or 'g')
+  piece_content_amount NUMERIC(10,1),          -- only for bottle/tube/inhaler; NULL otherwise
+  piece_content_unit TEXT            -- as above (e.g., 'mL', 'g', or 'puff')
 ) RETURNS INT AS $$
 DECLARE
   per_dose_dispense NUMERIC;  -- in dispense_unit
@@ -243,15 +243,15 @@ BEGIN
     -- dispense_unit is always valid
     IF dose_unit = dispense_unit THEN
       per_dose_dispense := dose_amount;
-    -- If bottle with piece_content_unit, piece_content_unit is also valid
-    ELSIF dispense_unit = 'bottle' AND piece_content_unit IS NOT NULL AND dose_unit = piece_content_unit THEN
+    -- If piece-based unit (bottle/tube/inhaler) with piece_content_unit, piece_content_unit is also valid
+    ELSIF dispense_unit IN ('bottle', 'tube', 'inhaler') AND piece_content_unit IS NOT NULL AND dose_unit = piece_content_unit THEN
       per_dose_liquid := dose_amount;
       total_liquid := per_dose_liquid * total_doses;
       RETURN CEIL(total_liquid / NULLIF(piece_content_amount, 0));
     ELSE
       RAISE EXCEPTION 'No strength data: dose_unit % must be dispense_unit (%)%', 
         dose_unit, dispense_unit,
-        CASE WHEN dispense_unit = 'bottle' AND piece_content_unit IS NOT NULL 
+        CASE WHEN dispense_unit IN ('bottle', 'tube', 'inhaler') AND piece_content_unit IS NOT NULL 
           THEN ' or piece_content_unit (' || piece_content_unit || ')' 
           ELSE '' END;
     END IF;
@@ -275,8 +275,8 @@ BEGIN
     IF dose_unit = dispense_unit THEN
       per_dose_dispense := dose_amount;
     
-    -- CASE 3.1 & 3.2: Not bottle, OR bottle without piece_content
-    ELSIF dispense_unit <> 'bottle' OR (dispense_unit = 'bottle' AND piece_content_unit IS NULL) THEN
+    -- CASE 3.1 & 3.2: Not piece-based with content, OR piece-based without piece_content
+    ELSIF dispense_unit NOT IN ('bottle', 'tube', 'inhaler') OR (dispense_unit IN ('bottle', 'tube', 'inhaler') AND piece_content_unit IS NULL) THEN
       -- If dispense_unit equals either strength_unit_num OR strength_unit_den,
       -- then BOTH strength_unit_num AND strength_unit_den are valid
       IF dispense_unit = strength_unit_num AND dose_unit = strength_unit_den THEN
@@ -292,8 +292,8 @@ BEGIN
           dose_unit, dispense_unit, strength_unit_num, strength_unit_den;
       END IF;
 
-    -- CASE 3.3: Bottle with piece_content_unit
-    ELSIF dispense_unit = 'bottle' AND piece_content_unit IS NOT NULL THEN
+    -- CASE 3.3: Piece-based unit (bottle/tube/inhaler) with piece_content_unit
+    ELSIF dispense_unit IN ('bottle', 'tube', 'inhaler') AND piece_content_unit IS NOT NULL THEN
       -- piece_content_unit is always valid
       IF dose_unit = piece_content_unit THEN
         per_dose_liquid := dose_amount;
@@ -352,11 +352,11 @@ BEGIN
          strength_den, strength_unit_den,
          piece_content_amount, piece_content_unit
     INTO dp
-    FROM drug_presentations
-   WHERE id = NEW.presentation_id;
+    FROM drugs
+   WHERE id = NEW.drug_id;
 
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'presentation % not found for line', NEW.presentation_id;
+    RAISE EXCEPTION 'drug % not found for line', NEW.drug_id;
   END IF;
 
   NEW.total_to_dispense := compute_total_to_dispense_pure(
@@ -372,7 +372,7 @@ BEGIN
   -- Recheck for update when qty-driving fields change
   IF TG_OP = 'UPDATE' THEN
     must_check := must_check OR (
-      NEW.presentation_id        IS DISTINCT FROM OLD.presentation_id OR
+      NEW.drug_id                IS DISTINCT FROM OLD.drug_id OR
       NEW.dose_amount            IS DISTINCT FROM OLD.dose_amount OR
       NEW.dose_unit              IS DISTINCT FROM OLD.dose_unit OR
       NEW.frequency_code         IS DISTINCT FROM OLD.frequency_code OR
@@ -382,7 +382,7 @@ BEGIN
   END IF;
   
   IF must_check THEN
-    PERFORM ck_line_stock_possible(NEW.presentation_id, NEW.total_to_dispense, NEW.id);
+    PERFORM ck_line_stock_possible(NEW.drug_id, NEW.total_to_dispense, NEW.id);
   END IF;
 
   RETURN NEW;
@@ -548,31 +548,31 @@ BEFORE DELETE ON prescription_batch_items
 FOR EACH ROW EXECUTE FUNCTION trg_pbi_adjust_stock();
 
 -- DEFERRABLE constraint trigger to allow multi-row transactions
-CREATE OR REPLACE FUNCTION ck_pbi_presentation_match()
+CREATE OR REPLACE FUNCTION ck_pbi_drug_match()
 RETURNS TRIGGER AS $$
 DECLARE
   bl_batch_id BIGINT;
-  bl_pres_id  BIGINT;
-  line_pres_id BIGINT;
+  bl_drug_id  BIGINT;
+  line_drug_id BIGINT;
 BEGIN
-  SELECT b.id, b.presentation_id INTO bl_batch_id, bl_pres_id
+  SELECT b.id, b.drug_id INTO bl_batch_id, bl_drug_id
   FROM batch_locations bl
   JOIN drug_batches b ON b.id = bl.batch_id
   WHERE bl.id = NEW.batch_location_id;
 
-  SELECT presentation_id INTO line_pres_id FROM prescription_lines WHERE id = NEW.line_id;
+  SELECT drug_id INTO line_drug_id FROM prescription_lines WHERE id = NEW.line_id;
 
-  IF bl_pres_id IS DISTINCT FROM line_pres_id THEN
-    RAISE EXCEPTION 'Batch location % belongs to presentation %, but line % is for presentation %',
-      NEW.batch_location_id, bl_pres_id, NEW.line_id, line_pres_id;
+  IF bl_drug_id IS DISTINCT FROM line_drug_id THEN
+    RAISE EXCEPTION 'Batch location % belongs to drug %, but line % is for drug %',
+      NEW.batch_location_id, bl_drug_id, NEW.line_id, line_drug_id;
   END IF;
 
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS pbi_ck_presentation ON prescription_batch_items;
-CREATE CONSTRAINT TRIGGER pbi_ck_presentation
+DROP TRIGGER IF EXISTS pbi_ck_drug ON prescription_batch_items;
+CREATE CONSTRAINT TRIGGER pbi_ck_drug
 AFTER INSERT OR UPDATE ON prescription_batch_items
 DEFERRABLE INITIALLY DEFERRED
-FOR EACH ROW EXECUTE FUNCTION ck_pbi_presentation_match();
+FOR EACH ROW EXECUTE FUNCTION ck_pbi_drug_match();

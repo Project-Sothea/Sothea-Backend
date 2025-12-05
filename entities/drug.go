@@ -6,22 +6,13 @@ import (
 	"time"
 )
 
-// High-level identity (no strength/units here)
+// Drug
 type Drug struct {
-	ID          int64     `json:"id"`
-	GenericName string    `json:"genericName"`
-	BrandName   *string   `json:"brandName,omitempty"`
-	ATCCode     *string   `json:"atcCode,omitempty"`
-	Notes       *string   `json:"notes,omitempty"`
-	IsActive    bool      `json:"isActive"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
-}
+	ID          int64   `json:"id"`
+	GenericName string  `json:"genericName"`
+	BrandName   *string `json:"brandName,omitempty"`
+	ATCCode     *string `json:"atcCode,omitempty"`
 
-// How it’s supplied/dispensed. One drug can have many presentations.
-type DrugPresentation struct {
-	ID             int64  `json:"id"`
-	DrugID         int64  `json:"drugId"`
 	DosageFormCode string `json:"dosageFormCode"` // e.g. "TAB","SYR","CREAM"
 	RouteCode      string `json:"routeCode"`      // e.g. "PO","TOP"
 
@@ -34,42 +25,39 @@ type DrugPresentation struct {
 	// Inventory base unit (what we actually deduct)
 	DispenseUnit string `json:"dispenseUnit"` // "tab","mL","g","bottle"
 
-	// Only for piece-dispensed liquids/creams (e.g., bottles/tubes)
-	PieceContentAmount *float64 `json:"pieceContentAmount,omitempty"` // e.g. 100.0 (mL per bottle) (supports 1 decimal place)
-	PieceContentUnit   *string  `json:"pieceContentUnit,omitempty"`   // e.g. "mL"
+	// Only for piece-dispensed items (e.g., bottles, tubes, inhalers)
+	PieceContentAmount *float64 `json:"pieceContentAmount,omitempty"` // e.g. 100.0 (mL per bottle, g per tube, puffs per inhaler) (supports 1 decimal place)
+	PieceContentUnit   *string  `json:"pieceContentUnit,omitempty"`   // e.g. "mL", "g", "puff"
 
 	IsFractionalAllowed bool `json:"isFractionalAllowed"`
 
+	DisplayAsPercentage bool `json:"displayAsPercentage"` // If true, show concentration as % (e.g., 1% instead of 1 g/100 g)
+
 	Barcode   *string   `json:"barcode,omitempty"`
 	Notes     *string   `json:"notes,omitempty"`
+	IsActive  bool      `json:"isActive"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // Convenience for dropdowns / labels (computed server-side)
-type DrugPresentationView struct {
-	DrugPresentation
-	DrugName        string `json:"drugName"`        // e.g. "Paracetamol"
+type DrugView struct {
+	Drug
 	DisplayStrength string `json:"displayStrength"` // e.g. "500 mg tab" or "250 mg/5 mL syrup"
 	DisplayRoute    string `json:"displayRoute"`    // e.g. "PO"
 	DisplayLabel    string `json:"displayLabel"`    // e.g. "Paracetamol 500 mg tablet (PO)"
 }
 
-type DrugWithPresentations struct {
-	Drug          Drug                   `json:"drug"`
-	Presentations []DrugPresentationView `json:"presentations"`
-}
-
-// Batch = one lot for a presentation. Quantity is in the presentation’s DispenseUnit.
+// Batch = one lot for a drug. Quantity is in the drug's DispenseUnit.
 type DrugBatch struct {
-	ID             int64      `json:"id"`
-	PresentationID int64      `json:"presentationId"`
-	BatchNumber    string     `json:"batchNumber"`
-	ExpiryDate     *time.Time `json:"expiryDate,omitempty"`
-	Supplier       *string    `json:"supplier,omitempty"`
-	Quantity       int        `json:"quantity"` // current on-hand in DispenseUnit
-	CreatedAt      time.Time  `json:"createdAt"`
-	UpdatedAt      time.Time  `json:"updatedAt"`
+	ID          int64      `json:"id"`
+	DrugID      int64      `json:"drugId"`
+	BatchNumber string     `json:"batchNumber"`
+	ExpiryDate  *time.Time `json:"expiryDate,omitempty"`
+	Supplier    *string    `json:"supplier,omitempty"`
+	Quantity    int        `json:"quantity"` // current on-hand in DispenseUnit
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
 }
 
 type DrugBatchLocation struct {
@@ -84,34 +72,27 @@ type DrugBatchLocation struct {
 // Useful for FEFO picking UI
 type BatchDetail struct {
 	DrugBatch
-	DispenseUnit   string              `json:"dispenseUnit"`  // from presentation
+	DispenseUnit   string              `json:"dispenseUnit"`  // from drug
 	ExpirySortKey  *time.Time          `json:"expirySortKey"` // for FEFO
 	BatchLocations []DrugBatchLocation `json:"batchLocations"`
 }
 
-type PresentationStock struct {
-	Presentation DrugPresentationView `json:"presentation"`
-	Batches      []BatchDetail        `json:"batches"`
-	TotalQty     int                  `json:"totalQty"` // sum of batch quantities
+type DrugStock struct {
+	Drug     DrugView      `json:"drug"`
+	Batches  []BatchDetail `json:"batches"`
+	TotalQty int           `json:"totalQty"` // sum of batch quantities
 }
 
 type PharmacyRepository interface {
-	// DRUGS
-	ListDrugs(ctx context.Context, q *string) ([]Drug, error) // optional search
-	CreateDrug(ctx context.Context, d *Drug) (*Drug, error)
-	GetDrug(ctx context.Context, id int64) (*Drug, error)
-	UpdateDrug(ctx context.Context, d *Drug) (*Drug, error)
+	// DRUGS (combined with presentations)
+	ListDrugs(ctx context.Context, q *string) ([]DrugView, error) // optional search
+	CreateDrug(ctx context.Context, d *Drug) (*DrugView, error)
+	GetDrug(ctx context.Context, id int64) (*DrugView, error)
+	UpdateDrug(ctx context.Context, d *Drug) (*DrugView, error)
 	DeleteDrug(ctx context.Context, id int64) error
 
-	// PRESENTATIONS
-	ListPresentations(ctx context.Context, drugID int64) ([]DrugPresentationView, error)
-	GetPresentation(ctx context.Context, id int64) (*DrugPresentationView, error)
-	CreatePresentation(ctx context.Context, p *DrugPresentation) (*DrugPresentationView, error)
-	UpdatePresentation(ctx context.Context, p *DrugPresentation) (*DrugPresentationView, error)
-	DeletePresentation(ctx context.Context, id int64) error
-
-	// STOCK (batches & locations) — quantities are in the presentation’s DispenseUnit
-	ListBatches(ctx context.Context, presentationID int64) ([]BatchDetail, error)
+	// STOCK (batches & locations) — quantities are in the drug's DispenseUnit
+	ListBatches(ctx context.Context, drugID int64) ([]BatchDetail, error)
 	GetBatch(ctx context.Context, batchID int64) (*BatchDetail, error)
 	CreateBatch(ctx context.Context, b *DrugBatch, locations []DrugBatchLocation) (*BatchDetail, error)
 	UpdateBatch(ctx context.Context, b *DrugBatch) (*BatchDetail, error)
@@ -122,27 +103,22 @@ type PharmacyRepository interface {
 	UpdateBatchLocation(ctx context.Context, loc *DrugBatchLocation) (*DrugBatchLocation, error)
 	DeleteBatchLocation(ctx context.Context, id int64) error
 
-	// Convenience for FEFO view (presentation + batches + totals)
-	GetPresentationStock(ctx context.Context, presentationID int64) (*PresentationStock, error)
+	// Convenience for FEFO view (drug + batches + totals)
+	GetDrugStock(ctx context.Context, drugID int64) (*DrugStock, error)
 }
 
 type PharmacyUseCase interface {
 	// wrappers that also build DisplayLabel/DisplayStrength, totals, etc.
-	ListDrugs(ctx context.Context, q *string) ([]Drug, error)
-	GetDrugWithPresentations(ctx context.Context, drugID int64) (*DrugWithPresentations, error)
-
-	GetPresentationStock(ctx context.Context, presentationID int64) (*PresentationStock, error)
+	ListDrugs(ctx context.Context, q *string) ([]DrugView, error)
+	GetDrug(ctx context.Context, id int64) (*DrugView, error)
+	GetDrugStock(ctx context.Context, drugID int64) (*DrugStock, error)
 
 	// Admin flows
-	CreateDrug(ctx context.Context, d *Drug) (*Drug, error)
-	UpdateDrug(ctx context.Context, d *Drug) (*Drug, error)
+	CreateDrug(ctx context.Context, d *Drug) (*DrugView, error)
+	UpdateDrug(ctx context.Context, d *Drug) (*DrugView, error)
 	DeleteDrug(ctx context.Context, id int64) error
 
-	CreatePresentation(ctx context.Context, p *DrugPresentation) (*DrugPresentationView, error)
-	UpdatePresentation(ctx context.Context, p *DrugPresentation) (*DrugPresentationView, error)
-	DeletePresentation(ctx context.Context, id int64) error
-
-	ListBatches(ctx context.Context, presentationID int64) ([]BatchDetail, error)
+	ListBatches(ctx context.Context, drugID int64) ([]BatchDetail, error)
 	GetBatch(ctx context.Context, batchID int64) (*BatchDetail, error)
 	CreateBatch(ctx context.Context, b *DrugBatch, locations []DrugBatchLocation) (*BatchDetail, error)
 	UpdateBatch(ctx context.Context, b *DrugBatch) (*BatchDetail, error)

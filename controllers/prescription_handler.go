@@ -170,7 +170,7 @@ func (h *PrescriptionHandler) AddLine(c *gin.Context) {
 
 	line := entities.PrescriptionLine{
 		PrescriptionID: prescriptionID,
-		PresentationID: req.PresentationID,
+		DrugID:         req.DrugID,
 		Remarks:        req.Remarks,
 		Prn:            req.Prn,
 		DoseAmount:     req.DoseAmount,
@@ -204,13 +204,13 @@ func (h *PrescriptionHandler) UpdateLine(c *gin.Context) {
 	}
 
 	line := entities.PrescriptionLine{
-		ID:             lineID,
-		PresentationID: req.PresentationID,
-		Remarks:        req.Remarks,
-		Prn:            req.Prn,
-		DoseAmount:     req.DoseAmount,
-		DoseUnit:       req.DoseUnit,
-		FrequencyCode:  req.FrequencyCode,
+		ID:            lineID,
+		DrugID:        req.DrugID,
+		Remarks:       req.Remarks,
+		Prn:           req.Prn,
+		DoseAmount:    req.DoseAmount,
+		DoseUnit:      req.DoseUnit,
+		FrequencyCode: req.FrequencyCode,
 		// schedule fields are derived from frequencyCode in DB trigger
 		Duration:     req.Duration,
 		DurationUnit: req.DurationUnit,

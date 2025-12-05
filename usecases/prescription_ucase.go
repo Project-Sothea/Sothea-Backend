@@ -74,8 +74,8 @@ func (u *prescriptionUsecase) AddLine(ctx context.Context, line *entities.Prescr
 	ctx, cancel := context.WithTimeout(ctx, u.contextTimeout)
 	defer cancel()
 
-	if line.PrescriptionID == 0 || line.PresentationID == 0 {
-		return nil, errors.New("missing prescriptionId or presentationId")
+	if line.PrescriptionID == 0 || line.DrugID == 0 {
+		return nil, errors.New("missing prescriptionId or drugId")
 	}
 	if line.DoseAmount <= 0 {
 		return nil, errors.New("doseAmount must be > 0")
@@ -176,7 +176,7 @@ func (u *prescriptionUsecase) SuggestFEFOAllocations(ctx context.Context, lineID
 	}
 
 	// Get stock view for that presentation
-	stock, err := u.pharmacy.GetPresentationStock(ctx, line.PresentationID)
+	stock, err := u.pharmacy.GetDrugStock(ctx, line.DrugID)
 	if err != nil {
 		return nil, err
 	}

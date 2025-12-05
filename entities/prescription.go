@@ -47,7 +47,7 @@ const (
 type PrescriptionLine struct {
 	ID             int64   `json:"id"`
 	PrescriptionID int64   `json:"prescriptionId"`
-	PresentationID int64   `json:"presentationId"`
+	DrugID         int64   `json:"drugId"`
 	Remarks        *string `json:"remarks,omitempty"` // SIG / instructions
 	Prn            bool    `json:"prn"`               // pro re nata (as needed)
 
@@ -85,11 +85,11 @@ type PrescriptionLine struct {
 }
 
 type AddLineReq struct {
-	PresentationID int64   `json:"presentationId" binding:"required"`
-	Remarks        *string `json:"remarks"`
-	Prn            bool    `json:"prn"` // pro re nata (as needed), default false
-	DoseAmount     float64 `json:"doseAmount" binding:"required,gt=0"`
-	DoseUnit       string  `json:"doseUnit" binding:"required"`
+	DrugID     int64   `json:"drugId" binding:"required"`
+	Remarks    *string `json:"remarks"`
+	Prn        bool    `json:"prn"` // pro re nata (as needed), default false
+	DoseAmount float64 `json:"doseAmount" binding:"required,gt=0"`
+	DoseUnit   string  `json:"doseUnit" binding:"required"`
 
 	// Frequency: must use FrequencyCode; no custom schedule fields in request
 	FrequencyCode string `json:"frequencyCode" binding:"required"` // "OM", "ON", "BD", "TDS", "q8h", etc.

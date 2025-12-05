@@ -101,7 +101,7 @@ func (r *postgresPrescriptionRepository) GetPrescriptionByID(ctx context.Context
 	// Lines (new schedule fields)
 	rows, err := dbx.QueryContext(ctx, `
 	SELECT
-		pl.id, pl.prescription_id, pl.presentation_id, pl.remarks, pl.prn,
+		pl.id, pl.prescription_id, pl.drug_id, pl.remarks, pl.prn,
 		pl.dose_amount, pl.dose_unit,
 		pl.frequency_code,
 		pl.duration, pl.duration_unit,
@@ -109,23 +109,22 @@ func (r *postgresPrescriptionRepository) GetPrescriptionByID(ctx context.Context
 		u1.name AS packer_name,
 		u2.name AS updater_name,
 		d.generic_name AS drug_name,
-		dp.route_code AS route_code,
-		dp.dispense_unit AS dispense_unit,
+		d.route_code AS route_code,
+		d.dispense_unit AS dispense_unit,
 		CASE
-		WHEN dp.strength_num IS NULL AND dp.strength_unit_num IS NULL THEN
+		WHEN d.strength_num IS NULL AND d.strength_unit_num IS NULL THEN
 			-- Unknown strength: show dosage form and dispense unit
-			dp.dosage_form_code || ' (strength unknown)'
-		WHEN dp.strength_den IS NULL THEN
+			d.dosage_form_code
+		WHEN d.strength_den IS NULL THEN
 			-- Solid with known strength
-			dp.strength_num::text || ' ' || dp.strength_unit_num || '/' || dp.dispense_unit
+			d.strength_num::text || ' ' || d.strength_unit_num || '/' || d.dispense_unit
 		ELSE
 			-- Liquid/cream with known concentration
-			dp.strength_num::text || ' ' || dp.strength_unit_num || '/' ||
-			dp.strength_den::text || ' ' || dp.strength_unit_den
+			d.strength_num::text || ' ' || d.strength_unit_num || '/' ||
+			d.strength_den::text || ' ' || d.strength_unit_den
 		END AS display_strength
 	FROM prescription_lines pl
-	LEFT JOIN drug_presentations dp ON dp.id = pl.presentation_id
-	LEFT JOIN drugs d ON d.id = dp.drug_id
+	LEFT JOIN drugs d ON d.id = pl.drug_id
 	LEFT JOIN users u1 ON u1.id = pl.packed_by
 	LEFT JOIN users u2 ON u2.id = pl.updated_by
 	WHERE pl.prescription_id = $1
@@ -143,7 +142,7 @@ func (r *postgresPrescriptionRepository) GetPrescriptionByID(ctx context.Context
 		var updaterName sql.NullString
 		var frequencyCode sql.NullString
 		if err := rows.Scan(
-			&l.ID, &l.PrescriptionID, &l.PresentationID, &l.Remarks, &l.Prn,
+			&l.ID, &l.PrescriptionID, &l.DrugID, &l.Remarks, &l.Prn,
 			&l.DoseAmount, &l.DoseUnit,
 			&frequencyCode,
 			&l.Duration, &l.DurationUnit,
@@ -376,7 +375,7 @@ func (r *postgresPrescriptionRepository) AddLine(ctx context.Context, line *enti
 
 	err = tx.QueryRowContext(ctx, `
 	  INSERT INTO prescription_lines (
-	    prescription_id, presentation_id, remarks, prn,
+	    prescription_id, drug_id, remarks, prn,
 	    dose_amount, dose_unit,
 	    frequency_code,
 		duration, duration_unit
@@ -387,7 +386,7 @@ func (r *postgresPrescriptionRepository) AddLine(ctx context.Context, line *enti
 		$7,
 		$8,$9)
 	  RETURNING id, total_to_dispense, is_packed
-	`, line.PrescriptionID, line.PresentationID, line.Remarks, line.Prn,
+	`, line.PrescriptionID, line.DrugID, line.Remarks, line.Prn,
 		line.DoseAmount, line.DoseUnit,
 		line.FrequencyCode,
 		line.Duration, line.DurationUnit).
@@ -433,7 +432,7 @@ func (r *postgresPrescriptionRepository) UpdateLine(ctx context.Context, line *e
 	var cur entities.PrescriptionLine
 	var curFreqCode sql.NullString
 	if err := tx.QueryRowContext(ctx, `
-		SELECT presentation_id,
+		SELECT drug_id,
 		dose_amount, dose_unit,
 		frequency_code,
 		duration, duration_unit,
@@ -441,7 +440,7 @@ func (r *postgresPrescriptionRepository) UpdateLine(ctx context.Context, line *e
 		FROM prescription_lines
 		WHERE id=$1 FOR UPDATE
 	`, line.ID).Scan(
-		&cur.PresentationID,
+		&cur.DrugID,
 		&cur.DoseAmount, &cur.DoseUnit,
 		&curFreqCode,
 		&cur.Duration, &cur.DurationUnit,
@@ -453,7 +452,7 @@ func (r *postgresPrescriptionRepository) UpdateLine(ctx context.Context, line *e
 		cur.FrequencyCode = curFreqCode.String
 	}
 
-	presChanged := cur.PresentationID != line.PresentationID
+	presChanged := cur.DrugID != line.DrugID
 
 	// 1) Only clear allocations if the presentation changed
 	if presChanged {
@@ -464,7 +463,7 @@ func (r *postgresPrescriptionRepository) UpdateLine(ctx context.Context, line *e
 
 	err = tx.QueryRowContext(ctx, `
 	  UPDATE prescription_lines SET
-	    presentation_id=$2, remarks=$3, prn=$4,
+	    drug_id=$2, remarks=$3, prn=$4,
 	    dose_amount=$5, dose_unit=$6,
 	    frequency_code=$7,
 		duration=$8, duration_unit=$9,
@@ -472,7 +471,7 @@ func (r *postgresPrescriptionRepository) UpdateLine(ctx context.Context, line *e
 	    updated_at=NOW()
 	  WHERE id=$1
 	  RETURNING total_to_dispense
-	`, line.ID, line.PresentationID, line.Remarks, line.Prn,
+	`, line.ID, line.DrugID, line.Remarks, line.Prn,
 		line.DoseAmount, line.DoseUnit,
 		line.FrequencyCode,
 		line.Duration, line.DurationUnit).
@@ -789,16 +788,16 @@ func (r *postgresPrescriptionRepository) GetLine(ctx context.Context, lineID int
 	var frequencyCode sql.NullString
 	if err := dbx.QueryRowContext(ctx, `
 	  SELECT
-	    pl.id, pl.prescription_id, pl.presentation_id, pl.remarks, pl.prn,
+	    pl.id, pl.prescription_id, pl.drug_id, pl.remarks, pl.prn,
 	    pl.dose_amount, pl.dose_unit,
 	    pl.frequency_code,
 	    pl.duration, pl.duration_unit,
 	    pl.total_to_dispense, pl.is_packed, pl.packed_by, pl.packed_at,
-	    (SELECT dispense_unit FROM drug_presentations WHERE id=pl.presentation_id) AS du
+	    (SELECT dispense_unit FROM drugs WHERE id=pl.drug_id) AS du
 	  FROM prescription_lines pl
 	  WHERE pl.id=$1
 	`, lineID).Scan(
-		&l.ID, &l.PrescriptionID, &l.PresentationID, &l.Remarks, &l.Prn,
+		&l.ID, &l.PrescriptionID, &l.DrugID, &l.Remarks, &l.Prn,
 		&l.DoseAmount, &l.DoseUnit,
 		&frequencyCode,
 		&l.Duration, &l.DurationUnit,

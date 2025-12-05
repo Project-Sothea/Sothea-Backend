@@ -20,7 +20,11 @@ INSERT INTO units(code,is_mass,is_volume,is_piece) VALUES
   ('tab', FALSE,FALSE,TRUE),
   ('cap', FALSE,FALSE,TRUE),
   ('drop',FALSE,FALSE,TRUE),
-  ('bottle',FALSE,FALSE,TRUE);
+  ('bottle',FALSE,FALSE,TRUE),
+  ('sachet',FALSE,FALSE,TRUE),   -- discrete pieces like tablets
+  ('inhaler',FALSE,FALSE,TRUE),  -- discrete pieces like tablets
+  ('puff',FALSE,FALSE,TRUE),    -- content unit for inhalers (e.g., 200 puffs per inhaler)
+  ('tube',FALSE,FALSE,TRUE);     -- discrete pieces like bottles, can have piece_content (e.g., 30g tube)
 
 -- === Dosage forms ============================================================
 CREATE TABLE dosage_forms (
@@ -30,7 +34,7 @@ CREATE TABLE dosage_forms (
 
 INSERT INTO dosage_forms(code,label) VALUES
   ('TAB','Tablet'),('CAP','Capsule'),('SYR','Syrup'),('SUSP','Suspension'),
-  ('CREAM','Cream/Ointment'),('DROP','Drops'),('INJ','Injection'),('INH','Inhaler');
+  ('CREAM','Cream/Ointment'),('DROP','Drops'),('INJ','Injection'),('INH','Inhaler'), ('SAT','Sachet');
 
 -- === Routes ==================================================================
 CREATE TABLE routes (
@@ -48,36 +52,11 @@ INSERT INTO routes(code,label) VALUES
 ********************/
 
 CREATE TABLE drugs (
-  id          BIGSERIAL PRIMARY KEY,
-  generic_name TEXT NOT NULL,           -- e.g., Amoxicillin
-  brand_name   TEXT,                    -- optional
-  atc_code     TEXT,                    -- optional coding
-  notes        TEXT,
-  is_active    BOOLEAN NOT NULL DEFAULT TRUE,
-
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  created_by   BIGINT REFERENCES users(id),
-  updated_at   TIMESTAMPTZ,
-  updated_by   BIGINT REFERENCES users(id),
-
-  CONSTRAINT uq_drug_identity UNIQUE (generic_name, brand_name)
-);
-
-CREATE TRIGGER trg_drugs_audit
-BEFORE INSERT OR UPDATE ON drugs
-FOR EACH ROW EXECUTE FUNCTION set_audit_fields();
-
-CREATE TRIGGER trg_drugs_log
-AFTER INSERT OR UPDATE OR DELETE ON drugs
-FOR EACH ROW EXECUTE FUNCTION audit_row();
-
-/*******************
- Presentation (drug metadata)
-********************/
-
-CREATE TABLE drug_presentations (
   id                BIGSERIAL PRIMARY KEY,
-  drug_id           BIGINT NOT NULL REFERENCES drugs(id) ON DELETE CASCADE,
+  generic_name      TEXT NOT NULL,           -- e.g., Amoxicillin
+  brand_name        TEXT,                    -- optional
+  atc_code          TEXT,                    -- optional coding
+  
   dosage_form_code  TEXT NOT NULL REFERENCES dosage_forms(code),
   route_code        TEXT NOT NULL REFERENCES routes(code),
 
@@ -96,6 +75,9 @@ CREATE TABLE drug_presentations (
   piece_content_unit   TEXT REFERENCES units(code),
 
   is_fractional_allowed BOOLEAN DEFAULT FALSE,
+  display_as_percentage BOOLEAN DEFAULT FALSE,   -- If true, show concentration as % (e.g., 1% instead of 1 g/100 g)
+
+  is_active           BOOLEAN NOT NULL DEFAULT TRUE,
 
   barcode             TEXT,                      -- optional scan support
   notes               TEXT,
@@ -105,13 +87,13 @@ CREATE TABLE drug_presentations (
   updated_at          TIMESTAMPTZ,
   updated_by          BIGINT REFERENCES users(id),
 
-  CONSTRAINT uq_presentation UNIQUE (
-    drug_id, dosage_form_code, route_code,
+  CONSTRAINT uq_drug_identity UNIQUE (
+    generic_name, brand_name, dosage_form_code, route_code,
     strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit
   ),
 
   -- Either solid OR liquid/cream style is valid, OR unknown strength (all strength fields NULL):
-  CONSTRAINT ck_presentation_style CHECK (
+  CONSTRAINT ck_drug_style CHECK (
     -- Solid with known strength
     (strength_den IS NULL AND strength_unit_den IS NULL AND strength_num IS NOT NULL AND strength_unit_num IS NOT NULL)
       OR
@@ -120,17 +102,15 @@ CREATE TABLE drug_presentations (
       OR
     -- Unknown strength (all strength fields NULL) - allowed for piece-based dispensing
     (strength_den IS NULL AND strength_unit_den IS NULL AND strength_num IS NULL AND strength_unit_num IS NULL)
-  ),
-
-
+  )
 );
 
-CREATE TRIGGER trg_presentations_audit
-BEFORE INSERT OR UPDATE ON drug_presentations
+CREATE TRIGGER trg_drugs_audit
+BEFORE INSERT OR UPDATE ON drugs
 FOR EACH ROW EXECUTE FUNCTION set_audit_fields();
 
-CREATE TRIGGER trg_presentations_log
-AFTER INSERT OR UPDATE OR DELETE ON drug_presentations
+CREATE TRIGGER trg_drugs_log
+AFTER INSERT OR UPDATE OR DELETE ON drugs
 FOR EACH ROW EXECUTE FUNCTION audit_row();
 
 
@@ -141,7 +121,7 @@ FOR EACH ROW EXECUTE FUNCTION audit_row();
 ********************/
 CREATE TABLE drug_batches (
   id             BIGSERIAL PRIMARY KEY,
-  presentation_id BIGINT NOT NULL REFERENCES drug_presentations(id) ON DELETE RESTRICT,
+  drug_id        BIGINT NOT NULL REFERENCES drugs(id) ON DELETE RESTRICT,
   batch_number   TEXT NOT NULL,
   expiry_date    DATE,                   -- nullable allowed
   supplier       TEXT,
@@ -152,10 +132,10 @@ CREATE TABLE drug_batches (
   updated_at     TIMESTAMPTZ,
   updated_by     BIGINT REFERENCES users(id),
 
-  UNIQUE (presentation_id, batch_number)
+  UNIQUE (drug_id, batch_number)
 );
 
-CREATE INDEX idx_batches_presentation ON drug_batches (presentation_id);
+CREATE INDEX idx_batches_drug ON drug_batches (drug_id);
 CREATE INDEX idx_batches_expiry ON drug_batches (expiry_date);
 
 CREATE TRIGGER trg_batches_audit
@@ -204,6 +184,17 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Helper function to get dispense_unit from drug (used in triggers)
+CREATE OR REPLACE FUNCTION get_drug_dispense_unit(p_drug_id BIGINT)
+RETURNS TEXT AS $$
+DECLARE
+  du TEXT;
+BEGIN
+  SELECT dispense_unit INTO du FROM drugs WHERE id = p_drug_id;
+  RETURN du;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
 
 DROP TRIGGER IF EXISTS trg_bl_sync_qty ON batch_locations;
 CREATE TRIGGER trg_bl_sync_qty
@@ -213,107 +204,85 @@ FOR EACH ROW EXECUTE FUNCTION sync_batch_quantity();
 BEGIN;
 
 -- ---------------------------------------------------------------------------
--- 1) DRUGS
--- ---------------------------------------------------------------------------
-INSERT INTO drugs (generic_name, brand_name, atc_code, notes)
-VALUES
-  ('Paracetamol',      'Panadol',        'N02BE01', 'Analgesic/antipyretic'),
-  ('Amoxicillin',      'Amoxil',         'J01CA04', 'Penicillin antibiotic'),
-  ('Ibuprofen',        'Nurofen',        'M01AE01', 'NSAID'),
-  ('Hydrocortisone',   'Hytone',         'D07AA02', 'Topical steroid'),
-  ('Gentamicin',       'Garamycin',      'S01AA11', 'Aminoglycoside (ophthalmic)'),
-  ('Ciprofloxacin',    'Cipro IV',       'J01MA02', 'Fluoroquinolone (IV infusion)'),
-  ('Cholecalciferol',  'Vit D3 1000IU',  'A11CC05', 'Vitamin D3 tablets')
-ON CONFLICT (generic_name, brand_name) DO NOTHING;
-
--- ---------------------------------------------------------------------------
--- 2) PRESENTATIONS
---    Note: use SELECT to bind to existing drug IDs. All numeric strengths
---    support up to 1 decimal place; strength_den NULL for solids.
+-- DRUGS (combined with presentations)
+--    All numeric strengths support up to 1 decimal place; strength_den NULL for solids.
 -- ---------------------------------------------------------------------------
 
 -- Paracetamol 500 mg TAB PO (solid → tab piece, no denominator)
-INSERT INTO drug_presentations (
-  drug_id, dosage_form_code, route_code,
+INSERT INTO drugs (
+  generic_name, brand_name, atc_code, dosage_form_code, route_code,
   strength_num, strength_unit_num, strength_den, strength_unit_den,
   dispense_unit, piece_content_amount, piece_content_unit, is_fractional_allowed, barcode, notes
 )
-SELECT d.id, 'TAB','PO', 500,'mg', NULL,NULL, 'tab', NULL,NULL, FALSE, NULL, '500 mg tablet'
-FROM drugs d
-WHERE d.generic_name='Paracetamol' AND d.brand_name='Panadol'
-ON CONFLICT (drug_id, dosage_form_code, route_code, strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit)
+VALUES
+  ('Paracetamol', 'Panadol', 'N02BE01', 'TAB', 'PO', 500, 'mg', NULL, NULL, 'tab', NULL, NULL, FALSE, NULL, '500 mg tablet')
+ON CONFLICT (generic_name, brand_name, dosage_form_code, route_code, strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit)
 DO NOTHING;
 
 -- Amoxicillin 250 mg/5 mL SUSP PO (liquid → bottle piece w/ 100 mL per bottle)
-INSERT INTO drug_presentations (
-  drug_id, dosage_form_code, route_code,
+INSERT INTO drugs (
+  generic_name, brand_name, atc_code, dosage_form_code, route_code,
   strength_num, strength_unit_num, strength_den, strength_unit_den,
   dispense_unit, piece_content_amount, piece_content_unit, is_fractional_allowed, barcode, notes
 )
-SELECT d.id, 'SUSP','PO', 250,'mg', 5,'mL', 'bottle', 100,'mL', FALSE, NULL, '250 mg/5 mL; 100 mL bottle'
-FROM drugs d
-WHERE d.generic_name='Amoxicillin' AND d.brand_name='Amoxil'
-ON CONFLICT (drug_id, dosage_form_code, route_code, strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit)
+VALUES
+  ('Amoxicillin', 'Amoxil', 'J01CA04', 'SUSP', 'PO', 250, 'mg', 5, 'mL', 'bottle', 100, 'mL', FALSE, NULL, '250 mg/5 mL; 100 mL bottle')
+ON CONFLICT (generic_name, brand_name, dosage_form_code, route_code, strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit)
 DO NOTHING;
 
 -- Ibuprofen 100 mg/5 mL SYR PO (liquid → continuous mL, fractional allowed)
-INSERT INTO drug_presentations (
-  drug_id, dosage_form_code, route_code,
+INSERT INTO drugs (
+  generic_name, brand_name, atc_code, dosage_form_code, route_code,
   strength_num, strength_unit_num, strength_den, strength_unit_den,
   dispense_unit, piece_content_amount, piece_content_unit, is_fractional_allowed, barcode, notes
 )
-SELECT d.id, 'SYR','PO', 100,'mg', 5,'mL', 'mL', NULL,NULL, TRUE, NULL, '100 mg/5 mL syrup'
-FROM drugs d
-WHERE d.generic_name='Ibuprofen' AND d.brand_name='Nurofen'
-ON CONFLICT (drug_id, dosage_form_code, route_code, strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit)
+VALUES
+  ('Ibuprofen', 'Nurofen', 'M01AE01', 'SYR', 'PO', 100, 'mg', 5, 'mL', 'mL', NULL, NULL, TRUE, NULL, '100 mg/5 mL syrup')
+ON CONFLICT (generic_name, brand_name, dosage_form_code, route_code, strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit)
 DO NOTHING;
 
 -- Hydrocortisone 1 g/100 g CREAM TOP (cream → continuous g)
-INSERT INTO drug_presentations (
-  drug_id, dosage_form_code, route_code,
+INSERT INTO drugs (
+  generic_name, brand_name, atc_code, dosage_form_code, route_code,
   strength_num, strength_unit_num, strength_den, strength_unit_den,
   dispense_unit, piece_content_amount, piece_content_unit, is_fractional_allowed, barcode, notes
 )
-SELECT d.id, 'CREAM','TOP', 1,'g', 100,'g', 'g', NULL,NULL, FALSE, NULL, '1% (1 g/100 g) cream'
-FROM drugs d
-WHERE d.generic_name='Hydrocortisone' AND d.brand_name='Hytone'
-ON CONFLICT (drug_id, dosage_form_code, route_code, strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit)
+VALUES
+  ('Hydrocortisone', 'Hytone', 'D07AA02', 'CREAM', 'TOP', 1, 'g', 100, 'g', 'g', NULL, NULL, FALSE, NULL, '1% (1 g/100 g) cream')
+ON CONFLICT (generic_name, brand_name, dosage_form_code, route_code, strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit)
 DO NOTHING;
 
 -- Gentamicin eye drops 3 mg/mL DROP OPH (liquid → bottle 10 mL)
-INSERT INTO drug_presentations (
-  drug_id, dosage_form_code, route_code,
+INSERT INTO drugs (
+  generic_name, brand_name, atc_code, dosage_form_code, route_code,
   strength_num, strength_unit_num, strength_den, strength_unit_den,
   dispense_unit, piece_content_amount, piece_content_unit, is_fractional_allowed, barcode, notes
 )
-SELECT d.id, 'DROP','OPH', 3,'mg', 1,'mL', 'bottle', 10,'mL', FALSE, NULL, '0.3% (3 mg/mL) ophthalmic drops; 10 mL'
-FROM drugs d
-WHERE d.generic_name='Gentamicin' AND d.brand_name='Garamycin'
-ON CONFLICT (drug_id, dosage_form_code, route_code, strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit)
+VALUES
+  ('Gentamicin', 'Garamycin', 'S01AA11', 'DROP', 'OPH', 3, 'mg', 1, 'mL', 'bottle', 10, 'mL', FALSE, NULL, '0.3% (3 mg/mL) ophthalmic drops; 10 mL')
+ON CONFLICT (generic_name, brand_name, dosage_form_code, route_code, strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit)
 DO NOTHING;
 
 -- Ciprofloxacin 200 mg/100 mL INJ IV (infusion → continuous mL)
-INSERT INTO drug_presentations (
-  drug_id, dosage_form_code, route_code,
+INSERT INTO drugs (
+  generic_name, brand_name, atc_code, dosage_form_code, route_code,
   strength_num, strength_unit_num, strength_den, strength_unit_den,
   dispense_unit, piece_content_amount, piece_content_unit, is_fractional_allowed, barcode, notes
 )
-SELECT d.id, 'INJ','IV', 200,'mg', 100,'mL', 'mL', NULL,NULL, FALSE, NULL, '200 mg/100 mL IV bag'
-FROM drugs d
-WHERE d.generic_name='Ciprofloxacin' AND d.brand_name='Cipro IV'
-ON CONFLICT (drug_id, dosage_form_code, route_code, strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit)
+VALUES
+  ('Ciprofloxacin', 'Cipro IV', 'J01MA02', 'INJ', 'IV', 200, 'mg', 100, 'mL', 'mL', NULL, NULL, FALSE, NULL, '200 mg/100 mL IV bag')
+ON CONFLICT (generic_name, brand_name, dosage_form_code, route_code, strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit)
 DO NOTHING;
 
 -- Vitamin D3 1000 IU/tab TAB PO (solid → tab)
-INSERT INTO drug_presentations (
-  drug_id, dosage_form_code, route_code,
+INSERT INTO drugs (
+  generic_name, brand_name, atc_code, dosage_form_code, route_code,
   strength_num, strength_unit_num, strength_den, strength_unit_den,
   dispense_unit, piece_content_amount, piece_content_unit, is_fractional_allowed, barcode, notes
 )
-SELECT d.id, 'TAB','PO', 1000,'IU', NULL,NULL, 'tab', NULL,NULL, FALSE, NULL, 'Vitamin D3 1000 IU tablet'
-FROM drugs d
-WHERE d.generic_name='Cholecalciferol' AND d.brand_name='Vit D3 1000IU'
-ON CONFLICT (drug_id, dosage_form_code, route_code, strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit)
+VALUES
+  ('Cholecalciferol', 'Vit D3 1000IU', 'A11CC05', 'TAB', 'PO', 1000, 'IU', NULL, NULL, 'tab', NULL, NULL, FALSE, NULL, 'Vitamin D3 1000 IU tablet')
+ON CONFLICT (generic_name, brand_name, dosage_form_code, route_code, strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit)
 DO NOTHING;
 
 -- ---------------------------------------------------------------------------
@@ -325,20 +294,19 @@ DO NOTHING;
 -- Helper: upsert a batch and split stock to locations in one shot
 -- (repeatable pattern via CTE)
 -- Paracetamol 500 mg TAB: batches PAN500-A, PAN500-B (piece = tabs)
-WITH pr AS (
-  SELECT dp.id AS presentation_id
-  FROM drug_presentations dp
-  JOIN drugs d ON d.id = dp.drug_id
-  WHERE d.generic_name='Paracetamol' AND d.brand_name='Panadol'
-    AND dp.dosage_form_code='TAB' AND dp.route_code='PO'
-    AND dp.strength_num=500 AND dp.strength_unit_num='mg'
-    AND dp.strength_den IS NULL AND dp.dispense_unit='tab'
+WITH d AS (
+  SELECT id AS drug_id
+  FROM drugs
+  WHERE generic_name='Paracetamol' AND brand_name='Panadol'
+    AND dosage_form_code='TAB' AND route_code='PO'
+    AND strength_num=500 AND strength_unit_num='mg'
+    AND strength_den IS NULL AND dispense_unit='tab'
 ),
 b1 AS (
-  INSERT INTO drug_batches (presentation_id, batch_number, expiry_date, supplier, quantity)
-  SELECT pr.presentation_id, 'PAN500-A', DATE '2027-01-31', 'Acme Pharma', 0 FROM pr
-  ON CONFLICT (presentation_id, batch_number) DO NOTHING
-  RETURNING id, presentation_id
+  INSERT INTO drug_batches (drug_id, batch_number, expiry_date, supplier, quantity)
+  SELECT d.drug_id, 'PAN500-A', DATE '2027-01-31', 'Acme Pharma', 0 FROM d
+  ON CONFLICT (drug_id, batch_number) DO NOTHING
+  RETURNING id, drug_id
 ),
 b1q AS (
   -- split: Main=80, Clinic A=40
@@ -352,9 +320,9 @@ b1q2 AS (
   ON CONFLICT (batch_id, location) DO NOTHING
 ),
 b2 AS (
-  INSERT INTO drug_batches (presentation_id, batch_number, expiry_date, supplier, quantity)
-  SELECT pr.presentation_id, 'PAN500-B', DATE '2028-03-31', 'Acme Pharma', 0 FROM pr
-  ON CONFLICT (presentation_id, batch_number) DO NOTHING
+  INSERT INTO drug_batches (drug_id, batch_number, expiry_date, supplier, quantity)
+  SELECT (SELECT drug_id FROM d), 'PAN500-B', DATE '2028-03-31', 'Acme Pharma', 0
+  ON CONFLICT (drug_id, batch_number) DO NOTHING
   RETURNING id
 )
 INSERT INTO batch_locations (batch_id, location, quantity)
@@ -362,20 +330,19 @@ SELECT (SELECT id FROM b2), 'Main Pharmacy', 60
 ON CONFLICT (batch_id, location) DO NOTHING;
 
 -- Amoxicillin 250 mg/5 mL SUSP (bottle pieces): AMX250-100ML-01
-WITH pr AS (
-  SELECT dp.id AS presentation_id
-  FROM drug_presentations dp
-  JOIN drugs d ON d.id = dp.drug_id
-  WHERE d.generic_name='Amoxicillin' AND d.brand_name='Amoxil'
-    AND dp.dosage_form_code='SUSP' AND dp.route_code='PO'
-    AND dp.strength_num=250 AND dp.strength_unit_num='mg'
-    AND dp.strength_den=5 AND dp.strength_unit_den='mL'
-    AND dp.dispense_unit='bottle' AND dp.piece_content_amount=100 AND dp.piece_content_unit='mL'
+WITH d AS (
+  SELECT id AS drug_id
+  FROM drugs
+  WHERE generic_name='Amoxicillin' AND brand_name='Amoxil'
+    AND dosage_form_code='SUSP' AND route_code='PO'
+    AND strength_num=250 AND strength_unit_num='mg'
+    AND strength_den=5 AND strength_unit_den='mL'
+    AND dispense_unit='bottle' AND piece_content_amount=100 AND piece_content_unit='mL'
 ),
 b AS (
-  INSERT INTO drug_batches (presentation_id, batch_number, expiry_date, supplier, quantity)
-  SELECT pr.presentation_id, 'AMX250-100ML-01', DATE '2026-11-30', 'MediSupply Co', 0 FROM pr
-  ON CONFLICT (presentation_id, batch_number) DO NOTHING
+  INSERT INTO drug_batches (drug_id, batch_number, expiry_date, supplier, quantity)
+  SELECT d.drug_id, 'AMX250-100ML-01', DATE '2026-11-30', 'MediSupply Co', 0 FROM d
+  ON CONFLICT (drug_id, batch_number) DO NOTHING
   RETURNING id
 )
 INSERT INTO batch_locations (batch_id, location, quantity)
@@ -383,20 +350,19 @@ SELECT (SELECT id FROM b), 'Main Pharmacy', 30
 ON CONFLICT (batch_id, location) DO NOTHING;
 
 -- Ibuprofen 100 mg/5 mL SYR (continuous mL): IBU100-5ML-LOT1 total 500 mL
-WITH pr AS (
-  SELECT dp.id AS presentation_id
-  FROM drug_presentations dp
-  JOIN drugs d ON d.id = dp.drug_id
-  WHERE d.generic_name='Ibuprofen' AND d.brand_name='Nurofen'
-    AND dp.dosage_form_code='SYR' AND dp.route_code='PO'
-    AND dp.strength_num=100 AND dp.strength_unit_num='mg'
-    AND dp.strength_den=5 AND dp.strength_unit_den='mL'
-    AND dp.dispense_unit='mL'
+WITH d AS (
+  SELECT id AS drug_id
+  FROM drugs
+  WHERE generic_name='Ibuprofen' AND brand_name='Nurofen'
+    AND dosage_form_code='SYR' AND route_code='PO'
+    AND strength_num=100 AND strength_unit_num='mg'
+    AND strength_den=5 AND strength_unit_den='mL'
+    AND dispense_unit='mL'
 ),
 b AS (
-  INSERT INTO drug_batches (presentation_id, batch_number, expiry_date, supplier, quantity)
-  SELECT pr.presentation_id, 'IBU100-5ML-LOT1', DATE '2026-08-31', 'WellPharma', 0 FROM pr
-  ON CONFLICT (presentation_id, batch_number) DO NOTHING
+  INSERT INTO drug_batches (drug_id, batch_number, expiry_date, supplier, quantity)
+  SELECT d.drug_id, 'IBU100-5ML-LOT1', DATE '2026-08-31', 'WellPharma', 0 FROM d
+  ON CONFLICT (drug_id, batch_number) DO NOTHING
   RETURNING id
 ),
 l1 AS (
@@ -409,20 +375,19 @@ SELECT (SELECT id FROM b), 'Clinic A', 200
 ON CONFLICT (batch_id, location) DO NOTHING;
 
 -- Hydrocortisone 1% cream (continuous g): HC1-2027A total 400 g
-WITH pr AS (
-  SELECT dp.id AS presentation_id
-  FROM drug_presentations dp
-  JOIN drugs d ON d.id = dp.drug_id
-  WHERE d.generic_name='Hydrocortisone' AND d.brand_name='Hytone'
-    AND dp.dosage_form_code='CREAM' AND dp.route_code='TOP'
-    AND dp.strength_num=1 AND dp.strength_unit_num='g'
-    AND dp.strength_den=100 AND dp.strength_unit_den='g'
-    AND dp.dispense_unit='g'
+WITH d AS (
+  SELECT id AS drug_id
+  FROM drugs
+  WHERE generic_name='Hydrocortisone' AND brand_name='Hytone'
+    AND dosage_form_code='CREAM' AND route_code='TOP'
+    AND strength_num=1 AND strength_unit_num='g'
+    AND strength_den=100 AND strength_unit_den='g'
+    AND dispense_unit='g'
 ),
 b AS (
-  INSERT INTO drug_batches (presentation_id, batch_number, expiry_date, supplier, quantity)
-  SELECT pr.presentation_id, 'HC1-2027A', DATE '2027-05-31', 'DermaPro', 0 FROM pr
-  ON CONFLICT (presentation_id, batch_number) DO NOTHING
+  INSERT INTO drug_batches (drug_id, batch_number, expiry_date, supplier, quantity)
+  SELECT d.drug_id, 'HC1-2027A', DATE '2027-05-31', 'DermaPro', 0 FROM d
+  ON CONFLICT (drug_id, batch_number) DO NOTHING
   RETURNING id
 ),
 l1 AS (
@@ -435,20 +400,19 @@ SELECT (SELECT id FROM b), 'Ward A', 150
 ON CONFLICT (batch_id, location) DO NOTHING;
 
 -- Gentamicin eye drops 3 mg/mL (bottle 10 mL pieces): GEN-OPH-10ML
-WITH pr AS (
-  SELECT dp.id AS presentation_id
-  FROM drug_presentations dp
-  JOIN drugs d ON d.id = dp.drug_id
-  WHERE d.generic_name='Gentamicin' AND d.brand_name='Garamycin'
-    AND dp.dosage_form_code='DROP' AND dp.route_code='OPH'
-    AND dp.strength_num=3 AND dp.strength_unit_num='mg'
-    AND dp.strength_den=1 AND dp.strength_unit_den='mL'
-    AND dp.dispense_unit='bottle' AND dp.piece_content_amount=10 AND dp.piece_content_unit='mL'
+WITH d AS (
+  SELECT id AS drug_id
+  FROM drugs
+  WHERE generic_name='Gentamicin' AND brand_name='Garamycin'
+    AND dosage_form_code='DROP' AND route_code='OPH'
+    AND strength_num=3 AND strength_unit_num='mg'
+    AND strength_den=1 AND strength_unit_den='mL'
+    AND dispense_unit='bottle' AND piece_content_amount=10 AND piece_content_unit='mL'
 ),
 b AS (
-  INSERT INTO drug_batches (presentation_id, batch_number, expiry_date, supplier, quantity)
-  SELECT pr.presentation_id, 'GEN-OPH-10ML', DATE '2026-04-30', 'EyeCare Dist', 0 FROM pr
-  ON CONFLICT (presentation_id, batch_number) DO NOTHING
+  INSERT INTO drug_batches (drug_id, batch_number, expiry_date, supplier, quantity)
+  SELECT d.drug_id, 'GEN-OPH-10ML', DATE '2026-04-30', 'EyeCare Dist', 0 FROM d
+  ON CONFLICT (drug_id, batch_number) DO NOTHING
   RETURNING id
 )
 INSERT INTO batch_locations (batch_id, location, quantity)
@@ -456,20 +420,19 @@ SELECT (SELECT id FROM b), 'Main Pharmacy', 25
 ON CONFLICT (batch_id, location) DO NOTHING;
 
 -- Ciprofloxacin IV 200 mg/100 mL (continuous mL): CIPRO-IV-200-LOTX total 300 mL
-WITH pr AS (
-  SELECT dp.id AS presentation_id
-  FROM drug_presentations dp
-  JOIN drugs d ON d.id = dp.drug_id
-  WHERE d.generic_name='Ciprofloxacin' AND d.brand_name='Cipro IV'
-    AND dp.dosage_form_code='INJ' AND dp.route_code='IV'
-    AND dp.strength_num=200 AND dp.strength_unit_num='mg'
-    AND dp.strength_den=100 AND dp.strength_unit_den='mL'
-    AND dp.dispense_unit='mL'
+WITH d AS (
+  SELECT id AS drug_id
+  FROM drugs
+  WHERE generic_name='Ciprofloxacin' AND brand_name='Cipro IV'
+    AND dosage_form_code='INJ' AND route_code='IV'
+    AND strength_num=200 AND strength_unit_num='mg'
+    AND strength_den=100 AND strength_unit_den='mL'
+    AND dispense_unit='mL'
 ),
 b AS (
-  INSERT INTO drug_batches (presentation_id, batch_number, expiry_date, supplier, quantity)
-  SELECT pr.presentation_id, 'CIPRO-IV-200-LOTX', DATE '2026-09-30', 'Hospisupply', 0 FROM pr
-  ON CONFLICT (presentation_id, batch_number) DO NOTHING
+  INSERT INTO drug_batches (drug_id, batch_number, expiry_date, supplier, quantity)
+  SELECT d.drug_id, 'CIPRO-IV-200-LOTX', DATE '2026-09-30', 'Hospisupply', 0 FROM d
+  ON CONFLICT (drug_id, batch_number) DO NOTHING
   RETURNING id
 ),
 l1 AS (
@@ -482,19 +445,18 @@ SELECT (SELECT id FROM b), 'Ward B', 100
 ON CONFLICT (batch_id, location) DO NOTHING;
 
 -- Vitamin D3 1000 IU/tab (solid → tab pieces): VITD3-1K-01
-WITH pr AS (
-  SELECT dp.id AS presentation_id
-  FROM drug_presentations dp
-  JOIN drugs d ON d.id = dp.drug_id
-  WHERE d.generic_name='Cholecalciferol' AND d.brand_name='Vit D3 1000IU'
-    AND dp.dosage_form_code='TAB' AND dp.route_code='PO'
-    AND dp.strength_num=1000 AND dp.strength_unit_num='IU'
-    AND dp.strength_den IS NULL AND dp.dispense_unit='tab'
+WITH d AS (
+  SELECT id AS drug_id
+  FROM drugs
+  WHERE generic_name='Cholecalciferol' AND brand_name='Vit D3 1000IU'
+    AND dosage_form_code='TAB' AND route_code='PO'
+    AND strength_num=1000 AND strength_unit_num='IU'
+    AND strength_den IS NULL AND dispense_unit='tab'
 ),
 b AS (
-  INSERT INTO drug_batches (presentation_id, batch_number, expiry_date, supplier, quantity)
-  SELECT pr.presentation_id, 'VITD3-1K-01', DATE '2028-12-31', 'NutraHealth', 0 FROM pr
-  ON CONFLICT (presentation_id, batch_number) DO NOTHING
+  INSERT INTO drug_batches (drug_id, batch_number, expiry_date, supplier, quantity)
+  SELECT d.drug_id, 'VITD3-1K-01', DATE '2028-12-31', 'NutraHealth', 0 FROM d
+  ON CONFLICT (drug_id, batch_number) DO NOTHING
   RETURNING id
 )
 INSERT INTO batch_locations (batch_id, location, quantity)

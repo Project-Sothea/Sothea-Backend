@@ -28,31 +28,61 @@ func NewPostgresPharmacyRepository(conn *sql.DB) entities.PharmacyRepository {
 //  HELPERS (label builders; keep in repo so FE gets nice strings)
 // -----------------------------------------------------------------------------
 
-func displayStrength(p entities.DrugPresentation) string {
-	if p.StrengthDen == nil || p.StrengthUnitDen == nil {
+func displayStrength(d entities.Drug) string {
+	if d.StrengthDen == nil || d.StrengthUnitDen == nil {
 		// solids (no denominator), e.g. "500 mg TAB"
-		if p.StrengthNum != nil && p.StrengthUnitNum != nil {
-			return fmt.Sprintf("%g %s %s", *p.StrengthNum, *p.StrengthUnitNum, p.DosageFormCode)
+		if d.StrengthNum != nil && d.StrengthUnitNum != nil {
+			return fmt.Sprintf("%g %s %s", *d.StrengthNum, *d.StrengthUnitNum, d.DosageFormCode)
 		}
 		// Unknown strength: show dosage form
-		return fmt.Sprintf("%s (strength unknown)", p.DosageFormCode)
+		return d.DosageFormCode
 	}
 	// liquids/creams, e.g. "250 mg/5 mL SYR"
-	if p.StrengthNum != nil && p.StrengthUnitNum != nil {
+	if d.StrengthNum != nil && d.StrengthUnitNum != nil {
+		numUnit := derefStr(d.StrengthUnitNum)
+		denUnit := derefStr(d.StrengthUnitDen)
+		numVal := derefFloat(d.StrengthNum)
+		denVal := derefFloat(d.StrengthDen)
+
+		// Check if we should display as percentage (based on drug setting)
+		if d.DisplayAsPercentage && denVal > 0 {
+			percentage := (numVal / denVal) * 100
+			return fmt.Sprintf("%g%% %s", percentage, d.DosageFormCode)
+		}
+
 		return fmt.Sprintf("%g %s/%g %s %s",
-			derefFloat(p.StrengthNum), derefStr(p.StrengthUnitNum),
-			derefFloat(p.StrengthDen), derefStr(p.StrengthUnitDen),
-			p.DosageFormCode)
+			numVal, numUnit,
+			denVal, denUnit,
+			d.DosageFormCode)
 	}
 	// Unknown strength liquid: show dosage form
-	return fmt.Sprintf("%s (strength unknown)", p.DosageFormCode)
+	return d.DosageFormCode
 }
 
-func displayLabel(drugName string, p entities.DrugPresentation) string {
-	base := fmt.Sprintf("%s %s (%s)", drugName, displayStrength(p), p.RouteCode)
-	if p.DispenseUnit == "bottle" && p.PieceContentAmount != nil && p.PieceContentUnit != nil {
-		return fmt.Sprintf("%s - bottle %g %s", base, *p.PieceContentAmount, *p.PieceContentUnit)
+func displayLabel(d entities.Drug) string {
+	strength := displayStrength(d)
+	route := d.RouteCode
+
+	// Build base label: "GenericName Strength (Route)"
+	base := fmt.Sprintf("%s %s (%s)", d.GenericName, strength, route)
+
+	// Add piece content info if applicable (bottles, tubes, inhalers)
+	if d.PieceContentAmount != nil && d.PieceContentUnit != nil {
+		switch d.DispenseUnit {
+		case "bottle":
+			base = fmt.Sprintf("%s - bottle %g %s", base, *d.PieceContentAmount, *d.PieceContentUnit)
+		case "tube":
+			base = fmt.Sprintf("%s - tube %g %s", base, *d.PieceContentAmount, *d.PieceContentUnit)
+		case "inhaler":
+			base = fmt.Sprintf("%s - inhaler %g %s", base, *d.PieceContentAmount, *d.PieceContentUnit)
+		}
 	}
+
+	// Prepend ATC code with a dot if present
+	if d.ATCCode != nil && *d.ATCCode != "" {
+		return fmt.Sprintf("%s. %s", *d.ATCCode, base)
+	}
+
 	return base
 }
 
@@ -74,22 +104,28 @@ func derefStr(p *string) string {
 // -----------------------------------------------------------------------------
 
 const qDrugsList = `
-  SELECT id, generic_name, brand_name, atc_code, notes, is_active, created_at, updated_at
+  SELECT id, generic_name, brand_name, atc_code, dosage_form_code, route_code,
+    strength_num, strength_unit_num, strength_den, strength_unit_den,
+    dispense_unit, piece_content_amount, piece_content_unit,
+    is_fractional_allowed, display_as_percentage, barcode, notes, is_active, created_at, updated_at
   FROM drugs
   /* optional WHERE added dynamically */
-  ORDER BY generic_name, COALESCE(brand_name,'')`
+  ORDER BY generic_name, COALESCE(brand_name,''), dosage_form_code, route_code`
 
-func (r *postgresPharmacyRepository) ListDrugs(ctx context.Context, q *string) ([]entities.Drug, error) {
+func (r *postgresPharmacyRepository) ListDrugs(ctx context.Context, q *string) ([]entities.DrugView, error) {
 	dbx := DBFromCtx(ctx, r.Conn)
 
 	query := qDrugsList
 	args := []any{}
 	if q != nil && *q != "" {
 		query = `
-		  SELECT id, generic_name, brand_name, atc_code, notes, is_active, created_at, updated_at
+		  SELECT id, generic_name, brand_name, atc_code, dosage_form_code, route_code,
+		    strength_num, strength_unit_num, strength_den, strength_unit_den,
+		    dispense_unit, piece_content_amount, piece_content_unit,
+		    is_fractional_allowed, display_as_percentage, barcode, notes, is_active, created_at, updated_at
 		  FROM drugs
 		  WHERE generic_name ILIKE $1 OR COALESCE(brand_name,'') ILIKE $1
-		  ORDER BY generic_name, COALESCE(brand_name,'')`
+		  ORDER BY generic_name, COALESCE(brand_name,''), dosage_form_code, route_code`
 		args = append(args, "%"+*q+"%")
 	}
 
@@ -99,27 +135,49 @@ func (r *postgresPharmacyRepository) ListDrugs(ctx context.Context, q *string) (
 	}
 	defer rows.Close()
 
-	out := []entities.Drug{}
+	out := []entities.DrugView{}
 	for rows.Next() {
 		var d entities.Drug
-		if err := rows.Scan(&d.ID, &d.GenericName, &d.BrandName, &d.ATCCode, &d.Notes, &d.IsActive, &d.CreatedAt, &d.UpdatedAt); err != nil {
+		if err := rows.Scan(
+			&d.ID, &d.GenericName, &d.BrandName, &d.ATCCode,
+			&d.DosageFormCode, &d.RouteCode,
+			&d.StrengthNum, &d.StrengthUnitNum, &d.StrengthDen, &d.StrengthUnitDen,
+			&d.DispenseUnit, &d.PieceContentAmount, &d.PieceContentUnit,
+			&d.IsFractionalAllowed, &d.DisplayAsPercentage, &d.Barcode, &d.Notes, &d.IsActive,
+			&d.CreatedAt, &d.UpdatedAt,
+		); err != nil {
 			return nil, err
 		}
-		out = append(out, d)
+		dv := entities.DrugView{
+			Drug:            d,
+			DisplayStrength: displayStrength(d),
+			DisplayRoute:    d.RouteCode,
+			DisplayLabel:    displayLabel(d),
+		}
+		out = append(out, dv)
 	}
 	return out, rows.Err()
 }
 
 const qDrugCreate = `
-  INSERT INTO drugs (generic_name, brand_name, atc_code, notes, is_active)
-  VALUES ($1,$2,$3,$4,COALESCE($5,TRUE))
+  INSERT INTO drugs (
+    generic_name, brand_name, atc_code, dosage_form_code, route_code,
+    strength_num, strength_unit_num, strength_den, strength_unit_den,
+    dispense_unit, piece_content_amount, piece_content_unit,
+    is_fractional_allowed, display_as_percentage, barcode, notes, is_active
+  )
+  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,COALESCE($13,FALSE),COALESCE($14,FALSE),$15,$16,COALESCE($17,TRUE))
   RETURNING id`
 
-func (r *postgresPharmacyRepository) CreateDrug(ctx context.Context, d *entities.Drug) (*entities.Drug, error) {
+func (r *postgresPharmacyRepository) CreateDrug(ctx context.Context, d *entities.Drug) (*entities.DrugView, error) {
 	dbx := DBFromCtx(ctx, r.Conn)
 	var id int64
 	if err := dbx.QueryRowContext(ctx, qDrugCreate,
-		d.GenericName, d.BrandName, d.ATCCode, d.Notes, d.IsActive,
+		d.GenericName, d.BrandName, d.ATCCode,
+		d.DosageFormCode, d.RouteCode,
+		d.StrengthNum, d.StrengthUnitNum, d.StrengthDen, d.StrengthUnitDen,
+		d.DispenseUnit, d.PieceContentAmount, d.PieceContentUnit,
+		d.IsFractionalAllowed, d.DisplayAsPercentage, d.Barcode, d.Notes, d.IsActive,
 	).Scan(&id); err != nil {
 		return nil, err
 	}
@@ -127,28 +185,56 @@ func (r *postgresPharmacyRepository) CreateDrug(ctx context.Context, d *entities
 }
 
 const qDrugGet = `
-  SELECT id, generic_name, brand_name, atc_code, notes, is_active, created_at, updated_at
+  SELECT id, generic_name, brand_name, atc_code, dosage_form_code, route_code,
+    strength_num, strength_unit_num, strength_den, strength_unit_den,
+    dispense_unit, piece_content_amount, piece_content_unit,
+    is_fractional_allowed, display_as_percentage, barcode, notes, is_active, created_at, updated_at
   FROM drugs WHERE id=$1`
 
-func (r *postgresPharmacyRepository) GetDrug(ctx context.Context, id int64) (*entities.Drug, error) {
+func (r *postgresPharmacyRepository) GetDrug(ctx context.Context, id int64) (*entities.DrugView, error) {
 	dbx := DBFromCtx(ctx, r.Conn)
 	var d entities.Drug
-	err := dbx.QueryRowContext(ctx, qDrugGet, id).
-		Scan(&d.ID, &d.GenericName, &d.BrandName, &d.ATCCode, &d.Notes, &d.IsActive, &d.CreatedAt, &d.UpdatedAt)
+	err := dbx.QueryRowContext(ctx, qDrugGet, id).Scan(
+		&d.ID, &d.GenericName, &d.BrandName, &d.ATCCode,
+		&d.DosageFormCode, &d.RouteCode,
+		&d.StrengthNum, &d.StrengthUnitNum, &d.StrengthDen, &d.StrengthUnitDen,
+		&d.DispenseUnit, &d.PieceContentAmount, &d.PieceContentUnit,
+		&d.IsFractionalAllowed, &d.DisplayAsPercentage, &d.Barcode, &d.Notes, &d.IsActive,
+		&d.CreatedAt, &d.UpdatedAt,
+	)
 	if err == sql.ErrNoRows {
 		return nil, errors.New("drug not found")
 	}
-	return &d, err
+	if err != nil {
+		return nil, err
+	}
+	dv := &entities.DrugView{
+		Drug:            d,
+		DisplayStrength: displayStrength(d),
+		DisplayRoute:    d.RouteCode,
+		DisplayLabel:    displayLabel(d),
+	}
+	return dv, nil
 }
 
 const qDrugUpdate = `
-  UPDATE drugs SET generic_name=$2, brand_name=$3, atc_code=$4, notes=$5, is_active=$6, updated_at=NOW()
+  UPDATE drugs SET
+    generic_name=$2, brand_name=$3, atc_code=$4,
+    dosage_form_code=$5, route_code=$6,
+    strength_num=$7, strength_unit_num=$8, strength_den=$9, strength_unit_den=$10,
+    dispense_unit=$11, piece_content_amount=$12, piece_content_unit=$13,
+    is_fractional_allowed=$14, display_as_percentage=$15, barcode=$16, notes=$17, is_active=$18, updated_at=NOW()
   WHERE id=$1`
 
-func (r *postgresPharmacyRepository) UpdateDrug(ctx context.Context, d *entities.Drug) (*entities.Drug, error) {
+func (r *postgresPharmacyRepository) UpdateDrug(ctx context.Context, d *entities.Drug) (*entities.DrugView, error) {
 	dbx := DBFromCtx(ctx, r.Conn)
 	res, err := dbx.ExecContext(ctx, qDrugUpdate,
-		d.ID, d.GenericName, d.BrandName, d.ATCCode, d.Notes, d.IsActive)
+		d.ID, d.GenericName, d.BrandName, d.ATCCode,
+		d.DosageFormCode, d.RouteCode,
+		d.StrengthNum, d.StrengthUnitNum, d.StrengthDen, d.StrengthUnitDen,
+		d.DispenseUnit, d.PieceContentAmount, d.PieceContentUnit,
+		d.IsFractionalAllowed, d.DisplayAsPercentage, d.Barcode, d.Notes, d.IsActive,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -173,190 +259,19 @@ func (r *postgresPharmacyRepository) DeleteDrug(ctx context.Context, id int64) e
 }
 
 // -----------------------------------------------------------------------------
-//  PRESENTATIONS
-// -----------------------------------------------------------------------------
-
-const qPresList = `
-  SELECT
-    id, drug_id, dosage_form_code, route_code,
-    strength_num, strength_unit_num,
-    strength_den, strength_unit_den,
-    dispense_unit, piece_content_amount, piece_content_unit,
-    is_fractional_allowed, barcode, notes, created_at, updated_at
-  FROM drug_presentations
-  WHERE drug_id=$1
-  ORDER BY dosage_form_code, route_code, dispense_unit, id`
-
-func (r *postgresPharmacyRepository) ListPresentations(ctx context.Context, drugID int64) ([]entities.DrugPresentationView, error) {
-	dbx := DBFromCtx(ctx, r.Conn)
-
-	drug, err := r.GetDrug(ctx, drugID)
-	if err != nil {
-		return nil, err
-	}
-
-	rows, err := dbx.QueryContext(ctx, qPresList, drugID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	out := []entities.DrugPresentationView{}
-	for rows.Next() {
-		var p entities.DrugPresentation
-		if err := rows.Scan(
-			&p.ID, &p.DrugID, &p.DosageFormCode, &p.RouteCode,
-			&p.StrengthNum, &p.StrengthUnitNum,
-			&p.StrengthDen, &p.StrengthUnitDen,
-			&p.DispenseUnit, &p.PieceContentAmount, &p.PieceContentUnit,
-			&p.IsFractionalAllowed, &p.Barcode, &p.Notes, &p.CreatedAt, &p.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		out = append(out, entities.DrugPresentationView{
-			DrugPresentation: p,
-			DrugName:         drug.GenericName,
-			DisplayStrength:  displayStrength(p),
-			DisplayRoute:     p.RouteCode,
-			DisplayLabel:     displayLabel(drug.GenericName, p),
-		})
-	}
-	return out, rows.Err()
-}
-
-const qPresGet = `
-  SELECT
-    id, drug_id, dosage_form_code, route_code,
-    strength_num, strength_unit_num,
-    strength_den, strength_unit_den,
-    dispense_unit, piece_content_amount, piece_content_unit,
-    is_fractional_allowed, barcode, notes, created_at, updated_at
-  FROM drug_presentations
-  WHERE id=$1`
-
-func (r *postgresPharmacyRepository) GetPresentation(ctx context.Context, id int64) (*entities.DrugPresentationView, error) {
-	dbx := DBFromCtx(ctx, r.Conn)
-
-	var p entities.DrugPresentation
-	err := dbx.QueryRowContext(ctx, qPresGet, id).Scan(
-		&p.ID, &p.DrugID, &p.DosageFormCode, &p.RouteCode,
-		&p.StrengthNum, &p.StrengthUnitNum,
-		&p.StrengthDen, &p.StrengthUnitDen,
-		&p.DispenseUnit, &p.PieceContentAmount, &p.PieceContentUnit,
-		&p.IsFractionalAllowed, &p.Barcode, &p.Notes, &p.CreatedAt, &p.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
-		return nil, errors.New("presentation not found")
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	drug, err := r.GetDrug(ctx, p.DrugID)
-	if err != nil {
-		return nil, err
-	}
-
-	v := entities.DrugPresentationView{
-		DrugPresentation: p,
-		DrugName:         drug.GenericName,
-		DisplayStrength:  displayStrength(p),
-		DisplayRoute:     p.RouteCode,
-		DisplayLabel:     displayLabel(drug.GenericName, p),
-	}
-	return &v, nil
-}
-
-const qPresCreate = `
-  INSERT INTO drug_presentations (
-    drug_id, dosage_form_code, route_code,
-    strength_num, strength_unit_num,
-    strength_den, strength_unit_den,
-    dispense_unit, piece_content_amount, piece_content_unit,
-    is_fractional_allowed, barcode, notes
-  ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,COALESCE($11,FALSE),$12,$13)
-  RETURNING id`
-
-func (r *postgresPharmacyRepository) CreatePresentation(ctx context.Context, p *entities.DrugPresentation) (*entities.DrugPresentationView, error) {
-	dbx := DBFromCtx(ctx, r.Conn)
-	var id int64
-	err := dbx.QueryRowContext(ctx, qPresCreate,
-		p.DrugID, p.DosageFormCode, p.RouteCode,
-		p.StrengthNum, p.StrengthUnitNum,
-		p.StrengthDen, p.StrengthUnitDen,
-		p.DispenseUnit, p.PieceContentAmount, p.PieceContentUnit,
-		p.IsFractionalAllowed, p.Barcode, p.Notes,
-	).Scan(&id)
-	if err != nil {
-		return nil, err
-	}
-	// hydrate
-	v, err := r.GetPresentation(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	return v, nil
-}
-
-const qPresUpdate = `
-  UPDATE drug_presentations SET
-    drug_id=$2, dosage_form_code=$3, route_code=$4,
-    strength_num=$5, strength_unit_num=$6,
-    strength_den=$7, strength_unit_den=$8,
-    dispense_unit=$9, piece_content_amount=$10, piece_content_unit=$11,
-    is_fractional_allowed=$12, barcode=$13, notes=$14, updated_at=NOW()
-  WHERE id=$1`
-
-func (r *postgresPharmacyRepository) UpdatePresentation(ctx context.Context, p *entities.DrugPresentation) (*entities.DrugPresentationView, error) {
-	dbx := DBFromCtx(ctx, r.Conn)
-	res, err := dbx.ExecContext(ctx, qPresUpdate,
-		p.ID, p.DrugID, p.DosageFormCode, p.RouteCode,
-		p.StrengthNum, p.StrengthUnitNum,
-		p.StrengthDen, p.StrengthUnitDen,
-		p.DispenseUnit, p.PieceContentAmount, p.PieceContentUnit,
-		p.IsFractionalAllowed, p.Barcode, p.Notes,
-	)
-	if err != nil {
-		return nil, err
-	}
-	if aff, _ := res.RowsAffected(); aff == 0 {
-		return nil, errors.New("presentation not found")
-	}
-	v, err := r.GetPresentation(ctx, p.ID)
-	if err != nil {
-		return nil, err
-	}
-	return v, nil
-}
-
-const qPresDelete = `DELETE FROM drug_presentations WHERE id=$1`
-
-func (r *postgresPharmacyRepository) DeletePresentation(ctx context.Context, id int64) error {
-	dbx := DBFromCtx(ctx, r.Conn)
-	res, err := dbx.ExecContext(ctx, qPresDelete, id)
-	if err != nil {
-		return err
-	}
-	if aff, _ := res.RowsAffected(); aff == 0 {
-		return errors.New("presentation not found")
-	}
-	return nil
-}
-
-// -----------------------------------------------------------------------------
 //  BATCHES & LOCATIONS (quantities in DispenseUnit)
 // -----------------------------------------------------------------------------
 
 const qBatchList = `
-  SELECT id, presentation_id, batch_number, expiry_date, supplier, quantity, created_at, updated_at
+  SELECT id, drug_id, batch_number, expiry_date, supplier, quantity, created_at, updated_at
   FROM drug_batches
-  WHERE presentation_id=$1
+  WHERE drug_id=$1
   ORDER BY expiry_date NULLS LAST, batch_number, id`
 
-func (r *postgresPharmacyRepository) ListBatches(ctx context.Context, presentationID int64) ([]entities.BatchDetail, error) {
+func (r *postgresPharmacyRepository) ListBatches(ctx context.Context, drugID int64) ([]entities.BatchDetail, error) {
 	dbx := DBFromCtx(ctx, r.Conn)
 
-	rows, err := dbx.QueryContext(ctx, qBatchList, presentationID)
+	rows, err := dbx.QueryContext(ctx, qBatchList, drugID)
 	if err != nil {
 		return nil, err
 	}
@@ -366,7 +281,7 @@ func (r *postgresPharmacyRepository) ListBatches(ctx context.Context, presentati
 	batchIDs := make([]int64, 0, 64)
 	for rows.Next() {
 		var b entities.DrugBatch
-		if err := rows.Scan(&b.ID, &b.PresentationID, &b.BatchNumber, &b.ExpiryDate, &b.Supplier, &b.Quantity, &b.CreatedAt, &b.UpdatedAt); err != nil {
+		if err := rows.Scan(&b.ID, &b.DrugID, &b.BatchNumber, &b.ExpiryDate, &b.Supplier, &b.Quantity, &b.CreatedAt, &b.UpdatedAt); err != nil {
 			return nil, err
 		}
 		batches = append(batches, b)
@@ -415,14 +330,14 @@ func (r *postgresPharmacyRepository) ListBatches(ctx context.Context, presentati
 }
 
 const qBatchGet = `
-  SELECT id, presentation_id, batch_number, expiry_date, supplier, quantity, created_at, updated_at
+  SELECT id, drug_id, batch_number, expiry_date, supplier, quantity, created_at, updated_at
   FROM drug_batches WHERE id=$1`
 
 func (r *postgresPharmacyRepository) GetBatch(ctx context.Context, batchID int64) (*entities.BatchDetail, error) {
 	dbx := DBFromCtx(ctx, r.Conn)
 	var b entities.DrugBatch
 	err := dbx.QueryRowContext(ctx, qBatchGet, batchID).
-		Scan(&b.ID, &b.PresentationID, &b.BatchNumber, &b.ExpiryDate, &b.Supplier, &b.Quantity, &b.CreatedAt, &b.UpdatedAt)
+		Scan(&b.ID, &b.DrugID, &b.BatchNumber, &b.ExpiryDate, &b.Supplier, &b.Quantity, &b.CreatedAt, &b.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, errors.New("batch not found")
 	}
@@ -442,7 +357,7 @@ func (r *postgresPharmacyRepository) GetBatch(ctx context.Context, batchID int64
 }
 
 const qBatchCreate = `
-  INSERT INTO drug_batches (presentation_id, batch_number, expiry_date, supplier, quantity)
+  INSERT INTO drug_batches (drug_id, batch_number, expiry_date, supplier, quantity)
   VALUES ($1,$2,$3,$4,COALESCE($5,0))
   RETURNING id`
 
@@ -461,7 +376,7 @@ func (r *postgresPharmacyRepository) CreateBatch(ctx context.Context, b *entitie
 
 	var id int64
 	if err := tx.QueryRowContext(ctx, qBatchCreate,
-		b.PresentationID, b.BatchNumber, b.ExpiryDate, b.Supplier, b.Quantity,
+		b.DrugID, b.BatchNumber, b.ExpiryDate, b.Supplier, b.Quantity,
 	).Scan(&id); err != nil {
 		return nil, err
 	}
@@ -501,13 +416,13 @@ func (r *postgresPharmacyRepository) CreateBatch(ctx context.Context, b *entitie
 
 const qBatchUpdate = `
   UPDATE drug_batches
-  SET presentation_id=$2, batch_number=$3, expiry_date=$4, supplier=$5, quantity=$6, updated_at=NOW()
+  SET drug_id=$2, batch_number=$3, expiry_date=$4, supplier=$5, quantity=$6, updated_at=NOW()
   WHERE id=$1`
 
 func (r *postgresPharmacyRepository) UpdateBatch(ctx context.Context, b *entities.DrugBatch) (*entities.BatchDetail, error) {
 	dbx := DBFromCtx(ctx, r.Conn)
 	res, err := dbx.ExecContext(ctx, qBatchUpdate,
-		b.ID, b.PresentationID, b.BatchNumber, b.ExpiryDate, b.Supplier, b.Quantity)
+		b.ID, b.DrugID, b.BatchNumber, b.ExpiryDate, b.Supplier, b.Quantity)
 	if err != nil {
 		return nil, err
 	}
@@ -622,15 +537,15 @@ func (r *postgresPharmacyRepository) DeleteBatchLocation(ctx context.Context, id
 //  STOCK VIEW (FEFO summary for a presentation)
 // -----------------------------------------------------------------------------
 
-func (r *postgresPharmacyRepository) GetPresentationStock(ctx context.Context, presentationID int64) (*entities.PresentationStock, error) {
-	// 1) Presentation view (for labels)
-	pv, err := r.GetPresentation(ctx, presentationID)
+func (r *postgresPharmacyRepository) GetDrugStock(ctx context.Context, drugID int64) (*entities.DrugStock, error) {
+	// 1) Drug view (for labels)
+	dv, err := r.GetDrug(ctx, drugID)
 	if err != nil {
 		return nil, err
 	}
 
 	// 2) Batches & locations
-	batches, err := r.ListBatches(ctx, presentationID)
+	batches, err := r.ListBatches(ctx, drugID)
 	if err != nil {
 		return nil, err
 	}
@@ -658,9 +573,9 @@ func (r *postgresPharmacyRepository) GetPresentationStock(ctx context.Context, p
 		total += b.Quantity
 	}
 
-	return &entities.PresentationStock{
-		Presentation: *pv,
-		Batches:      batches,
-		TotalQty:     total,
+	return &entities.DrugStock{
+		Drug:     *dv,
+		Batches:  batches,
+		TotalQty: total,
 	}, nil
 }
