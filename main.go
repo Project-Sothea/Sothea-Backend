@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	_httpDelivery "github.com/jieqiboh/sothea_backend/controllers"
 	_postgresRepository "github.com/jieqiboh/sothea_backend/repository/postgres"
@@ -40,6 +41,14 @@ func main() {
 	}()
 
 	router := gin.Default()
+	router.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"*"}, // or specific origin
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
 	router.Static("/app", "./dist")
 
 	// Root router group for all public API endpoints
