@@ -1,0 +1,23 @@
+# Docker Compose for Local Development
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: sothea-postgres
+    environment:
+      POSTGRES_DB: sothea
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+    ports:
+      - '5432:5432'
+    command: postgres -c listen_addresses='*'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d sothea']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
