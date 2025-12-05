@@ -101,9 +101,9 @@ func (r *postgresPrescriptionRepository) GetPrescriptionByID(ctx context.Context
 	// Lines (new schedule fields)
 	rows, err := dbx.QueryContext(ctx, `
 	SELECT
-		pl.id, pl.prescription_id, pl.presentation_id, pl.remarks,
+		pl.id, pl.prescription_id, pl.presentation_id, pl.remarks, pl.prn,
 		pl.dose_amount, pl.dose_unit,
-		pl.schedule_kind, pl.every_n, pl.frequency_per_schedule,
+		pl.frequency_code,
 		pl.duration, pl.duration_unit,
 		pl.total_to_dispense, pl.is_packed, pl.packed_by, pl.packed_at,
 		u1.name AS packer_name,
@@ -112,9 +112,14 @@ func (r *postgresPrescriptionRepository) GetPrescriptionByID(ctx context.Context
 		dp.route_code AS route_code,
 		dp.dispense_unit AS dispense_unit,
 		CASE
+		WHEN dp.strength_num IS NULL AND dp.strength_unit_num IS NULL THEN
+			-- Unknown strength: show dosage form and dispense unit
+			dp.dosage_form_code || ' (strength unknown)'
 		WHEN dp.strength_den IS NULL THEN
+			-- Solid with known strength
 			dp.strength_num::text || ' ' || dp.strength_unit_num || '/' || dp.dispense_unit
 		ELSE
+			-- Liquid/cream with known concentration
 			dp.strength_num::text || ' ' || dp.strength_unit_num || '/' ||
 			dp.strength_den::text || ' ' || dp.strength_unit_den
 		END AS display_strength
@@ -136,16 +141,20 @@ func (r *postgresPrescriptionRepository) GetPrescriptionByID(ctx context.Context
 		var l entities.PrescriptionLine
 		var packerName sql.NullString
 		var updaterName sql.NullString
+		var frequencyCode sql.NullString
 		if err := rows.Scan(
-			&l.ID, &l.PrescriptionID, &l.PresentationID, &l.Remarks,
+			&l.ID, &l.PrescriptionID, &l.PresentationID, &l.Remarks, &l.Prn,
 			&l.DoseAmount, &l.DoseUnit,
-			&l.ScheduleKind, &l.EveryN, &l.FrequencyPerSchedule,
+			&frequencyCode,
 			&l.Duration, &l.DurationUnit,
 			&l.TotalToDispense, &l.IsPacked, &l.PackedBy, &l.PackedAt,
 			&packerName, &updaterName,
 			&l.DrugName, &l.DisplayRoute, &l.DispenseUnit, &l.DisplayStrength,
 		); err != nil {
 			return nil, err
+		}
+		if frequencyCode.Valid {
+			l.FrequencyCode = frequencyCode.String
 		}
 		if packerName.Valid {
 			l.PackerName = &packerName.String
@@ -367,20 +376,20 @@ func (r *postgresPrescriptionRepository) AddLine(ctx context.Context, line *enti
 
 	err = tx.QueryRowContext(ctx, `
 	  INSERT INTO prescription_lines (
-	    prescription_id, presentation_id, remarks,
+	    prescription_id, presentation_id, remarks, prn,
 	    dose_amount, dose_unit,
-	    schedule_kind, every_n, frequency_per_schedule,
+	    frequency_code,
 		duration, duration_unit
 	  )
 	  VALUES (
-	  	$1,$2,$3,
-		$4,$5,
-		$6,$7,$8,
-		$9,$10)
+	  	$1,$2,$3,$4,
+		$5,$6,
+		$7,
+		$8,$9)
 	  RETURNING id, total_to_dispense, is_packed
-	`, line.PrescriptionID, line.PresentationID, line.Remarks,
+	`, line.PrescriptionID, line.PresentationID, line.Remarks, line.Prn,
 		line.DoseAmount, line.DoseUnit,
-		line.ScheduleKind, line.EveryN, line.FrequencyPerSchedule,
+		line.FrequencyCode,
 		line.Duration, line.DurationUnit).
 		Scan(&line.ID, &line.TotalToDispense, &line.IsPacked)
 	if err != nil {
@@ -422,22 +431,26 @@ func (r *postgresPrescriptionRepository) UpdateLine(ctx context.Context, line *e
 
 	// Load current values to detect what changed (lock the row for the rest of the tx)
 	var cur entities.PrescriptionLine
+	var curFreqCode sql.NullString
 	if err := tx.QueryRowContext(ctx, `
 		SELECT presentation_id,
 		dose_amount, dose_unit,
-		schedule_kind, every_n, frequency_per_schedule,
+		frequency_code,
 		duration, duration_unit,
-		remarks
+		remarks, prn
 		FROM prescription_lines
 		WHERE id=$1 FOR UPDATE
 	`, line.ID).Scan(
 		&cur.PresentationID,
 		&cur.DoseAmount, &cur.DoseUnit,
-		&cur.ScheduleKind, &cur.EveryN, &cur.FrequencyPerSchedule,
+		&curFreqCode,
 		&cur.Duration, &cur.DurationUnit,
-		&cur.Remarks,
+		&cur.Remarks, &cur.Prn,
 	); err != nil {
 		return nil, err
+	}
+	if curFreqCode.Valid {
+		cur.FrequencyCode = curFreqCode.String
 	}
 
 	presChanged := cur.PresentationID != line.PresentationID
@@ -451,17 +464,17 @@ func (r *postgresPrescriptionRepository) UpdateLine(ctx context.Context, line *e
 
 	err = tx.QueryRowContext(ctx, `
 	  UPDATE prescription_lines SET
-	    presentation_id=$2, remarks=$3,
-	    dose_amount=$4, dose_unit=$5,
-	    schedule_kind=$6, every_n=$7, frequency_per_schedule=$8,
-		duration=$9, duration_unit=$10,
+	    presentation_id=$2, remarks=$3, prn=$4,
+	    dose_amount=$5, dose_unit=$6,
+	    frequency_code=$7,
+		duration=$8, duration_unit=$9,
 	    is_packed=FALSE, packed_by=NULL, packed_at=NULL,
 	    updated_at=NOW()
 	  WHERE id=$1
 	  RETURNING total_to_dispense
-	`, line.ID, line.PresentationID, line.Remarks,
+	`, line.ID, line.PresentationID, line.Remarks, line.Prn,
 		line.DoseAmount, line.DoseUnit,
-		line.ScheduleKind, line.EveryN, line.FrequencyPerSchedule,
+		line.FrequencyCode,
 		line.Duration, line.DurationUnit).
 		Scan(&line.TotalToDispense)
 	if err != nil {
@@ -773,25 +786,31 @@ func (r *postgresPrescriptionRepository) DispensePrescription(ctx context.Contex
 func (r *postgresPrescriptionRepository) GetLine(ctx context.Context, lineID int64) (*entities.PrescriptionLine, error) {
 	dbx := DBFromCtx(ctx, r.Conn)
 	var l entities.PrescriptionLine
+	var frequencyCode sql.NullString
 	if err := dbx.QueryRowContext(ctx, `
 	  SELECT
-	    pl.id, pl.prescription_id, pl.presentation_id, pl.remarks,
+	    pl.id, pl.prescription_id, pl.presentation_id, pl.remarks, pl.prn,
 	    pl.dose_amount, pl.dose_unit,
-	    pl.schedule_kind, pl.every_n, pl.frequency_per_schedule, pl.duration,
+	    pl.frequency_code,
+	    pl.duration, pl.duration_unit,
 	    pl.total_to_dispense, pl.is_packed, pl.packed_by, pl.packed_at,
 	    (SELECT dispense_unit FROM drug_presentations WHERE id=pl.presentation_id) AS du
 	  FROM prescription_lines pl
 	  WHERE pl.id=$1
 	`, lineID).Scan(
-		&l.ID, &l.PrescriptionID, &l.PresentationID, &l.Remarks,
+		&l.ID, &l.PrescriptionID, &l.PresentationID, &l.Remarks, &l.Prn,
 		&l.DoseAmount, &l.DoseUnit,
-		&l.ScheduleKind, &l.EveryN, &l.FrequencyPerSchedule, &l.Duration,
+		&frequencyCode,
+		&l.Duration, &l.DurationUnit,
 		&l.TotalToDispense, &l.IsPacked, &l.PackedBy, &l.PackedAt, &l.DispenseUnit,
 	); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, errors.New("line not found")
 		}
 		return nil, err
+	}
+	if frequencyCode.Valid {
+		l.FrequencyCode = frequencyCode.String
 	}
 
 	// Allocations

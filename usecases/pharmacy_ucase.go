@@ -47,20 +47,33 @@ func validatePresentationForCreate(p *entities.DrugPresentation) error {
 	if p.DrugID == 0 || p.DosageFormCode == "" || p.RouteCode == "" || p.DispenseUnit == "" {
 		return fmt.Errorf("missing required fields (drugId, dosageFormCode, routeCode, dispenseUnit)")
 	}
-	// Solid vs liquid rules (light):
+
+	// Check if strength is unknown (all strength fields NULL)
+	if p.StrengthNum == nil && p.StrengthUnitNum == nil {
+		if p.StrengthDen != nil || p.StrengthUnitDen != nil {
+			return fmt.Errorf("invalid strength configuration: strength_num/unit_num NULL but strength_den/unit_den not NULL")
+		}
+		// Unknown strength: any dispense_unit is allowed (mL, g, tab, cap, drop, bottle, etc.)
+		// If bottle, piece_content is optional
+		return nil
+	}
+
+	// Known strength cases
 	if p.StrengthDen == nil {
 		// Solids must have numerator filled
 		if p.StrengthNum == nil || p.StrengthUnitNum == nil {
 			return fmt.Errorf("solid presentation requires strength numerator and unit")
 		}
 	} else {
-		// Liquids/creams must have denom + num
-		if p.StrengthNum == nil || p.StrengthUnitNum == nil || p.StrengthUnitDen == nil {
-			return fmt.Errorf("liquid/cream presentation requires numerator+denominator units and values")
-		}
-		// If dispensed as a piece (bottle), piece content must be provided
-		if p.DispenseUnit == "bottle" && (p.PieceContentAmount == nil || p.PieceContentUnit == nil) {
-			return fmt.Errorf("bottle dispense requires pieceContentAmount and pieceContentUnit")
+
+		// If dispensed as a piece (bottle), piece content is optional
+		// If provided, piece_content_unit should match one of strength units
+		if p.DispenseUnit == "bottle" && p.PieceContentAmount != nil && p.PieceContentUnit != nil {
+			if p.StrengthUnitNum != nil && p.StrengthUnitDen != nil {
+				if *p.PieceContentUnit != *p.StrengthUnitNum && *p.PieceContentUnit != *p.StrengthUnitDen {
+					return fmt.Errorf("piece_content_unit must match one of strength units (strength_unit_num or strength_unit_den)")
+				}
+			}
 		}
 	}
 	return nil

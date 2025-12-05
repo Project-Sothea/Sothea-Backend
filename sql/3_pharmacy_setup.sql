@@ -30,7 +30,7 @@ CREATE TABLE dosage_forms (
 
 INSERT INTO dosage_forms(code,label) VALUES
   ('TAB','Tablet'),('CAP','Capsule'),('SYR','Syrup'),('SUSP','Suspension'),
-  ('CREAM','Cream/Ointment'),('DROP','Drops'),('INJ','Injection');
+  ('CREAM','Cream/Ointment'),('DROP','Drops'),('INJ','Injection'),('INH','Inhaler');
 
 -- === Routes ==================================================================
 CREATE TABLE routes (
@@ -40,7 +40,7 @@ CREATE TABLE routes (
 
 INSERT INTO routes(code,label) VALUES
   ('PO','Oral'),('IV','Intravenous'),('IM','Intramuscular'),
-  ('TOP','Topical'),('OTIC','Ear'),('OPH','Eye');
+  ('TOP','Topical'),('OTIC','Ear'),('OPH','Eye'),('INH','Inhalation');
 
 
 /*******************
@@ -110,39 +110,19 @@ CREATE TABLE drug_presentations (
     strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit
   ),
 
-  -- Either solid OR liquid/cream style is valid:
+  -- Either solid OR liquid/cream style is valid, OR unknown strength (all strength fields NULL):
   CONSTRAINT ck_presentation_style CHECK (
+    -- Solid with known strength
     (strength_den IS NULL AND strength_unit_den IS NULL AND strength_num IS NOT NULL AND strength_unit_num IS NOT NULL)
       OR
+    -- Liquid/cream with known concentration
     (strength_den IS NOT NULL AND strength_unit_den IS NOT NULL AND strength_num IS NOT NULL AND strength_unit_num IS NOT NULL)
+      OR
+    -- Unknown strength (all strength fields NULL) - allowed for piece-based dispensing
+    (strength_den IS NULL AND strength_unit_den IS NULL AND strength_num IS NULL AND strength_unit_num IS NULL)
   ),
 
-  CONSTRAINT ck_piece_content_presence CHECK (
-    (
-      -- liquid/cream style + piece dispense => must have piece content defined
-      strength_den IS NOT NULL
-      AND dispense_unit IN ('bottle')                     -- add 'tube' later if you use it
-      AND piece_content_amount IS NOT NULL
-      AND piece_content_unit   IS NOT NULL
-      AND piece_content_unit IN (strength_unit_num, strength_unit_den)
-    )
-    OR
-    (
-      -- solid style with piece dispense (tab/cap/drop) => no piece content needed
-      strength_den IS NULL
-      AND dispense_unit IN ('tab','cap','drop')
-      AND piece_content_amount IS NULL
-      AND piece_content_unit   IS NULL
-    )
-    OR
-    (
-      -- liquids/creams dispensed in continuous units (mL/g) => no piece content
-      strength_den IS NOT NULL
-      AND dispense_unit IN ('mL','g')
-      AND piece_content_amount IS NULL
-      AND piece_content_unit   IS NULL
-    )
-  )
+
 );
 
 CREATE TRIGGER trg_presentations_audit
@@ -153,59 +133,7 @@ CREATE TRIGGER trg_presentations_log
 AFTER INSERT OR UPDATE OR DELETE ON drug_presentations
 FOR EACH ROW EXECUTE FUNCTION audit_row();
 
-CREATE OR REPLACE FUNCTION validate_presentation_units()
-RETURNS TRIGGER AS $$
-DECLARE
-  num units; den units; du units; pc units;
-BEGIN
-  SELECT * INTO du FROM units WHERE code = NEW.dispense_unit;
 
-  IF NEW.strength_den IS NULL THEN
-    -- SOLID: numerator must be mass/IU; dispense must be a piece (tab/cap/drop)
-    SELECT * INTO num FROM units WHERE code = NEW.strength_unit_num;
-    IF NOT (num.is_mass OR num.code='IU') THEN
-      RAISE EXCEPTION 'Solid strength unit must be mass/IU';
-    END IF;
-    IF NOT du.is_piece THEN
-      RAISE EXCEPTION 'Solid presentations must dispense in a piece unit (tab/cap/drop)';
-    END IF;
-  ELSE
-    -- LIQUID/CREAM concentration
-    SELECT * INTO num FROM units WHERE code = NEW.strength_unit_num;
-    SELECT * INTO den FROM units WHERE code = NEW.strength_unit_den;
-    IF NOT (num.is_mass OR num.code='IU') THEN
-      RAISE EXCEPTION 'Concentration numerator must be mass/IU';
-    END IF;
-    IF NOT (den.is_volume OR den.is_mass) THEN
-      RAISE EXCEPTION 'Concentration denominator must be volume or mass';
-    END IF;
-
-    -- Liquids/creams can dispense in continuous (mL/g) OR as a piece (bottle) if piece_content is defined
-    IF du.is_volume OR du.is_mass THEN
-      -- ok
-    ELSIF du.is_piece THEN
-      IF NEW.piece_content_amount IS NULL OR NEW.piece_content_unit IS NULL THEN
-        RAISE EXCEPTION 'Piece dispense for liquids/creams requires piece_content_*';
-      END IF;
-      SELECT * INTO pc FROM units WHERE code = NEW.piece_content_unit;
-      IF NOT (pc.is_volume OR pc.is_mass) THEN
-        RAISE EXCEPTION 'piece_content_unit must be a volume or mass unit';
-      END IF;
-    ELSE
-      RAISE EXCEPTION 'Invalid dispense unit for liquid/cream';
-    END IF;
-  END IF;
-
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Keep as DEFERRABLE so multi-row inserts don’t bite
-DROP TRIGGER IF EXISTS ck_presentations_units ON drug_presentations;
-CREATE CONSTRAINT TRIGGER ck_presentations_units
-AFTER INSERT OR UPDATE ON drug_presentations
-DEFERRABLE INITIALLY DEFERRED
-FOR EACH ROW EXECUTE FUNCTION validate_presentation_units();
 
 
 /*******************

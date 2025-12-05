@@ -80,17 +80,8 @@ func (u *prescriptionUsecase) AddLine(ctx context.Context, line *entities.Prescr
 	if line.DoseAmount <= 0 {
 		return nil, errors.New("doseAmount must be > 0")
 	}
-	if line.EveryN <= 0 {
-		return nil, errors.New("every_n must be > 0")
-	}
-	if line.FrequencyPerSchedule <= 0 {
-		return nil, errors.New("frequency_per_schedule must be > 0")
-	}
 	if line.Duration <= 0 {
 		return nil, errors.New("duration must be > 0")
-	}
-	if line.ScheduleKind == "" {
-		return nil, errors.New("schedule_kind is required")
 	}
 
 	// DB trigger computes total_to_dispense based on schedule fields.
@@ -107,17 +98,8 @@ func (u *prescriptionUsecase) UpdateLine(ctx context.Context, line *entities.Pre
 	if line.DoseAmount <= 0 {
 		return nil, errors.New("doseAmount must be > 0")
 	}
-	if line.EveryN <= 0 {
-		return nil, errors.New("every_n must be > 0")
-	}
-	if line.FrequencyPerSchedule <= 0 {
-		return nil, errors.New("frequency_per_schedule must be > 0")
-	}
 	if line.Duration <= 0 {
 		return nil, errors.New("duration must be > 0")
-	}
-	if line.ScheduleKind == "" {
-		return nil, errors.New("schedule_kind is required")
 	}
 
 	// DB recomputes total_to_dispense; allocations are cleared in repo.

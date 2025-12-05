@@ -536,7 +536,7 @@ func Test_AddLine_Success(t *testing.T) {
 
 	line := &entities.PrescriptionLine{
 		PrescriptionID: 55, PresentationID: 101, Remarks: sp("r"),
-		DoseAmount: 500, DoseUnit: "mg", ScheduleKind: "day", EveryN: 1, FrequencyPerSchedule: 3, Duration: 5,
+		DoseAmount: 500, DoseUnit: "mg", FrequencyCode: "BD", Duration: 5, DurationUnit: "day",
 	}
 	out, err := repo.AddLine(context.Background(), line)
 	assert.NoError(t, err)
@@ -564,7 +564,7 @@ func Test_AddLine_DispensedGuard_InsertErr(t *testing.T) {
 		WithArgs(int64(2), int64(10), (*string)(nil), 1, "x", "day", 1, 1.0, 1.0).
 		WillReturnError(errors.New("ins err"))
 	mock.ExpectRollback()
-	_, err = repo.AddLine(context.Background(), &entities.PrescriptionLine{PrescriptionID: 2, PresentationID: 10, DoseAmount: 1, DoseUnit: "x", ScheduleKind: "day", EveryN: 1, FrequencyPerSchedule: 1, Duration: 1})
+	_, err = repo.AddLine(context.Background(), &entities.PrescriptionLine{PrescriptionID: 2, PresentationID: 10, DoseAmount: 1, DoseUnit: "x", FrequencyCode: "BD", Duration: 1, DurationUnit: "day"})
 	assert.Error(t, err)
 }
 
@@ -600,7 +600,7 @@ func Test_UpdateLine_Success(t *testing.T) {
 		WithArgs(int64(9)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "line_id", "batch_location_id", "quantity", "created_at", "updated_at"}))
 
-	out, err := repo.UpdateLine(context.Background(), &entities.PrescriptionLine{ID: 9, PresentationID: 101, DoseAmount: 2, DoseUnit: "tab", ScheduleKind: "day", EveryN: 1, FrequencyPerSchedule: 1.5, Duration: 1})
+	out, err := repo.UpdateLine(context.Background(), &entities.PrescriptionLine{ID: 9, PresentationID: 101, DoseAmount: 2, DoseUnit: "tab", FrequencyCode: "BD", Duration: 1, DurationUnit: "day"})
 	assert.NoError(t, err)
 	assert.Equal(t, 10, out.TotalToDispense)
 }

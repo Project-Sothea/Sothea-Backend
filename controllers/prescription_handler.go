@@ -169,16 +169,16 @@ func (h *PrescriptionHandler) AddLine(c *gin.Context) {
 	}
 
 	line := entities.PrescriptionLine{
-		PrescriptionID:       prescriptionID,
-		PresentationID:       req.PresentationID,
-		Remarks:              req.Remarks,
-		DoseAmount:           req.DoseAmount,
-		DoseUnit:             req.DoseUnit,
-		ScheduleKind:         req.ScheduleKind,
-		EveryN:               req.EveryN,
-		FrequencyPerSchedule: req.FrequencyPerSchedule,
-		Duration:             req.Duration,
-		DurationUnit:         req.DurationUnit,
+		PrescriptionID: prescriptionID,
+		PresentationID: req.PresentationID,
+		Remarks:        req.Remarks,
+		Prn:            req.Prn,
+		DoseAmount:     req.DoseAmount,
+		DoseUnit:       req.DoseUnit,
+		FrequencyCode:  req.FrequencyCode,
+		// schedule fields are derived from frequencyCode in DB trigger
+		Duration:     req.Duration,
+		DurationUnit: req.DurationUnit,
 	}
 
 	ctx := c.Request.Context()
@@ -204,16 +204,16 @@ func (h *PrescriptionHandler) UpdateLine(c *gin.Context) {
 	}
 
 	line := entities.PrescriptionLine{
-		ID:                   lineID,
-		PresentationID:       req.PresentationID,
-		Remarks:              req.Remarks,
-		DoseAmount:           req.DoseAmount,
-		DoseUnit:             req.DoseUnit,
-		ScheduleKind:         req.ScheduleKind,
-		EveryN:               req.EveryN,
-		FrequencyPerSchedule: req.FrequencyPerSchedule,
-		Duration:             req.Duration,
-		DurationUnit:         req.DurationUnit,
+		ID:             lineID,
+		PresentationID: req.PresentationID,
+		Remarks:        req.Remarks,
+		Prn:            req.Prn,
+		DoseAmount:     req.DoseAmount,
+		DoseUnit:       req.DoseUnit,
+		FrequencyCode:  req.FrequencyCode,
+		// schedule fields are derived from frequencyCode in DB trigger
+		Duration:     req.Duration,
+		DurationUnit: req.DurationUnit,
 	}
 
 	ctx := c.Request.Context()

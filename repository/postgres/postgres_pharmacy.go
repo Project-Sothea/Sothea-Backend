@@ -34,13 +34,18 @@ func displayStrength(p entities.DrugPresentation) string {
 		if p.StrengthNum != nil && p.StrengthUnitNum != nil {
 			return fmt.Sprintf("%g %s %s", *p.StrengthNum, *p.StrengthUnitNum, p.DosageFormCode)
 		}
-		return p.DosageFormCode
+		// Unknown strength: show dosage form
+		return fmt.Sprintf("%s (strength unknown)", p.DosageFormCode)
 	}
 	// liquids/creams, e.g. "250 mg/5 mL SYR"
-	return fmt.Sprintf("%g %s/%g %s %s",
-		derefFloat(p.StrengthNum), derefStr(p.StrengthUnitNum),
-		derefFloat(p.StrengthDen), derefStr(p.StrengthUnitDen),
-		p.DosageFormCode)
+	if p.StrengthNum != nil && p.StrengthUnitNum != nil {
+		return fmt.Sprintf("%g %s/%g %s %s",
+			derefFloat(p.StrengthNum), derefStr(p.StrengthUnitNum),
+			derefFloat(p.StrengthDen), derefStr(p.StrengthUnitDen),
+			p.DosageFormCode)
+	}
+	// Unknown strength liquid: show dosage form
+	return fmt.Sprintf("%s (strength unknown)", p.DosageFormCode)
 }
 
 func displayLabel(drugName string, p entities.DrugPresentation) string {
