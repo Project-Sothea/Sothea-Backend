@@ -265,17 +265,27 @@ func (r *postgresPrescriptionRepository) UpdatePrescription(ctx context.Context,
 	if err := tx.QueryRowContext(ctx, `SELECT is_dispensed FROM prescriptions WHERE id=$1`, p.ID).Scan(&isDispensed); err != nil {
 		return nil, err
 	}
-	if isDispensed {
-		return nil, errors.New("cannot modify a dispensed prescription")
-	}
 
-	_, err = tx.ExecContext(ctx, `
-		UPDATE prescriptions
-		SET patient_id=$2, vid=$3, notes=$4, updated_at=now()
-		WHERE id=$1
-	`, p.ID, p.PatientID, p.VID, p.Notes)
-	if err != nil {
-		return nil, err
+	if isDispensed {
+		// For dispensed prescriptions, only allow updating notes
+		_, err = tx.ExecContext(ctx, `
+			UPDATE prescriptions
+			SET notes=$2, updated_at=now()
+			WHERE id=$1
+		`, p.ID, p.Notes)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// For non-dispensed prescriptions, allow updating all fields
+		_, err = tx.ExecContext(ctx, `
+			UPDATE prescriptions
+			SET patient_id=$2, vid=$3, notes=$4, updated_at=now()
+			WHERE id=$1
+		`, p.ID, p.PatientID, p.VID, p.Notes)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if own {
