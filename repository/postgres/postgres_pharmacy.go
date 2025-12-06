@@ -99,6 +99,27 @@ func derefStr(p *string) string {
 	return *p
 }
 
+// Helper functions for comparing pointers
+func equalFloatPtr(a, b *float64) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+func equalStrPtr(a, b *string) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
 // -----------------------------------------------------------------------------
 //  DRUGS
 // -----------------------------------------------------------------------------
@@ -228,6 +249,39 @@ const qDrugUpdate = `
 
 func (r *postgresPharmacyRepository) UpdateDrug(ctx context.Context, d *entities.Drug) (*entities.DrugView, error) {
 	dbx := DBFromCtx(ctx, r.Conn)
+
+	// Get current drug to compare fields
+	current, err := r.GetDrug(ctx, d.ID)
+	if err != nil {
+		return nil, err
+	}
+	currentDrug := current.Drug
+
+	// Check if any risky fields are being changed
+	riskyFieldChanged :=
+		!equalFloatPtr(currentDrug.StrengthNum, d.StrengthNum) ||
+			!equalStrPtr(currentDrug.StrengthUnitNum, d.StrengthUnitNum) ||
+			!equalFloatPtr(currentDrug.StrengthDen, d.StrengthDen) ||
+			!equalStrPtr(currentDrug.StrengthUnitDen, d.StrengthUnitDen) ||
+			currentDrug.DispenseUnit != d.DispenseUnit ||
+			!equalFloatPtr(currentDrug.PieceContentAmount, d.PieceContentAmount) ||
+			!equalStrPtr(currentDrug.PieceContentUnit, d.PieceContentUnit)
+
+	// If risky fields changed, check if drug has prescriptions
+	if riskyFieldChanged {
+		var prescriptionCount int
+		err := dbx.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM prescription_lines WHERE drug_id=$1
+		`, d.ID).Scan(&prescriptionCount)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check prescriptions: %w", err)
+		}
+
+		if prescriptionCount > 0 {
+			return nil, fmt.Errorf("cannot modify drug properties (strength, dispense unit, piece content) because this drug is already used in %d prescription(s). Only safe fields (name, ATC code, dosage form, route, notes, barcode, active status, display percentage) can be edited", prescriptionCount)
+		}
+	}
+
 	res, err := dbx.ExecContext(ctx, qDrugUpdate,
 		d.ID, d.GenericName, d.BrandName, d.ATCCode,
 		d.DosageFormCode, d.RouteCode,
@@ -248,6 +302,20 @@ const qDrugDelete = `DELETE FROM drugs WHERE id=$1`
 
 func (r *postgresPharmacyRepository) DeleteDrug(ctx context.Context, id int64) error {
 	dbx := DBFromCtx(ctx, r.Conn)
+
+	// Check if drug has any prescriptions
+	var prescriptionCount int
+	err := dbx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM prescription_lines WHERE drug_id=$1
+	`, id).Scan(&prescriptionCount)
+	if err != nil {
+		return fmt.Errorf("failed to check prescriptions: %w", err)
+	}
+
+	if prescriptionCount > 0 {
+		return fmt.Errorf("cannot delete drug because it is already used in %d prescription(s)", prescriptionCount)
+	}
+
 	res, err := dbx.ExecContext(ctx, qDrugDelete, id)
 	if err != nil {
 		return err
@@ -416,26 +484,178 @@ func (r *postgresPharmacyRepository) CreateBatch(ctx context.Context, b *entitie
 
 const qBatchUpdate = `
   UPDATE drug_batches
-  SET drug_id=$2, batch_number=$3, expiry_date=$4, supplier=$5, quantity=$6, updated_at=NOW()
+  SET batch_number=$2, expiry_date=$3, supplier=$4
   WHERE id=$1`
 
-func (r *postgresPharmacyRepository) UpdateBatch(ctx context.Context, b *entities.DrugBatch) (*entities.BatchDetail, error) {
-	dbx := DBFromCtx(ctx, r.Conn)
-	res, err := dbx.ExecContext(ctx, qBatchUpdate,
-		b.ID, b.DrugID, b.BatchNumber, b.ExpiryDate, b.Supplier, b.Quantity)
+func (r *postgresPharmacyRepository) UpdateBatch(ctx context.Context, b *entities.DrugBatch, locations []entities.DrugBatchLocation) (*entities.BatchDetail, error) {
+	tx, ok := TxFromCtx(ctx)
+	own := false
+	var err error
+	if !ok {
+		tx, err = r.Conn.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, err
+		}
+		own = true
+		defer tx.Rollback()
+	}
+
+	// Update batch itself (batch_number, expiry_date, supplier)
+	// drug_id and quantity cannot be edited (drug_id is fixed, quantity is auto-synced from locations)
+	res, err := tx.ExecContext(ctx, qBatchUpdate,
+		b.ID, b.BatchNumber, b.ExpiryDate, b.Supplier)
 	if err != nil {
 		return nil, err
 	}
 	if aff, _ := res.RowsAffected(); aff == 0 {
 		return nil, errors.New("batch not found")
 	}
+
+	// Get current batch locations from database
+	currentLocs, err := r.listBatchLocationsTx(ctx, tx, b.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build a map of current locations by ID for quick lookup
+	currentLocsMap := make(map[int64]entities.DrugBatchLocation)
+	for _, loc := range currentLocs {
+		currentLocsMap[loc.ID] = loc
+	}
+
+	// Build a map of locations to keep (from payload) by ID
+	payloadLocsMap := make(map[int64]bool)
+	for _, loc := range locations {
+		if loc.ID > 0 {
+			payloadLocsMap[loc.ID] = true
+		}
+	}
+
+	// 1. Update or create locations from payload
+	for i := range locations {
+		loc := &locations[i]
+		if loc.Quantity < 0 {
+			return nil, fmt.Errorf("location %q has negative quantity", loc.Location)
+		}
+
+		if loc.ID > 0 {
+			// Existing location - check if it belongs to this batch
+			currentLoc, exists := currentLocsMap[loc.ID]
+			if !exists {
+				return nil, fmt.Errorf("batch location with id %d not found", loc.ID)
+			}
+			if currentLoc.BatchID != b.ID {
+				return nil, fmt.Errorf("batch location %d does not belong to batch %d", loc.ID, b.ID)
+			}
+
+			// Update location if location name or quantity changed
+			if currentLoc.Location != loc.Location || currentLoc.Quantity != loc.Quantity {
+				_, err := tx.ExecContext(ctx, `
+					UPDATE batch_locations 
+					SET location=$2, quantity=$3, updated_at=NOW()
+					WHERE id=$1`,
+					loc.ID, loc.Location, loc.Quantity)
+				if err != nil {
+					return nil, fmt.Errorf("failed to update batch location %d: %w", loc.ID, err)
+				}
+			}
+		} else {
+			// New location - create it
+			var locID int64
+			var ca, ua time.Time
+			err := tx.QueryRowContext(ctx, `
+				INSERT INTO batch_locations (batch_id, location, quantity)
+				VALUES ($1,$2,$3) RETURNING id, created_at, updated_at`,
+				b.ID, loc.Location, loc.Quantity).Scan(&locID, &ca, &ua)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create batch location: %w", err)
+			}
+			loc.ID = locID
+			loc.BatchID = b.ID
+			loc.CreatedAt = ca
+			loc.UpdatedAt = ua
+		}
+	}
+
+	// 2. Delete locations that exist in DB but not in payload
+	// First, check if any of these locations are referenced by prescriptions
+	for _, currentLoc := range currentLocs {
+		if !payloadLocsMap[currentLoc.ID] {
+			// Location exists in DB but not in payload - check if referenced
+			var referenceCount int
+			err := tx.QueryRowContext(ctx, `
+				SELECT COUNT(*) 
+				FROM prescription_batch_items 
+				WHERE batch_location_id = $1`,
+				currentLoc.ID).Scan(&referenceCount)
+			if err != nil {
+				return nil, fmt.Errorf("failed to check prescription references: %w", err)
+			}
+
+			if referenceCount > 0 {
+				return nil, fmt.Errorf("cannot delete batch location %d (location: %q) because it is allocated to %d prescription line(s)", currentLoc.ID, currentLoc.Location, referenceCount)
+			}
+
+			// Safe to delete
+			_, err = tx.ExecContext(ctx, `DELETE FROM batch_locations WHERE id=$1`, currentLoc.ID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to delete batch location %d: %w", currentLoc.ID, err)
+			}
+		}
+	}
+
+	if own {
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+	}
 	return r.GetBatch(ctx, b.ID)
+}
+
+// Helper function to list batch locations within a transaction
+func (r *postgresPharmacyRepository) listBatchLocationsTx(ctx context.Context, tx *sql.Tx, batchID int64) ([]entities.DrugBatchLocation, error) {
+	rows, err := tx.QueryContext(ctx, `
+	  SELECT id, batch_id, location, quantity, created_at, updated_at
+	  FROM batch_locations
+	  WHERE batch_id=$1
+	  ORDER BY location, id`, batchID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []entities.DrugBatchLocation
+	for rows.Next() {
+		var l entities.DrugBatchLocation
+		if err := rows.Scan(&l.ID, &l.BatchID, &l.Location, &l.Quantity, &l.CreatedAt, &l.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
 }
 
 const qBatchDelete = `DELETE FROM drug_batches WHERE id=$1`
 
 func (r *postgresPharmacyRepository) DeleteBatch(ctx context.Context, batchID int64) error {
 	dbx := DBFromCtx(ctx, r.Conn)
+
+	// Check if any batch locations belonging to this batch are referenced by prescriptions
+	var referenceCount int
+	err := dbx.QueryRowContext(ctx, `
+		SELECT COUNT(*) 
+		FROM prescription_batch_items pbi
+		JOIN batch_locations bl ON bl.id = pbi.batch_location_id
+		WHERE bl.batch_id = $1
+	`, batchID).Scan(&referenceCount)
+	if err != nil {
+		return fmt.Errorf("failed to check prescription references: %w", err)
+	}
+
+	if referenceCount > 0 {
+		return fmt.Errorf("cannot delete batch because its locations are allocated to %d prescription line(s)", referenceCount)
+	}
+
 	res, err := dbx.ExecContext(ctx, qBatchDelete, batchID)
 	if err != nil {
 		return err
@@ -504,12 +724,14 @@ func (r *postgresPharmacyRepository) GetBatchLocation(ctx context.Context, id in
 }
 
 const qLocUpdate = `
-  UPDATE batch_locations SET batch_id=$2, location=$3, quantity=$4, updated_at=NOW()
+  UPDATE batch_locations SET location=$2, quantity=$3, updated_at=NOW()
   WHERE id=$1`
 
 func (r *postgresPharmacyRepository) UpdateBatchLocation(ctx context.Context, loc *entities.DrugBatchLocation) (*entities.DrugBatchLocation, error) {
 	dbx := DBFromCtx(ctx, r.Conn)
-	res, err := dbx.ExecContext(ctx, qLocUpdate, loc.ID, loc.BatchID, loc.Location, loc.Quantity)
+
+	// Only allow updating location name and quantity
+	res, err := dbx.ExecContext(ctx, qLocUpdate, loc.ID, loc.Location, loc.Quantity)
 	if err != nil {
 		return nil, err
 	}
@@ -523,6 +745,22 @@ const qLocDelete = `DELETE FROM batch_locations WHERE id=$1`
 
 func (r *postgresPharmacyRepository) DeleteBatchLocation(ctx context.Context, id int64) error {
 	dbx := DBFromCtx(ctx, r.Conn)
+
+	// Check if batch location is referenced by any prescriptions
+	var referenceCount int
+	err := dbx.QueryRowContext(ctx, `
+		SELECT COUNT(*) 
+		FROM prescription_batch_items 
+		WHERE batch_location_id = $1
+	`, id).Scan(&referenceCount)
+	if err != nil {
+		return fmt.Errorf("failed to check prescription references: %w", err)
+	}
+
+	if referenceCount > 0 {
+		return fmt.Errorf("cannot delete batch location because it is allocated to %d prescription line(s)", referenceCount)
+	}
+
 	res, err := dbx.ExecContext(ctx, qLocDelete, id)
 	if err != nil {
 		return err

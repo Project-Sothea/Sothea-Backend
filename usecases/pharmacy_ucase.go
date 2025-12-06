@@ -102,10 +102,10 @@ func (u *pharmacyUsecase) CreateBatch(ctx context.Context, b *entities.DrugBatch
 	return u.repo.CreateBatch(ctx, b, locations)
 }
 
-func (u *pharmacyUsecase) UpdateBatch(ctx context.Context, b *entities.DrugBatch) (*entities.BatchDetail, error) {
+func (u *pharmacyUsecase) UpdateBatch(ctx context.Context, b *entities.DrugBatch, locations []entities.DrugBatchLocation) (*entities.BatchDetail, error) {
 	ctx, cancel := context.WithTimeout(ctx, u.contextTimeout)
 	defer cancel()
-	return u.repo.UpdateBatch(ctx, b)
+	return u.repo.UpdateBatch(ctx, b, locations)
 }
 
 func (u *pharmacyUsecase) DeleteBatch(ctx context.Context, batchID int64) error {

@@ -121,7 +121,7 @@ FOR EACH ROW EXECUTE FUNCTION audit_row();
 ********************/
 CREATE TABLE drug_batches (
   id             BIGSERIAL PRIMARY KEY,
-  drug_id        BIGINT NOT NULL REFERENCES drugs(id) ON DELETE RESTRICT,
+  drug_id        BIGINT NOT NULL REFERENCES drugs(id) ON DELETE CASCADE,
   batch_number   TEXT NOT NULL,
   expiry_date    DATE,                   -- nullable allowed
   supplier       TEXT,

@@ -79,19 +79,19 @@ func main() {
 
 	patientRepo := _postgresRepository.NewPostgresPatientRepository(db)
 	// Set up login routes
-	loginUseCase := _useCase.NewLoginUseCase(patientRepo, 5*time.Second, secretKey)
+	loginUseCase := _useCase.NewLoginUseCase(patientRepo, 30*time.Second, secretKey)
 	_httpDelivery.NewLoginHandler(api, loginUseCase, secretKey)
 
 	// Set up patient routes
-	patientUseCase := _useCase.NewPatientUsecase(patientRepo, 2*time.Second)
+	patientUseCase := _useCase.NewPatientUsecase(patientRepo, 30*time.Second)
 	_httpDelivery.NewPatientHandler(api, patientUseCase, secretKey)
 
 	pharmacyRepo := _postgresRepository.NewPostgresPharmacyRepository(db)
-	pharmacyUseCase := _useCase.NewPharmacyUsecase(pharmacyRepo, 2*time.Second)
+	pharmacyUseCase := _useCase.NewPharmacyUsecase(pharmacyRepo, 30*time.Second)
 	_httpDelivery.NewPharmacyHandler(api, pharmacyUseCase, secretKey, db)
 
 	prescriptionRepo := _postgresRepository.NewPostgresPrescriptionRepository(db)
-	prescriptionUseCase := _useCase.NewPrescriptionUsecase(prescriptionRepo, pharmacyRepo, 2*time.Second)
+	prescriptionUseCase := _useCase.NewPrescriptionUsecase(prescriptionRepo, pharmacyRepo, 30*time.Second)
 	_httpDelivery.NewPrescriptionHandler(api, prescriptionUseCase, secretKey, db)
 
 	router.NoRoute(func(c *gin.Context) {

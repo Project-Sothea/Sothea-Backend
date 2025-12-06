@@ -243,15 +243,18 @@ func (h *PharmacyHandler) UpdateBatch(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid batchId"})
 		return
 	}
-	var b entities.DrugBatch
-	if err := c.ShouldBindJSON(&b); err != nil {
+	var body struct {
+		Batch     entities.DrugBatch           `json:"batch"`
+		Locations []entities.DrugBatchLocation `json:"locations"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
 		handleBindErr(c, err)
 		return
 	}
-	b.ID = batchID
+	body.Batch.ID = batchID
 
 	ctx := c.Request.Context()
-	detail, err := h.Usecase.UpdateBatch(ctx, &b)
+	detail, err := h.Usecase.UpdateBatch(ctx, &body.Batch, body.Locations)
 	if err != nil {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 		return

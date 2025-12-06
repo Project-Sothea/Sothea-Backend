@@ -95,7 +95,7 @@ type PharmacyRepository interface {
 	ListBatches(ctx context.Context, drugID int64) ([]BatchDetail, error)
 	GetBatch(ctx context.Context, batchID int64) (*BatchDetail, error)
 	CreateBatch(ctx context.Context, b *DrugBatch, locations []DrugBatchLocation) (*BatchDetail, error)
-	UpdateBatch(ctx context.Context, b *DrugBatch) (*BatchDetail, error)
+	UpdateBatch(ctx context.Context, b *DrugBatch, locations []DrugBatchLocation) (*BatchDetail, error)
 	DeleteBatch(ctx context.Context, batchID int64) error
 
 	ListBatchLocations(ctx context.Context, batchID int64) ([]DrugBatchLocation, error)
@@ -121,7 +121,7 @@ type PharmacyUseCase interface {
 	ListBatches(ctx context.Context, drugID int64) ([]BatchDetail, error)
 	GetBatch(ctx context.Context, batchID int64) (*BatchDetail, error)
 	CreateBatch(ctx context.Context, b *DrugBatch, locations []DrugBatchLocation) (*BatchDetail, error)
-	UpdateBatch(ctx context.Context, b *DrugBatch) (*BatchDetail, error)
+	UpdateBatch(ctx context.Context, b *DrugBatch, locations []DrugBatchLocation) (*BatchDetail, error)
 	DeleteBatch(ctx context.Context, batchID int64) error
 
 	ListBatchLocations(ctx context.Context, batchID int64) ([]DrugBatchLocation, error)
