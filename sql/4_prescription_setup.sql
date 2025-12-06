@@ -35,6 +35,28 @@ CREATE TABLE schedule_kinds (
 INSERT INTO schedule_kinds(code) VALUES
   ('hour'), ('day'), ('week'), ('month');
 
+-- Frequency codes lookup table
+CREATE TABLE frequency_codes (
+  code TEXT PRIMARY KEY,              -- OM, ON, BD, TDS, q8h, ...
+  label TEXT NOT NULL,                -- human-readable label
+  schedule_kind TEXT NOT NULL REFERENCES schedule_kinds(code),
+  every_n INTEGER NOT NULL CHECK (every_n > 0),
+  frequency_per_schedule NUMERIC(6,2) NOT NULL CHECK (frequency_per_schedule > 0)
+);
+
+INSERT INTO frequency_codes (code, label, schedule_kind, every_n, frequency_per_schedule) VALUES
+  ('OM',  'Once Morning',        'day',  1, 1),
+  ('ON',  'Once Night',          'day',  1, 1),
+  ('OA',  'Once Afternoon',      'day',  1, 1),
+  ('BD',  'Twice a day',         'day',  1, 2),
+  ('TDS', '3 times a day',       'day',  1, 3),
+  ('QDS', '4 times a day',       'day',  1, 4),
+  ('EOD', 'Every other day',     'day',  2, 1),
+  ('q5h', 'Every 5 hours',       'hour', 5, 1),
+  ('q6h', 'Every 6 hours',       'hour', 6, 1),
+  ('q8h', 'Every 8 hours',       'hour', 8, 1),
+  ('q12h','Every 12 hours',      'hour', 12, 1);
+
 -- converts any duration unit to hours
 CREATE OR REPLACE FUNCTION duration_to_hours(
   duration NUMERIC,
@@ -101,16 +123,16 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 CREATE TABLE prescription_lines (
   id                 BIGSERIAL PRIMARY KEY,
   prescription_id    BIGINT NOT NULL REFERENCES prescriptions(id) ON DELETE CASCADE,
-  presentation_id    BIGINT NOT NULL REFERENCES drug_presentations(id),
+  drug_id            BIGINT NOT NULL REFERENCES drugs(id),
   remarks            TEXT,
+  prn                BOOLEAN NOT NULL DEFAULT FALSE, -- pro re nata (as needed)
 
   -- Clinical dose:
   dose_amount        NUMERIC(10,2) NOT NULL,            -- smallest clinical unit, up to 2 decimal places
   dose_unit          TEXT NOT NULL REFERENCES units(code),
 
-  schedule_kind      TEXT NOT NULL REFERENCES schedule_kinds(code),
-  every_n INTEGER NOT NULL DEFAULT 1 CHECK (every_n > 0),
-  frequency_per_schedule  NUMERIC(6,2) NOT NULL,       -- e.g., 3 for TDS
+  -- Frequency: must use frequency_code; schedule_* fields are derived
+  frequency_code     TEXT NOT NULL REFERENCES frequency_codes(code), 
 
   duration      NUMERIC(6,2) NOT NULL,
   duration_unit TEXT NOT NULL REFERENCES schedule_kinds(code), 
@@ -129,7 +151,7 @@ CREATE TABLE prescription_lines (
 );
 
 CREATE INDEX idx_lines_rx ON prescription_lines (prescription_id);
-CREATE INDEX idx_lines_presentation ON prescription_lines (presentation_id);
+CREATE INDEX idx_lines_drug ON prescription_lines (drug_id);
 
 CREATE TRIGGER trg_lines_audit
 BEFORE INSERT OR UPDATE ON prescription_lines
@@ -140,7 +162,7 @@ AFTER INSERT OR UPDATE OR DELETE ON prescription_lines
 FOR EACH ROW EXECUTE FUNCTION audit_row();
 
 CREATE OR REPLACE FUNCTION ck_line_stock_possible(
-  p_presentation_id BIGINT,
+  p_drug_id         BIGINT,
   p_required        INTEGER,
   p_line_id         BIGINT  -- may be NULL on INSERT
 )
@@ -171,14 +193,14 @@ BEGIN
     INTO available
     FROM batch_locations bl
     JOIN drug_batches b ON b.id = bl.batch_id
-   WHERE b.presentation_id = p_presentation_id;
+   WHERE b.drug_id = p_drug_id;
 
   IF available < need_extra THEN
     RAISE EXCEPTION 'insufficient stock: total needed %, available %', p_required, available + need_extra
       USING ERRCODE   = '23514',                 -- check_violation
             CONSTRAINT = 'ck_insufficient_stock',
             DETAIL     = json_build_object(
-                            'presentation_id', p_presentation_id,
+                            'drug_id', p_drug_id,
                             'total_required', p_required,
                             'total_available', available + allocated 
                           )::text;
@@ -201,8 +223,8 @@ CREATE OR REPLACE FUNCTION compute_total_to_dispense_pure(
   strength_unit_num TEXT,
   strength_den NUMERIC(10,1),                  -- NULL for solids
   strength_unit_den TEXT,            -- NULL for solids
-  piece_content_amount NUMERIC(10,1),          -- only for bottle/tube; NULL otherwise
-  piece_content_unit TEXT            -- as above (e.g., 'mL' or 'g')
+  piece_content_amount NUMERIC(10,1),          -- only for bottle/tube/inhaler; NULL otherwise
+  piece_content_unit TEXT            -- as above (e.g., 'mL', 'g', or 'puff')
 ) RETURNS INT AS $$
 DECLARE
   per_dose_dispense NUMERIC;  -- in dispense_unit
@@ -215,62 +237,83 @@ BEGIN
   total_doses := dose_count_periodic_pure(schedule_kind, every_n, frequency_per_schedule, duration, duration_unit);
 
   -- 2) Per-administration conversion to "dispense unit"
-  IF dose_unit = dispense_unit THEN
-    per_dose_dispense := dose_amount;
-
-  ELSIF strength_den IS NULL THEN
-    -- SOLID: e.g., 500 mg / tab; dispense_unit must be a piece ('tab','cap','drop',...)
-    IF dose_unit = strength_unit_num THEN
-      per_dose_dispense := CEIL((dose_amount::NUMERIC / NULLIF(strength_num,0)) * 100) / 100;
+  
+  -- CASE 1: No strength data provided (all strength fields NULL)
+  IF strength_num IS NULL AND strength_unit_num IS NULL AND strength_den IS NULL AND strength_unit_den IS NULL THEN
+    -- dispense_unit is always valid
+    IF dose_unit = dispense_unit THEN
+      per_dose_dispense := dose_amount;
+    -- If piece-based unit (bottle/tube/inhaler) with piece_content_unit, piece_content_unit is also valid
+    ELSIF dispense_unit IN ('bottle', 'tube', 'inhaler') AND piece_content_unit IS NOT NULL AND dose_unit = piece_content_unit THEN
+      per_dose_liquid := dose_amount;
+      total_liquid := per_dose_liquid * total_doses;
+      RETURN CEIL(total_liquid / NULLIF(piece_content_amount, 0));
     ELSE
-      RAISE EXCEPTION 'Unsupported dose_unit % for solid presentation', dose_unit;
+      RAISE EXCEPTION 'No strength data: dose_unit % must be dispense_unit (%)%', 
+        dose_unit, dispense_unit,
+        CASE WHEN dispense_unit IN ('bottle', 'tube', 'inhaler') AND piece_content_unit IS NOT NULL 
+          THEN ' or piece_content_unit (' || piece_content_unit || ')' 
+          ELSE '' END;
     END IF;
 
+  -- CASE 2: Only strength numerator provided (solid)
+  ELSIF strength_den IS NULL AND strength_unit_den IS NULL THEN
+    -- dispense_unit and strength_unit_num are both valid
+    IF dose_unit = dispense_unit THEN
+      per_dose_dispense := dose_amount;
+    ELSIF dose_unit = strength_unit_num THEN
+      -- Convert strength_unit_num to dispense_unit (pieces)
+      per_dose_dispense := CEIL((dose_amount::NUMERIC / NULLIF(strength_num, 0)) * 100) / 100;
+    ELSE
+      RAISE EXCEPTION 'Solid: dose_unit % must be dispense_unit (%) or strength_unit_num (%)', 
+        dose_unit, dispense_unit, strength_unit_num;
+    END IF;
+
+  -- CASE 3: Both numerator and denominator provided
   ELSE
-    -- LIQUID/SEMI-SOLID with concentration, e.g., 250 mg / 5 mL
-    IF dispense_unit <> 'bottle' THEN
-      -- For continuous dispense, dispense_unit must be one of strength_unit_num or strength_unit_den
-      -- Handle cross-conversions between numerator and denominator units
-      IF dose_unit = strength_unit_den AND dispense_unit = strength_unit_num THEN
-        -- Example: 5 mL dose, 250 mg/5 mL, dispense_unit = mg → 5 * 250 / 5 = 250 mg
-        per_dose_dispense := CEIL((dose_amount::NUMERIC * strength_num / NULLIF(strength_den,0)) * 100) / 100;
-      ELSIF dose_unit = strength_unit_num AND dispense_unit = strength_unit_den THEN
-        -- Example: 250 mg dose, 250 mg/5 mL, dispense_unit = mL → 250 * 5 / 250 = 5 mL
-        per_dose_dispense := CEIL((dose_amount::NUMERIC * strength_den / NULLIF(strength_num,0)) * 100) / 100;
+    -- dispense_unit always allowed
+    IF dose_unit = dispense_unit THEN
+      per_dose_dispense := dose_amount;
+    
+    -- CASE 3.1 & 3.2: Not piece-based with content, OR piece-based without piece_content
+    ELSIF dispense_unit NOT IN ('bottle', 'tube', 'inhaler') OR (dispense_unit IN ('bottle', 'tube', 'inhaler') AND piece_content_unit IS NULL) THEN
+      -- If dispense_unit equals either strength_unit_num OR strength_unit_den,
+      -- then BOTH strength_unit_num AND strength_unit_den are valid
+      IF dispense_unit = strength_unit_num AND dose_unit = strength_unit_den THEN
+        per_dose_dispense := CEIL((dose_amount::NUMERIC * strength_num / NULLIF(strength_den, 0)) * 100) / 100; -- dose_amt * strength_num / strength_den
+
+      ELSIF dispense_unit = strength_unit_den AND dose_unit = strength_unit_num THEN
+        per_dose_dispense := CEIL((dose_amount::NUMERIC * strength_den / NULLIF(strength_num, 0)) * 100) / 100; -- dose_amt * strength_den / strength_num
+        
       ELSE
-        -- dose_unit = dispense_unit is already handled at line 218
-        -- Any other combination is invalid for continuous dispense
-        RAISE EXCEPTION 'Unsupported conversion dose_unit % -> dispense_unit % for continuous dispense', dose_unit, dispense_unit;
+        -- dispense_unit doesn't match either strength unit, so only dispense_unit is valid
+        -- This case should have been caught at line 275, so this is an error
+        RAISE EXCEPTION 'dose_unit % must be dispense_unit (%). Strength unit conversions only allowed when dispense_unit equals strength_unit_num (%) or strength_unit_den (%)', 
+          dose_unit, dispense_unit, strength_unit_num, strength_unit_den;
       END IF;
 
-    ELSIF dispense_unit = 'bottle' THEN
-      -- Bottled liquids (no fractional bottles) - use CEIL
-      IF dose_unit = 'bottle' THEN
-        -- doctor prescribed in whole bottles per administration
-        RETURN CEIL(dose_amount * total_doses);
-      END IF;
-
-      IF piece_content_amount IS NULL OR piece_content_unit IS NULL THEN
-        RAISE EXCEPTION 'piece_content_* required for bottle dispense';
-      END IF;
-
-      -- Round to 2dp for accuracy in intermediate calculation
+    -- CASE 3.3: Piece-based unit (bottle/tube/inhaler) with piece_content_unit
+    ELSIF dispense_unit IN ('bottle', 'tube', 'inhaler') AND piece_content_unit IS NOT NULL THEN
+      -- piece_content_unit is always valid
       IF dose_unit = piece_content_unit THEN
         per_dose_liquid := dose_amount;
-      ELSIF dose_unit = strength_unit_num AND piece_content_unit = strength_unit_den THEN
-        per_dose_liquid := CEIL((dose_amount::NUMERIC * strength_den / NULLIF(strength_num,0)) * 100) / 100;
-      ELSIF dose_unit = strength_unit_den AND piece_content_unit = strength_unit_num THEN
-        per_dose_liquid := CEIL((dose_amount::NUMERIC * strength_num / NULLIF(strength_den,0)) * 100) / 100;
+      -- If piece_content_unit equals either strength_unit_num OR strength_unit_den,
+      -- then BOTH strength_unit_num AND strength_unit_den are valid
+      ELSIF piece_content_unit = strength_unit_num AND dose_unit = strength_unit_den THEN
+        per_dose_liquid := CEIL((dose_amount::NUMERIC * strength_num / NULLIF(strength_den, 0)) * 100) / 100; -- dose_amt * strength_num / strength_den
+
+      ELSIF piece_content_unit = strength_unit_den AND dose_unit = strength_unit_num THEN
+        per_dose_liquid := CEIL((dose_amount::NUMERIC * strength_den / NULLIF(strength_num, 0)) * 100) / 100; -- dose_amt * strength_den / strength_num
+
       ELSE
-        RAISE EXCEPTION 'Unsupported conversion dose_unit % -> piece_content_unit % for bottle dispense', dose_unit, piece_content_unit;
+        -- piece_content_unit doesn't match either strength unit, so only piece_content_unit is valid
+        -- This case should have been caught at line 296, so this is an error
+        RAISE EXCEPTION 'dose_unit % must be piece_content_unit (%). Strength unit conversions only allowed when piece_content_unit equals strength_unit_num (%) or strength_unit_den (%)', 
+          dose_unit, piece_content_unit, strength_unit_num, strength_unit_den;
       END IF;
-
+      
       total_liquid := per_dose_liquid * total_doses;
-      -- CEIL when converting to bottles (can't have fractional bottles)
-      RETURN CEIL(total_liquid / NULLIF(piece_content_amount,0));
-
-    ELSE
-      RAISE EXCEPTION 'Unsupported dispense_unit %', dispense_unit;
+      RETURN CEIL(total_liquid / NULLIF(piece_content_amount, 0));
     END IF;
   END IF;
 
@@ -285,24 +328,40 @@ CREATE OR REPLACE FUNCTION trg_set_total_to_dispense()
 RETURNS TRIGGER AS $$
 DECLARE
   dp RECORD;
+  fc RECORD;
   required_qty INTEGER;
   available_qty INTEGER;
   must_check   BOOLEAN := (TG_OP = 'INSERT');
 BEGIN
+  -- frequency_code must always be provided
+  IF NEW.frequency_code IS NULL THEN
+    RAISE EXCEPTION 'frequency_code must be provided';
+  END IF;
+
+  -- Lookup the schedule fields from frequency_codes
+  SELECT schedule_kind, every_n, frequency_per_schedule
+    INTO fc
+    FROM frequency_codes
+   WHERE code = NEW.frequency_code;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'frequency_code % not found', NEW.frequency_code;
+  END IF;
+
   SELECT dispense_unit, strength_num, strength_unit_num,
          strength_den, strength_unit_den,
          piece_content_amount, piece_content_unit
     INTO dp
-    FROM drug_presentations
-   WHERE id = NEW.presentation_id;
+    FROM drugs
+   WHERE id = NEW.drug_id;
 
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'presentation % not found for line', NEW.presentation_id;
+    RAISE EXCEPTION 'drug % not found for line', NEW.drug_id;
   END IF;
 
   NEW.total_to_dispense := compute_total_to_dispense_pure(
     NEW.dose_amount, NEW.dose_unit,
-    NEW.schedule_kind, NEW.every_n, NEW.frequency_per_schedule,
+    fc.schedule_kind, fc.every_n, fc.frequency_per_schedule,
     NEW.duration, NEW.duration_unit,
     dp.dispense_unit, dp.strength_num, dp.strength_unit_num,
     dp.strength_den, dp.strength_unit_den,
@@ -313,18 +372,17 @@ BEGIN
   -- Recheck for update when qty-driving fields change
   IF TG_OP = 'UPDATE' THEN
     must_check := must_check OR (
-      NEW.presentation_id        IS DISTINCT FROM OLD.presentation_id OR
+      NEW.drug_id                IS DISTINCT FROM OLD.drug_id OR
       NEW.dose_amount            IS DISTINCT FROM OLD.dose_amount OR
       NEW.dose_unit              IS DISTINCT FROM OLD.dose_unit OR
-      NEW.schedule_kind          IS DISTINCT FROM OLD.schedule_kind OR
-      NEW.every_n                IS DISTINCT FROM OLD.every_n OR
-      NEW.frequency_per_schedule IS DISTINCT FROM OLD.frequency_per_schedule OR
-      NEW.duration               IS DISTINCT FROM OLD.duration
+      NEW.frequency_code         IS DISTINCT FROM OLD.frequency_code OR
+      NEW.duration               IS DISTINCT FROM OLD.duration OR
+      NEW.duration_unit          IS DISTINCT FROM OLD.duration_unit
     );
   END IF;
   
   IF must_check THEN
-    PERFORM ck_line_stock_possible(NEW.presentation_id, NEW.total_to_dispense, NEW.id);
+    PERFORM ck_line_stock_possible(NEW.drug_id, NEW.total_to_dispense, NEW.id);
   END IF;
 
   RETURN NEW;
@@ -490,31 +548,31 @@ BEFORE DELETE ON prescription_batch_items
 FOR EACH ROW EXECUTE FUNCTION trg_pbi_adjust_stock();
 
 -- DEFERRABLE constraint trigger to allow multi-row transactions
-CREATE OR REPLACE FUNCTION ck_pbi_presentation_match()
+CREATE OR REPLACE FUNCTION ck_pbi_drug_match()
 RETURNS TRIGGER AS $$
 DECLARE
   bl_batch_id BIGINT;
-  bl_pres_id  BIGINT;
-  line_pres_id BIGINT;
+  bl_drug_id  BIGINT;
+  line_drug_id BIGINT;
 BEGIN
-  SELECT b.id, b.presentation_id INTO bl_batch_id, bl_pres_id
+  SELECT b.id, b.drug_id INTO bl_batch_id, bl_drug_id
   FROM batch_locations bl
   JOIN drug_batches b ON b.id = bl.batch_id
   WHERE bl.id = NEW.batch_location_id;
 
-  SELECT presentation_id INTO line_pres_id FROM prescription_lines WHERE id = NEW.line_id;
+  SELECT drug_id INTO line_drug_id FROM prescription_lines WHERE id = NEW.line_id;
 
-  IF bl_pres_id IS DISTINCT FROM line_pres_id THEN
-    RAISE EXCEPTION 'Batch location % belongs to presentation %, but line % is for presentation %',
-      NEW.batch_location_id, bl_pres_id, NEW.line_id, line_pres_id;
+  IF bl_drug_id IS DISTINCT FROM line_drug_id THEN
+    RAISE EXCEPTION 'Batch location % belongs to drug %, but line % is for drug %',
+      NEW.batch_location_id, bl_drug_id, NEW.line_id, line_drug_id;
   END IF;
 
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS pbi_ck_presentation ON prescription_batch_items;
-CREATE CONSTRAINT TRIGGER pbi_ck_presentation
+DROP TRIGGER IF EXISTS pbi_ck_drug ON prescription_batch_items;
+CREATE CONSTRAINT TRIGGER pbi_ck_drug
 AFTER INSERT OR UPDATE ON prescription_batch_items
 DEFERRABLE INITIALLY DEFERRED
-FOR EACH ROW EXECUTE FUNCTION ck_pbi_presentation_match();
+FOR EACH ROW EXECUTE FUNCTION ck_pbi_drug_match();

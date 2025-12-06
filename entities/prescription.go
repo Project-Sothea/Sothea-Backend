@@ -47,23 +47,16 @@ const (
 type PrescriptionLine struct {
 	ID             int64   `json:"id"`
 	PrescriptionID int64   `json:"prescriptionId"`
-	PresentationID int64   `json:"presentationId"`
+	DrugID         int64   `json:"drugId"`
 	Remarks        *string `json:"remarks,omitempty"` // SIG / instructions
+	Prn            bool    `json:"prn"`               // pro re nata (as needed)
 
 	// Clinical dose input (per administration)
 	DoseAmount float64 `json:"doseAmount"`
 	DoseUnit   string  `json:"doseUnit"` // "mg","mL","tab","bottle", etc.
 
-	// Periodic schedule model:
-	// periods = ceil(duration / everyN); doses = periods * frequencyPerSchedule
-	// Examples:
-	//  - TID x 7 days        → kind=day,  everyN=1, freq=3,  duration=7
-	//  - q8h x 5 days        → kind=hour, everyN=8, freq=1,  duration=120
-	//  - every other day x14 → kind=day,  everyN=2, freq=1,  duration=14
-	//  - weekly x 4 weeks    → kind=week, everyN=1, freq=1,  duration=4
-	ScheduleKind         string  `json:"scheduleKind"`         // "hour" | "day" | "week" | "month"
-	EveryN               int     `json:"everyN"`               // > 0
-	FrequencyPerSchedule float64 `json:"frequencyPerSchedule"` // administrations per schedule period
+	// Frequency: must use FrequencyCode; schedule fields are read-only, derived from DB
+	FrequencyCode string `json:"frequencyCode,omitempty"` // "OM", "ON", "BD", "TDS", "q8h", etc.
 
 	Duration     float64 `json:"duration"`     // in units of scheduleKind
 	DurationUnit string  `json:"durationUnit"` // "hour" | "day" | "week" | "month"
@@ -92,15 +85,17 @@ type PrescriptionLine struct {
 }
 
 type AddLineReq struct {
-	PresentationID       int64   `json:"presentationId" binding:"required"`
-	Remarks              *string `json:"remarks"`
-	DoseAmount           float64 `json:"doseAmount" binding:"required,gt=0"`
-	DoseUnit             string  `json:"doseUnit" binding:"required"`
-	ScheduleKind         string  `json:"scheduleKind" binding:"required,oneof=hour day week month"`
-	EveryN               int     `json:"everyN" binding:"required,gt=0"`               // e.g. every 2 days
-	FrequencyPerSchedule float64 `json:"frequencyPerSchedule" binding:"required,gt=0"` // e.g. 3 doses per 'day' window
-	Duration             float64 `json:"duration" binding:"required,gt=0"`             // in units of ScheduleKind * EveryN
-	DurationUnit         string  `json:"durationUnit" binding:"required,oneof=hour day week month"`
+	DrugID     int64   `json:"drugId" binding:"required"`
+	Remarks    *string `json:"remarks"`
+	Prn        bool    `json:"prn"` // pro re nata (as needed), default false
+	DoseAmount float64 `json:"doseAmount" binding:"required,gt=0"`
+	DoseUnit   string  `json:"doseUnit" binding:"required"`
+
+	// Frequency: must use FrequencyCode; no custom schedule fields in request
+	FrequencyCode string `json:"frequencyCode" binding:"required"` // "OM", "ON", "BD", "TDS", "q8h", etc.
+
+	Duration     float64 `json:"duration" binding:"required,gt=0"` // in units of DurationUnit
+	DurationUnit string  `json:"durationUnit" binding:"required,oneof=hour day week month"`
 }
 
 type LineAllocation struct {
