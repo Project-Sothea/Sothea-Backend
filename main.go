@@ -2,12 +2,11 @@ package main
 
 import (
 	"database/sql"
-	"flag"
-	"fmt"
 	"log"
 	"strings"
 	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	_httpDelivery "github.com/jieqiboh/sothea_backend/controllers"
 	_postgresRepository "github.com/jieqiboh/sothea_backend/repository/postgres"
@@ -16,41 +15,11 @@ import (
 )
 
 func main() {
-	// Define a flag to determine the mode
-	mode := flag.String("mode", "dev", "Mode of the application: dev or prod")
+	viper.AutomaticEnv()
 
-	// Parse the flags
-	flag.Parse()
-
-	// Determine the mode and print a message
-	switch *mode {
-	case "dev":
-		gin.SetMode(gin.DebugMode)
-		fmt.Println("Running in development mode")
-		viper.SetConfigFile(`config.json`)
-	case "prod":
-		gin.SetMode(gin.ReleaseMode)
-		fmt.Println("Running in production mode")
-		viper.SetConfigFile(`prod.json`)
-	default:
-		fmt.Println("Unknown mode. Please use 'dev' or 'prod'.")
-	}
-
-	err := viper.ReadInConfig()
-	if err != nil {
-		panic(err)
-	}
-
-	address := viper.GetString(`server.address`)
-	dbHost := viper.GetString(`database.host`)
-	dbPort := viper.GetString(`database.port`)
-	dbUser := viper.GetString(`database.user`)
-	dbName := viper.GetString(`database.name`)
-	dbPassword := viper.GetString(`database.password`)
-	dbSslMode := viper.GetString(`database.sslmode`)
-	secretKey := []byte(viper.GetString(`jwt.secretkey`))
-
-	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s", dbHost, dbPort, dbUser, dbPassword, dbName, dbSslMode)
+	port := viper.GetString("PORT")
+	connStr := viper.GetString("DATABASE_URL")
+	secretKey := []byte(viper.GetString("SECRET_KEY"))
 
 	// Open a database connection
 	db, err := sql.Open("postgres", connStr)
@@ -72,6 +41,14 @@ func main() {
 	}()
 
 	router := gin.Default()
+	router.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"*"}, // or specific origin
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
 	router.Static("/app", "./dist")
 
 	// Root router group for all public API endpoints
@@ -101,5 +78,5 @@ func main() {
 		}
 	})
 
-	router.Run(address)
+	router.Run("0.0.0.0:" + port)
 }
