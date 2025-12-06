@@ -11,10 +11,12 @@ import (
 	_httpDelivery "github.com/jieqiboh/sothea_backend/controllers"
 	_postgresRepository "github.com/jieqiboh/sothea_backend/repository/postgres"
 	_useCase "github.com/jieqiboh/sothea_backend/usecases"
+	"github.com/joho/godotenv"
 	"github.com/spf13/viper"
 )
 
 func main() {
+	godotenv.Load()
 	viper.AutomaticEnv()
 
 	port := viper.GetString("PORT")
