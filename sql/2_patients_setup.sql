@@ -188,17 +188,13 @@ CREATE TABLE IF NOT EXISTS doctorsconsultation
 
 CREATE TABLE IF NOT EXISTS physiotherapy
 (
-    id                         INTEGER NOT NULL,                         -- Use INTEGER to match the id type from admin
-    vid                        INTEGER NOT NULL,                         -- Add vid to match the vid type from admin
-    pain_stiffness_day         INTEGER NOT NULL,                         -- Pain/stiffness during the day: How severe was your usual joint or muscle pain and/or stiffness overall during the day in the last 2 weeks? 0, 1, 2, 3, 4, 5
-    pain_stiffness_night       INTEGER NOT NULL,                         -- Pain/stiffness during the night: How severe was your usual joint or muscle pain and/or stiffness overall during the night in the last 2 weeks? 0, 1, 2, 3, 4, 5
-    symptoms_interfere_tasks   TEXT    NOT NULL,                         -- How much has your symptoms interfered with your ability to walk or do everyday tasks like cooking, cleaning or dressing in the last 2 weeks? Never, Rarely, Sometimes, Often, Always
-    symptoms_change            TEXT    NOT NULL,                         -- Have your symptoms improved, worsened, or stayed the same over the last 2 weeks? Never, Rarely, Sometimes, Often, Always
-    symptoms_need_help         TEXT    NOT NULL,                         -- How often have you needed help from others (including family, friends or carers) because of your joint or muscle symptoms in the last 2 weeks? Never, Rarely, Sometimes, Often, Always
-    trouble_sleep_symptoms     TEXT    NOT NULL,                         -- How often have you had trouble with either falling asleep or staying asleep because of your joint or muscle symptoms in the last 2 weeks? Never, Rarely, Sometimes, Often, Always
-    how_much_fatigue           INTEGER NOT NULL,                         -- How much fatigue or low energy have you felt in the last 2 weeks? 0, 1, 2, 3, 4, 5
-    anxious_low_mood           INTEGER NOT NULL,                         -- How much have you felt anxious or low in your mood because of your joint or muscle symptoms in the last 2 weeks? 0, 1, 2, 3, 4, 5
-    medication_manage_symptoms TEXT    NOT NULL,                         -- Have you used any medication to manage your symptoms in the last 2 weeks? If yes, how often? Never, Rarely, Sometimes, Often, Always
+    id                         INTEGER NOT NULL,                         -- Use INTEGER to match the id type from patients
+    vid                        INTEGER NOT NULL,                         -- Add vid to match the vid type from visits
+    subjective_assessment      TEXT,                                     -- Subjective Assessment (Open Ended)
+    pain_scale                 INTEGER,                                  -- Pain Scale (1-10)
+    objective_assessment       TEXT,                                     -- Objective Assessment (Open Ended)
+    intervention               TEXT,                                     -- Intervention (Open Ended)
+    evaluation                 TEXT,                                     -- Evaluation (Open Ended)
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
 );
@@ -331,11 +327,9 @@ VALUES (1, 1, TRUE, FALSE, FALSE, TRUE, TRUE, FALSE, TRUE, FALSE, 'LEUKAEMIA',
         'CHEST PAIN, SHORTNESS OF BREATH, COUGH', 'ACUTE BRONCHITIS',
         'REST, HYDRATION, COUGH SYRUP', FALSE, NULL, 'MONITOR FOR RESOLUTION');
 
-INSERT INTO physiotherapy (id, vid, pain_stiffness_day, pain_stiffness_night, symptoms_interfere_tasks, symptoms_change,
-                           symptoms_need_help, trouble_sleep_symptoms, how_much_fatigue, anxious_low_mood,
-                           medication_manage_symptoms)
-VALUES (1, 1, 3, 2, 'Sometimes', 'Often', 'Sometimes', 'Sometimes', 3, 2, 'Sometimes'),
-         (2, 1, 4, 3, 'Often', 'Always', 'Often', 'Often', 4, 3, 'Often');
+INSERT INTO physiotherapy (id, vid, subjective_assessment, pain_scale, objective_assessment, intervention, evaluation)
+VALUES (1, 1, 'Patient reports chronic lower back pain, worse in the morning. Difficulty with daily activities.', 7, 'Limited range of motion in lumbar spine. Muscle tension noted.', 'Prescribed stretching exercises and heat therapy.', 'Patient shows improvement with exercises. Continue current plan.'),
+       (2, 1, 'Complains of shoulder stiffness after work. Pain increases with overhead movements.', 5, 'Reduced shoulder mobility. Tenderness in rotator cuff area.', 'Manual therapy and strengthening exercises recommended.', 'Moderate improvement. Patient to continue home exercises.');
 
 /*******************
     Add additional entries for patient 1 and 2

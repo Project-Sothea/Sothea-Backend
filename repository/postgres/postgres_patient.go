@@ -224,15 +224,11 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 	err = rows.Scan(
 		&physiotherapy.ID,
 		&physiotherapy.VID,
-		&physiotherapy.PainStiffnessDay,
-		&physiotherapy.PainStiffnessNight,
-		&physiotherapy.SymptomsInterfereTasks,
-		&physiotherapy.SymptomsChange,
-		&physiotherapy.SymptomsNeedHelp,
-		&physiotherapy.TroubleSleepSymptoms,
-		&physiotherapy.HowMuchFatigue,
-		&physiotherapy.AnxiousLowMood,
-		&physiotherapy.MedicationManageSymptoms,
+		&physiotherapy.SubjectiveAssessment,
+		&physiotherapy.PainScale,
+		&physiotherapy.ObjectiveAssessment,
+		&physiotherapy.Intervention,
+		&physiotherapy.Evaluation,
 	)
 	if errors.Is(err, sql.ErrNoRows) { // no physiotherapy found
 		physiotherapy = nil
@@ -664,20 +660,15 @@ func (p *postgresPatientRepository) UpdatePatientVisit(ctx context.Context, id i
 	}
 	if phy != nil {
 		_, err = tx.ExecContext(ctx, `
-		INSERT INTO physiotherapy (id, vid, pain_stiffness_day, pain_stiffness_night, symptoms_interfere_tasks, symptoms_change, 
-		symptoms_need_help, trouble_sleep_symptoms, how_much_fatigue, anxious_low_mood, medication_manage_symptoms) 
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
+		INSERT INTO physiotherapy (id, vid, subjective_assessment, pain_scale, objective_assessment, intervention, evaluation) 
+		VALUES ($1, $2, $3, $4, $5, $6, $7) 
 		ON CONFLICT (id, vid) DO UPDATE SET
-			pain_stiffness_day = $3,
-			pain_stiffness_night = $4,
-			symptoms_interfere_tasks = $5,
-			symptoms_change = $6,
-			symptoms_need_help = $7,
-			trouble_sleep_symptoms = $8,
-			how_much_fatigue = $9,
-			anxious_low_mood = $10,
-			medication_manage_symptoms = $11
-		`, id, vid, phy.PainStiffnessDay, phy.PainStiffnessNight, phy.SymptomsInterfereTasks, phy.SymptomsChange, phy.SymptomsNeedHelp, phy.TroubleSleepSymptoms, phy.HowMuchFatigue, phy.AnxiousLowMood, phy.MedicationManageSymptoms)
+			subjective_assessment = $3,
+			pain_scale = $4,
+			objective_assessment = $5,
+			intervention = $6,
+			evaluation = $7
+		`, id, vid, phy.SubjectiveAssessment, phy.PainScale, phy.ObjectiveAssessment, phy.Intervention, phy.Evaluation)
 
 		if err != nil {
 			return err
@@ -1031,15 +1022,11 @@ func (p *postgresPatientRepository) ExportDatabaseToCSV(ctx context.Context) err
         dc.referral_loc AS dc_referral_loc,
 		dc.remarks AS dc_remarks,
 		-- Physiotherapy
-		p.pain_stiffness_day AS p_pain_stiffness_day,
-		p.pain_stiffness_night AS p_pain_stiffness_night,
-		p.symptoms_interfere_tasks AS p_symptoms_interfere_tasks,
-		p.symptoms_change AS p_symptoms_change,
-		p.symptoms_need_help AS p_symptoms_need_help,
-		p.trouble_sleep_symptoms AS p_trouble_sleep_symptoms,
-		p.how_much_fatigue AS p_how_much_fatigue,
-		p.anxious_low_mood AS p_anxious_low_mood,
-		p.medication_manage_symptoms AS p_medication_manage_symptoms
+		p.subjective_assessment AS p_subjective_assessment,
+		p.pain_scale AS p_pain_scale,
+		p.objective_assessment AS p_objective_assessment,
+		p.intervention AS p_intervention,
+		p.evaluation AS p_evaluation
 		FROM
         admin a
     LEFT JOIN
