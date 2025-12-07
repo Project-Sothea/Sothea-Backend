@@ -9,28 +9,34 @@ DROP TABLE IF EXISTS visual_acuity;
 DROP TABLE IF EXISTS fall_risk;
 DROP TABLE IF EXISTS doctors_consultation;
 DROP TABLE IF EXISTS admin;
+DROP TABLE IF EXISTS patient_details;
 
 /*******************
 Create the schema and Load Extensions
 ********************/
 
+CREATE TABLE IF NOT EXISTS patient_details
+(
+  id             SERIAL PRIMARY KEY,
+  name           TEXT       NOT NULL,
+  family_group   TEXT       NOT NULL,
+  khmer_name     TEXT       NOT NULL,
+  dob            DATE       NOT NULL,
+  gender         VARCHAR(1) NOT NULL,
+  village        TEXT       NOT NULL,
+  contact_no     TEXT       NOT NULL,
+  drug_allergies TEXT
+);
+
 CREATE TABLE IF NOT EXISTS admin
 (
-  id                    SERIAL, -- Use SERIAL to auto-increment the ID
-  vid                   INTEGER    NOT NULL,
-  family_group          TEXT       NOT NULL,
-  reg_date              DATE       NOT NULL,
-  queue_no              TEXT       NOT NULL,
-  name                  TEXT       NOT NULL,
-  khmer_name            TEXT       NOT NULL,
-  dob                   DATE       NOT NULL,
-  gender                VARCHAR(1) NOT NULL,
-  village               TEXT       NOT NULL,
-  contact_no            TEXT       NOT NULL,
-  pregnant              BOOLEAN    NOT NULL,
+  id                    INTEGER NOT NULL REFERENCES patient_details (id) ON DELETE CASCADE,
+  vid                   INTEGER NOT NULL,
+  reg_date              DATE    NOT NULL,
+  queue_no              TEXT    NOT NULL,
+  pregnant              BOOLEAN NOT NULL,
   last_menstrual_period DATE,
-  drug_allergies        TEXT,
-  sent_to_id            BOOLEAN    NOT NULL,
+  sent_to_id            BOOLEAN NOT NULL,
   PRIMARY KEY (id, vid)         -- Composite primary key
 );
 
@@ -55,7 +61,7 @@ CREATE TABLE IF NOT EXISTS past_medical_history
     specified_stds               TEXT,
     others                       TEXT,
     PRIMARY KEY (id, vid),                                               -- Composite primary key
-    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
+    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
 
 CREATE TABLE IF NOT EXISTS social_history
@@ -69,7 +75,7 @@ CREATE TABLE IF NOT EXISTS social_history
     alcohol_history         BOOLEAN NOT NULL,
     how_regular             VARCHAR(1),
     PRIMARY KEY (id, vid),                                               -- Composite primary key
-    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
+    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
 
 CREATE TABLE IF NOT EXISTS vital_statistics
@@ -90,7 +96,7 @@ CREATE TABLE IF NOT EXISTS vital_statistics
     rand_blood_glucose_mmol_l  NUMERIC(5, 1),
     icope_high_bp             BOOLEAN,
     PRIMARY KEY (id, vid),                                               -- Composite primary key
-    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
+    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
 
 CREATE TABLE IF NOT EXISTS height_and_weight
@@ -107,7 +113,7 @@ CREATE TABLE IF NOT EXISTS height_and_weight
     icope_lost_weight_past_months BOOLEAN,
     icope_no_desire_to_eat BOOLEAN,
     PRIMARY KEY (id, vid),                                               -- Composite primary key
-    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
+    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
 
 CREATE TABLE IF NOT EXISTS visual_acuity
@@ -124,7 +130,7 @@ CREATE TABLE IF NOT EXISTS visual_acuity
     icope_treated_for_diabetes_or_bp BOOLEAN,
 
     PRIMARY KEY (id, vid),                                               -- Composite primary key
-    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
+    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
 
 CREATE TABLE IF NOT EXISTS dental
@@ -142,7 +148,7 @@ CREATE TABLE IF NOT EXISTS dental
     dental_notes         TEXT,
 
     PRIMARY KEY (id, vid),                                               -- Composite primary key
-    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
+    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
 
 CREATE TABLE IF NOT EXISTS fall_risk
@@ -159,7 +165,7 @@ CREATE TABLE IF NOT EXISTS fall_risk
     icope_chair_stands_time BOOLEAN,
                           
     PRIMARY KEY (id, vid),                                               -- Composite primary key
-    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
+    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
 
 CREATE TABLE IF NOT EXISTS doctors_consultation
@@ -198,23 +204,18 @@ CREATE TABLE IF NOT EXISTS physiotherapy
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
 );
 
-/*******************
-    Create the trigger function
-*******************/
-
+-- Auto-increment VID per patient
 CREATE OR REPLACE FUNCTION set_entry_id() RETURNS TRIGGER AS
 $$
 DECLARE
     max_entry_id INTEGER;
 BEGIN
-    -- Check if the ID already exists in the table
-    SELECT COALESCE(MAX(VID), 0)
+    SELECT COALESCE(MAX(vid), 0)
     INTO max_entry_id
     FROM admin
-    WHERE ID = NEW.ID;
+    WHERE id = NEW.id;
 
-    -- Increment Entry_ID based on the max_entry_id
-    NEW.VID := max_entry_id + 1;
+    NEW.vid := max_entry_id + 1;
 
     RETURN NEW;
 END;
@@ -227,23 +228,32 @@ CREATE TRIGGER before_insert_admin
 EXECUTE FUNCTION set_entry_id();
 
 /*******************
-    Create new patients
+    Seed patients
  */
 
-INSERT INTO admin (family_group, reg_date, queue_no, name, khmer_name, dob, age, gender, village, contact_no, pregnant,
-                   last_menstrual_period, drug_allergies, sent_to_id)
-VALUES ('S001', '2024-01-10', '1A', 'John Doe', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1994-01-10', 30, 'M', 'SO', '12345678', FALSE, NULL,
-        'panadol', FALSE),
-       ('S002A', '2024-01-10', '2A', 'Jane Smith', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1999-01-10', 25, 'F', 'SO', '12345679', FALSE,
-        NULL, NULL, FALSE),
-       ('S002B', '2024-01-10', '2B', 'Bob Smith', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1999-01-10', 25, 'M', 'R1', '99999999', FALSE, NULL,
-        'aspirin', FALSE),
-       ('S003', '2024-01-10', '3A', 'Bob Johnson', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1989-01-10', 35, 'M', 'R1', '11111111', FALSE,
-        NULL, NULL, FALSE),
-       ('S004', '2024-01-10', '4B', 'Alice Brown', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1996-01-10', 28, 'F', 'R1', '17283948', FALSE,
-        NULL, NULL, FALSE),
-       ('S005A', '2024-01-10', '5C', 'Charlie Davis', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1982-01-10', 40, 'M', 'R1', '09876543', FALSE,
-        NULL, NULL, FALSE);
+INSERT INTO patient_details (id, name, family_group, khmer_name, dob, gender, village, contact_no, drug_allergies)
+VALUES (1, 'John Doe', 'S001', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1994-01-10', 'M', 'SO', '12345678', 'panadol'),
+       (2, 'Jane Smith', 'S002A', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1999-01-10', 'F', 'SO', '12345679', NULL),
+       (3, 'Bob Smith', 'S002B', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1999-01-10', 'M', 'R1', '99999999', 'aspirin'),
+       (4, 'Bob Johnson', 'S003', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1989-01-10', 'M', 'R1', '11111111', NULL),
+       (5, 'Alice Brown', 'S004', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1996-01-10', 'F', 'R1', '17283948', NULL);
+
+/*******************
+    Seed visits (admin)
+ */
+
+-- First visits (VID = 1 per patient)
+INSERT INTO admin (id, reg_date, queue_no, pregnant, last_menstrual_period, sent_to_id)
+VALUES (1, '2024-01-10', '1A', FALSE, NULL, FALSE),
+       (2, '2024-01-10', '2A', FALSE, NULL, FALSE),
+       (3, '2024-01-10', '2B', FALSE, NULL, FALSE),
+       (4, '2024-01-10', '3A', FALSE, NULL, FALSE),
+       (5, '2024-01-10', '4B', FALSE, NULL, FALSE);
+
+-- Second visits for patient 1 and 2 (VID = 2)
+INSERT INTO admin (id, reg_date, queue_no, pregnant, last_menstrual_period, sent_to_id)
+VALUES (1, '2025-07-01', 'Q123', FALSE, '2023-06-01', FALSE),
+       (2, '2024-12-02', 'Q124', TRUE, '2023-06-15', TRUE);
 
 INSERT INTO past_medical_history
   (id, vid,
@@ -329,33 +339,6 @@ VALUES (1, 1, TRUE, FALSE, FALSE, TRUE, TRUE, FALSE, TRUE, FALSE, 'LEUKAEMIA',
 INSERT INTO physiotherapy (id, vid, subjective_assessment, pain_scale, objective_assessment, intervention, evaluation)
 VALUES (1, 1, 'Patient reports chronic lower back pain, worse in the morning. Difficulty with daily activities.', 7, 'Limited range of motion in lumbar spine. Muscle tension noted.', 'Prescribed stretching exercises and heat therapy.', 'Patient shows improvement with exercises. Continue current plan.'),
        (2, 1, 'Complains of shoulder stiffness after work. Pain increases with overhead movements.', 5, 'Reduced shoulder mobility. Tenderness in rotator cuff area.', 'Manual therapy and strengthening exercises recommended.', 'Moderate improvement. Patient to continue home exercises.');
-
-/*******************
-    Add additional entries for patient 1 and 2
- */
-INSERT INTO admin (id, family_group, reg_date, queue_no, name, khmer_name, dob, age, gender, village, contact_no,
-       pregnant, last_menstrual_period, drug_allergies, sent_to_id)
-VALUES (1, 'Family 1', '2025-07-01', 'Q123', 'John Doe', 'ខេមរ', '1990-01-01', 34, 'M', 'Village 1', '123456789', false, '2023-06-01', 'None', false);
-
-INSERT INTO admin (id, family_group, reg_date, queue_no, name, khmer_name, dob, age, gender, village, contact_no,
-       pregnant, last_menstrual_period, drug_allergies, sent_to_id)
-VALUES (1, 'Family 2', '2024-12-02', 'Q124', 'Jane Doe', 'ចន ឌូ', '1990-01-11', 34, 'F', 'Village 2', '987654321',
-  true, '2023-06-15', 'Penicillin', true);
-
-INSERT INTO admin (id, family_group, reg_date, queue_no, name, khmer_name, dob, age, gender, village, contact_no,
-       pregnant, last_menstrual_period, drug_allergies, sent_to_id)
-VALUES (1, 'Family 1', '2023-07-03', 'Q125', 'Alice Doe', 'អាលីស ស្ម៊ីត', '1990-01-01', 35, 'F', 'Village 1',
-  '555666777', false, '2023-05-01', 'None', false);
-
-INSERT INTO admin (id, family_group, reg_date, queue_no, name, khmer_name, dob, age, gender, village, contact_no,
-       pregnant, last_menstrual_period, drug_allergies, sent_to_id)
-VALUES (2, 'B009', '2024-12-03', 'Q125', 'Walter White', 'អាលីស ស្ម៊ីត', '1990-01-01', 52, 'M', 'ABQ',
-  '555666777', false, '2023-05-01', 'None', false);
-
-INSERT INTO admin (id, family_group, reg_date, queue_no, name, khmer_name, dob, age, gender, village, contact_no,
-       pregnant, last_menstrual_period, drug_allergies, sent_to_id)
-VALUES (2, 'B009', '2023-10-03', 'Q125', 'Walter White', 'អាលីស ស្ម៊ីត', '1990-01-01', 52, 'M', 'ABQ',
-  '555666777', false, '2023-05-01', 'None', false);
 
 /*******************
     Add remaining categories for second visit for patient 1 and 2

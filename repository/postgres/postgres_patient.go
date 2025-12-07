@@ -25,7 +25,7 @@ func NewPostgresPatientRepository(conn *pgxpool.Pool) entities.PatientRepository
 	}
 }
 
-// GetPatientVisit returns a Patient struct representing a single visit based on ID, and Visit ID. Only guaranteed field is Admin
+// GetPatientVisit returns a Patient struct representing a single visit based on ID and visit ID. Patient and Admin are guaranteed when found.
 func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int32, vid int32) (*entities.Patient, error) {
 	tx, err := p.Conn.Begin(ctx)
 	if err != nil {
@@ -34,6 +34,14 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	q := p.queries.WithTx(tx)
+
+	patientRow, err := q.GetPatient(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, entities.ErrPatientNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
 
 	adminRow, err := q.GetAdmin(ctx, db.GetAdminParams{ID: id, Vid: vid})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -108,6 +116,7 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 	}
 
 	patient := entities.Patient{
+		PatientDetails:      &patientRow,
 		Admin:               admin,
 		PastMedicalHistory:  pastmedicalhistory,
 		SocialHistory:       socialhistory,
@@ -127,10 +136,10 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 	return &patient, nil
 }
 
-// CreatePatient inserts a new Admin category for a new patient and returns the new id if successful.
-func (p *postgresPatientRepository) CreatePatient(ctx context.Context, admin *db.Admin) (int32, error) {
-	if admin == nil {
-		return -1, entities.ErrMissingAdminCategory
+// CreatePatient inserts a new patient record and returns the patient id.
+func (p *postgresPatientRepository) CreatePatient(ctx context.Context, patient *db.PatientDetail) (int32, error) {
+	if patient == nil {
+		return -1, entities.ErrMissingPatientData
 	}
 
 	tx, err := p.Conn.Begin(ctx)
@@ -140,12 +149,12 @@ func (p *postgresPatientRepository) CreatePatient(ctx context.Context, admin *db
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	q := p.queries.WithTx(tx)
-	params, err := toInsertPatientParams(admin)
+	patientParams, err := toInsertPatientParams(patient)
 	if err != nil {
 		return -1, err
 	}
 
-	row, err := q.InsertPatient(ctx, params)
+	patientID, err := q.InsertPatient(ctx, patientParams)
 	if err != nil {
 		return -1, err
 	}
@@ -153,7 +162,61 @@ func (p *postgresPatientRepository) CreatePatient(ctx context.Context, admin *db
 	if err = tx.Commit(ctx); err != nil {
 		return -1, err
 	}
-	return row.ID, nil
+	return patientID, nil
+}
+
+// UpdatePatient updates demographic data for a patient.
+func (p *postgresPatientRepository) UpdatePatient(ctx context.Context, id int32, patient *db.PatientDetail) error {
+	if patient == nil {
+		return entities.ErrMissingPatientData
+	}
+
+	tx, err := p.Conn.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	q := p.queries.WithTx(tx)
+	exists, err := checkPatientExists(ctx, q, id)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return entities.ErrPatientNotFound
+	}
+
+	params := toUpdatePatientParams(id, patient)
+	if err := q.UpdatePatient(ctx, params); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+// DeletePatient deletes a patient and all associated visits/data.
+func (p *postgresPatientRepository) DeletePatient(ctx context.Context, id int32) error {
+	tx, err := p.Conn.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	q := p.queries.WithTx(tx)
+
+	exists, err := checkPatientExists(ctx, q, id)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return entities.ErrPatientNotFound
+	}
+
+	if _, err := tx.Exec(ctx, "DELETE FROM patient_details WHERE id = $1", id); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }
 
 // CreatePatientVisit inserts a new Admin category for an existing patient and returns the new vid if successful.
@@ -193,7 +256,7 @@ func (p *postgresPatientRepository) CreatePatientVisit(ctx context.Context, id i
 	return row.Vid, nil
 }
 
-// DeletePatientVisit removes all patient entries where id and vid match.
+// DeletePatientVisit removes a visit and cascades through related tables.
 func (p *postgresPatientRepository) DeletePatientVisit(ctx context.Context, id int32, vid int32) error {
 	tx, err := p.Conn.Begin(ctx)
 	if err != nil {
@@ -203,39 +266,7 @@ func (p *postgresPatientRepository) DeletePatientVisit(ctx context.Context, id i
 
 	q := p.queries.WithTx(tx)
 
-	if err = runDelete(ctx, q.DeletePastMedicalHistory, db.DeletePastMedicalHistoryParams{ID: id, Vid: vid}); err != nil {
-		return err
-	}
-	if err = runDelete(ctx, q.DeleteSocialHistory, db.DeleteSocialHistoryParams{ID: id, Vid: vid}); err != nil {
-		return err
-	}
-	if err = runDelete(ctx, q.DeleteVitalStatistics, db.DeleteVitalStatisticsParams{ID: id, Vid: vid}); err != nil {
-		return err
-	}
-	if err = runDelete(ctx, q.DeleteHeightAndWeight, db.DeleteHeightAndWeightParams{ID: id, Vid: vid}); err != nil {
-		return err
-	}
-	if err = runDelete(ctx, q.DeleteVisualAcuity, db.DeleteVisualAcuityParams{ID: id, Vid: vid}); err != nil {
-		return err
-	}
-	if err = runDelete(ctx, q.DeleteFallRisk, db.DeleteFallRiskParams{ID: id, Vid: vid}); err != nil {
-		return err
-	}
-	if err = runDelete(ctx, q.DeleteDental, db.DeleteDentalParams{ID: id, Vid: vid}); err != nil {
-		return err
-	}
-	if err = runDelete(ctx, q.DeletePhysiotherapy, db.DeletePhysiotherapyParams{ID: id, Vid: vid}); err != nil {
-		return err
-	}
-	if err = runDelete(ctx, q.DeleteDoctorsConsultation, db.DeleteDoctorsConsultationParams{ID: id, Vid: vid}); err != nil {
-		return err
-	}
-
-	// Prescriptions rely on the same visit identifiers.
-	if _, err := tx.Exec(ctx, "DELETE FROM prescriptions WHERE prescriptions.id = $1 AND prescriptions.vid = $2;", id, vid); err != nil {
-		return err
-	}
-
+	// Delete admin row; ON DELETE CASCADE handles dependent tables.
 	if err = runDelete(ctx, q.DeleteAdmin, db.DeleteAdminParams{ID: id, Vid: vid}); err != nil {
 		return err
 	}
@@ -375,19 +406,27 @@ func (p *postgresPatientRepository) GetPatientMeta(ctx context.Context, id int32
 		return nil, entities.ErrPatientNotFound
 	}
 
+	patientRow, err := q.GetPatient(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, entities.ErrPatientNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
 	latestRow, err := q.GetLatestAdmin(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
 	patientMeta := entities.PatientMeta{
-		ID:          latestRow.ID,
+		ID:          patientRow.ID,
 		Vid:         latestRow.Vid,
-		FamilyGroup: latestRow.FamilyGroup,
+		FamilyGroup: patientRow.FamilyGroup,
 		RegDate:     latestRow.RegDate,
 		QueueNo:     latestRow.QueueNo,
-		Name:        latestRow.Name,
-		KhmerName:   latestRow.KhmerName,
+		Name:        patientRow.Name,
+		KhmerName:   patientRow.KhmerName,
 		Visits:      make(map[int32]time.Time),
 	}
 
@@ -469,67 +508,51 @@ func runDelete[T any](ctx context.Context, fn func(context.Context, T) error, pa
 
 // Parameter builders ---------------------------------------------------------
 
-func toInsertPatientParams(admin *db.Admin) (db.InsertPatientParams, error) {
+func toInsertPatientParams(patient *db.PatientDetail) (db.InsertPatientParams, error) {
 	return db.InsertPatientParams{
-		FamilyGroup:         admin.FamilyGroup,
-		RegDate:             admin.RegDate,
-		QueueNo:             admin.QueueNo,
-		Name:                admin.Name,
-		KhmerName:           admin.KhmerName,
-		Dob:                 admin.Dob,
-		Gender:              admin.Gender,
-		Village:             admin.Village,
-		ContactNo:           admin.ContactNo,
-		Pregnant:            admin.Pregnant,
-		LastMenstrualPeriod: admin.LastMenstrualPeriod,
-		DrugAllergies:       admin.DrugAllergies,
-		SentToID:            admin.SentToID,
+		Name:          patient.Name,
+		FamilyGroup:   patient.FamilyGroup,
+		KhmerName:     patient.KhmerName,
+		Dob:           patient.Dob,
+		Gender:        patient.Gender,
+		Village:       patient.Village,
+		ContactNo:     patient.ContactNo,
+		DrugAllergies: patient.DrugAllergies,
 	}, nil
 }
 
 func toInsertPatientVisitParams(id int32, admin *db.Admin) (db.InsertPatientVisitParams, error) {
-	base, err := toInsertPatientParams(admin)
-	if err != nil {
-		return db.InsertPatientVisitParams{}, err
-	}
 	return db.InsertPatientVisitParams{
 		ID:                  id,
-		FamilyGroup:         base.FamilyGroup,
-		RegDate:             base.RegDate,
-		QueueNo:             base.QueueNo,
-		Name:                base.Name,
-		KhmerName:           base.KhmerName,
-		Dob:                 base.Dob,
-		Gender:              base.Gender,
-		Village:             base.Village,
-		ContactNo:           base.ContactNo,
-		Pregnant:            base.Pregnant,
-		LastMenstrualPeriod: base.LastMenstrualPeriod,
-		DrugAllergies:       base.DrugAllergies,
-		SentToID:            base.SentToID,
+		RegDate:             admin.RegDate,
+		QueueNo:             admin.QueueNo,
+		Pregnant:            admin.Pregnant,
+		LastMenstrualPeriod: admin.LastMenstrualPeriod,
+		SentToID:            admin.SentToID,
 	}, nil
 }
 
-func toUpdateAdminParams(id int32, vid int32, admin *db.Admin) (db.UpdateAdminParams, error) {
-	base, err := toInsertPatientParams(admin)
-	if err != nil {
-		return db.UpdateAdminParams{}, err
+func toUpdatePatientParams(id int32, patient *db.PatientDetail) db.UpdatePatientParams {
+	return db.UpdatePatientParams{
+		Name:          patient.Name,
+		FamilyGroup:   patient.FamilyGroup,
+		KhmerName:     patient.KhmerName,
+		Dob:           patient.Dob,
+		Gender:        patient.Gender,
+		Village:       patient.Village,
+		ContactNo:     patient.ContactNo,
+		DrugAllergies: patient.DrugAllergies,
+		ID:            id,
 	}
+}
 
+func toUpdateAdminParams(id int32, vid int32, admin *db.Admin) (db.UpdateAdminParams, error) {
 	return db.UpdateAdminParams{
-		FamilyGroup:         base.FamilyGroup,
-		RegDate:             base.RegDate,
-		QueueNo:             base.QueueNo,
-		Name:                base.Name,
-		KhmerName:           base.KhmerName,
-		Dob:                 base.Dob,
-		Gender:              base.Gender,
-		Village:             base.Village,
-		ContactNo:           base.ContactNo,
-		Pregnant:            base.Pregnant,
-		LastMenstrualPeriod: base.LastMenstrualPeriod,
-		DrugAllergies:       base.DrugAllergies,
-		SentToID:            base.SentToID,
+		RegDate:             admin.RegDate,
+		QueueNo:             admin.QueueNo,
+		Pregnant:            admin.Pregnant,
+		LastMenstrualPeriod: admin.LastMenstrualPeriod,
+		SentToID:            admin.SentToID,
 		ID:                  id,
 		Vid:                 vid,
 	}, nil

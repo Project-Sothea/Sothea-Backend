@@ -1,21 +1,26 @@
+CREATE TABLE patient_details
+(
+  id             SERIAL PRIMARY KEY,
+  name           TEXT       NOT NULL,
+  family_group   TEXT       NOT NULL,
+  khmer_name     TEXT       NOT NULL,
+  dob            DATE       NOT NULL,
+  gender         VARCHAR(1) NOT NULL,
+  village        TEXT       NOT NULL,
+  contact_no     TEXT       NOT NULL,
+  drug_allergies TEXT
+);
+
 CREATE TABLE admin
 (
-  id                    SERIAL, -- Use SERIAL to auto-increment the ID
-  vid                   INTEGER    NOT NULL,
-  family_group          TEXT       NOT NULL,
-  reg_date              DATE       NOT NULL,
-  queue_no              TEXT       NOT NULL,
-  name                  TEXT       NOT NULL,
-  khmer_name            TEXT       NOT NULL,
-  dob                   DATE       NOT NULL,
-  gender                VARCHAR(1) NOT NULL,
-  village               TEXT       NOT NULL,
-  contact_no            TEXT       NOT NULL,
-  pregnant              BOOLEAN    NOT NULL,
+  id                    INTEGER NOT NULL REFERENCES patient_details (id) ON DELETE CASCADE,
+  vid                   INTEGER NOT NULL,
+  reg_date              DATE    NOT NULL,
+  queue_no              TEXT    NOT NULL,
+  pregnant              BOOLEAN NOT NULL,
   last_menstrual_period DATE,
-  drug_allergies        TEXT,
-  sent_to_id            BOOLEAN    NOT NULL,
-  PRIMARY KEY (id, vid)         -- Composite primary key
+  sent_to_id            BOOLEAN NOT NULL,
+  PRIMARY KEY (id, vid) -- Composite primary key
 );
 
 CREATE TABLE past_medical_history
@@ -39,7 +44,7 @@ CREATE TABLE past_medical_history
     specified_stds               TEXT,
     others                       TEXT,
     PRIMARY KEY (id, vid),                                               -- Composite primary key
-    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
+    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
 
 CREATE TABLE social_history
@@ -53,7 +58,7 @@ CREATE TABLE social_history
     alcohol_history         BOOLEAN NOT NULL,
     how_regular             VARCHAR(1),
     PRIMARY KEY (id, vid),                                               -- Composite primary key
-    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
+    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
 
 CREATE TABLE vital_statistics
@@ -74,7 +79,7 @@ CREATE TABLE vital_statistics
     rand_blood_glucose_mmol_l  NUMERIC(5, 1),
     icope_high_bp             BOOLEAN,
     PRIMARY KEY (id, vid),                                               -- Composite primary key
-    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
+    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
 
 CREATE TABLE height_and_weight
@@ -91,7 +96,7 @@ CREATE TABLE height_and_weight
     icope_lost_weight_past_months BOOLEAN,
     icope_no_desire_to_eat BOOLEAN,
     PRIMARY KEY (id, vid),                                               -- Composite primary key
-    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
+    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
 
 CREATE TABLE visual_acuity
@@ -108,7 +113,7 @@ CREATE TABLE visual_acuity
     icope_treated_for_diabetes_or_bp BOOLEAN,
 
     PRIMARY KEY (id, vid),                                               -- Composite primary key
-    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
+    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
 
 CREATE TABLE dental
@@ -126,7 +131,7 @@ CREATE TABLE dental
     dental_notes         TEXT,
 
     PRIMARY KEY (id, vid),                                               -- Composite primary key
-    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
+    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
 
 CREATE TABLE fall_risk
@@ -143,7 +148,7 @@ CREATE TABLE fall_risk
     icope_chair_stands_time BOOLEAN,
                           
     PRIMARY KEY (id, vid),                                               -- Composite primary key
-    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
+    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
 
 CREATE TABLE doctors_consultation

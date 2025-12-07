@@ -1,88 +1,85 @@
--- Admin ----------------------------------------------------------------------
+-- Patient --------------------------------------------------------------------
 
--- name: GetAdmin :one
+-- name: GetPatient :one
 SELECT id,
-       vid,
-       family_group,
-       reg_date,
-       queue_no,
        name,
+       family_group,
        khmer_name,
        dob,
        gender,
        village,
        contact_no,
+       drug_allergies
+FROM patient_details
+WHERE id = $1;
+
+-- name: InsertPatient :one
+INSERT INTO patient_details (
+  name,
+  family_group,
+  khmer_name,
+  dob,
+  gender,
+  village,
+  contact_no,
+  drug_allergies
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7, $8
+) RETURNING id;
+
+-- name: UpdatePatient :exec
+UPDATE patient_details
+SET name           = $1,
+    family_group   = $2,
+    khmer_name     = $3,
+    dob            = $4,
+    gender         = $5,
+    village        = $6,
+    contact_no     = $7,
+    drug_allergies = $8
+WHERE id = $9;
+
+-- name: CheckPatientExists :one
+SELECT id
+FROM patient_details
+WHERE id = $1
+LIMIT 1;
+
+-- Admin ----------------------------------------------------------------------
+
+-- name: GetAdmin :one
+SELECT id,
+       vid,
+       reg_date,
+       queue_no,
        pregnant,
        last_menstrual_period,
-       drug_allergies,
        sent_to_id
 FROM admin
 WHERE id = $1
   AND vid = $2;
 
--- name: InsertPatient :one
-INSERT INTO admin (
-  family_group,
-  reg_date,
-  queue_no,
-  name,
-  khmer_name,
-  dob,
-  gender,
-  village,
-  contact_no,
-  pregnant,
-  last_menstrual_period,
-  drug_allergies,
-  sent_to_id
-) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
-)
-RETURNING id, vid;
-
 -- name: InsertPatientVisit :one
 INSERT INTO admin (
   id,
-  family_group,
   reg_date,
   queue_no,
-  name,
-  khmer_name,
-  dob,
-  gender,
-  village,
-  contact_no,
   pregnant,
   last_menstrual_period,
-  drug_allergies,
   sent_to_id
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+  $1, $2, $3, $4, $5, $6
 ) RETURNING id, vid;
 
 -- name: UpdateAdmin :exec
 UPDATE admin
-SET family_group         = $1,
-    reg_date             = $2,
-    queue_no             = $3,
-    name                 = $4,
-    khmer_name           = $5,
-    dob                  = $6,
-    gender               = $7,
-    village              = $8,
-    contact_no           = $9,
-    pregnant             = $10,
-    last_menstrual_period = $11,
-    drug_allergies       = $12,
-    sent_to_id           = $13
-WHERE id = $14
-  AND vid = $15;
-
--- name: CheckPatientExists :one
-SELECT id
-FROM admin
-WHERE id = $1
-LIMIT 1;
+SET reg_date              = $1,
+    queue_no              = $2,
+    pregnant              = $3,
+    last_menstrual_period = $4,
+    sent_to_id            = $5
+WHERE id = $6
+  AND vid = $7;
 
 -- name: CheckPatientVisitExists :one
 SELECT id, vid
@@ -99,11 +96,8 @@ WHERE id = $1
 -- name: GetLatestAdmin :one
 SELECT id,
        vid,
-       family_group,
        reg_date,
-       queue_no,
-       name,
-       khmer_name
+       queue_no
 FROM admin
 WHERE id = $1
 ORDER BY reg_date DESC, vid DESC
@@ -594,15 +588,15 @@ WITH LatestDates AS (
 SELECT DISTINCT ON (a.id)
   a.id,
   a.vid,
-  a.family_group,
+  p.family_group,
   a.reg_date,
   a.queue_no,
-  a.name,
-  a.khmer_name,
-  a.gender,
-  a.village,
-  a.contact_no,
-  a.drug_allergies,
+  p.name,
+  p.khmer_name,
+  p.gender,
+  p.village,
+  p.contact_no,
+  p.drug_allergies,
   a.sent_to_id,
   dc.referral_needed,
   EXISTS (
@@ -637,6 +631,7 @@ SELECT DISTINCT ON (a.id)
       AND pr.is_dispensed = TRUE
   ) AS prescription_dispensed
 FROM admin a
+JOIN patient_details p ON p.id = a.id
 LEFT JOIN doctors_consultation dc
   ON a.id = dc.id AND a.vid = dc.vid
 INNER JOIN LatestDates ld
@@ -647,15 +642,15 @@ ORDER BY a.id, a.vid DESC;
 SELECT DISTINCT ON (a.id)
   a.id,
   a.vid,
-  a.family_group,
+  p.family_group,
   a.reg_date,
   a.queue_no,
-  a.name,
-  a.khmer_name,
-  a.gender,
-  a.village,
-  a.contact_no,
-  a.drug_allergies,
+  p.name,
+  p.khmer_name,
+  p.gender,
+  p.village,
+  p.contact_no,
+  p.drug_allergies,
   a.sent_to_id,
   dc.referral_needed,
   EXISTS (
@@ -690,6 +685,7 @@ SELECT DISTINCT ON (a.id)
       AND pr.is_dispensed = TRUE
   ) AS prescription_dispensed
 FROM admin a
+JOIN patient_details p ON p.id = a.id
 LEFT JOIN doctors_consultation dc
   ON a.id = dc.id AND a.vid = dc.vid
 WHERE a.reg_date = $1

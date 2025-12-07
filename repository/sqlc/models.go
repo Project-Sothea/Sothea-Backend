@@ -13,18 +13,10 @@ import (
 type Admin struct {
 	ID                  int32      `json:"id"`
 	Vid                 int32      `json:"vid"`
-	FamilyGroup         string     `json:"family_group"`
 	RegDate             time.Time  `json:"reg_date"`
 	QueueNo             string     `json:"queue_no"`
-	Name                string     `json:"name"`
-	KhmerName           string     `json:"khmer_name"`
-	Dob                 time.Time  `json:"dob"`
-	Gender              string     `json:"gender"`
-	Village             string     `json:"village"`
-	ContactNo           string     `json:"contact_no"`
 	Pregnant            bool       `json:"pregnant"`
 	LastMenstrualPeriod *time.Time `json:"last_menstrual_period"`
-	DrugAllergies       *string    `json:"drug_allergies"`
 	SentToID            bool       `json:"sent_to_id"`
 }
 
@@ -178,6 +170,18 @@ type PastMedicalHistory struct {
 	SexuallyTransmittedDisease *bool   `json:"sexually_transmitted_disease"`
 	SpecifiedStds              *string `json:"specified_stds"`
 	Others                     *string `json:"others"`
+}
+
+type PatientDetail struct {
+	ID            int32     `json:"id"`
+	Name          string    `json:"name"`
+	FamilyGroup   string    `json:"family_group"`
+	KhmerName     string    `json:"khmer_name"`
+	Dob           time.Time `json:"dob"`
+	Gender        string    `json:"gender"`
+	Village       string    `json:"village"`
+	ContactNo     string    `json:"contact_no"`
+	DrugAllergies *string   `json:"drug_allergies"`
 }
 
 type Physiotherapy struct {

@@ -14,7 +14,7 @@ import (
 
 const checkPatientExists = `-- name: CheckPatientExists :one
 SELECT id
-FROM admin
+FROM patient_details
 WHERE id = $1
 LIMIT 1
 `
@@ -214,18 +214,10 @@ const getAdmin = `-- name: GetAdmin :one
 
 SELECT id,
        vid,
-       family_group,
        reg_date,
        queue_no,
-       name,
-       khmer_name,
-       dob,
-       gender,
-       village,
-       contact_no,
        pregnant,
        last_menstrual_period,
-       drug_allergies,
        sent_to_id
 FROM admin
 WHERE id = $1
@@ -244,18 +236,10 @@ func (q *Queries) GetAdmin(ctx context.Context, arg GetAdminParams) (Admin, erro
 	err := row.Scan(
 		&i.ID,
 		&i.Vid,
-		&i.FamilyGroup,
 		&i.RegDate,
 		&i.QueueNo,
-		&i.Name,
-		&i.KhmerName,
-		&i.Dob,
-		&i.Gender,
-		&i.Village,
-		&i.ContactNo,
 		&i.Pregnant,
 		&i.LastMenstrualPeriod,
-		&i.DrugAllergies,
 		&i.SentToID,
 	)
 	return i, err
@@ -444,11 +428,8 @@ func (q *Queries) GetHeightAndWeight(ctx context.Context, arg GetHeightAndWeight
 const getLatestAdmin = `-- name: GetLatestAdmin :one
 SELECT id,
        vid,
-       family_group,
        reg_date,
-       queue_no,
-       name,
-       khmer_name
+       queue_no
 FROM admin
 WHERE id = $1
 ORDER BY reg_date DESC, vid DESC
@@ -456,13 +437,10 @@ LIMIT 1
 `
 
 type GetLatestAdminRow struct {
-	ID          int32     `json:"id"`
-	Vid         int32     `json:"vid"`
-	FamilyGroup string    `json:"family_group"`
-	RegDate     time.Time `json:"reg_date"`
-	QueueNo     string    `json:"queue_no"`
-	Name        string    `json:"name"`
-	KhmerName   string    `json:"khmer_name"`
+	ID      int32     `json:"id"`
+	Vid     int32     `json:"vid"`
+	RegDate time.Time `json:"reg_date"`
+	QueueNo string    `json:"queue_no"`
 }
 
 func (q *Queries) GetLatestAdmin(ctx context.Context, id int32) (GetLatestAdminRow, error) {
@@ -471,11 +449,8 @@ func (q *Queries) GetLatestAdmin(ctx context.Context, id int32) (GetLatestAdminR
 	err := row.Scan(
 		&i.ID,
 		&i.Vid,
-		&i.FamilyGroup,
 		&i.RegDate,
 		&i.QueueNo,
-		&i.Name,
-		&i.KhmerName,
 	)
 	return i, err
 }
@@ -537,19 +512,52 @@ func (q *Queries) GetPastMedicalHistory(ctx context.Context, arg GetPastMedicalH
 	return i, err
 }
 
+const getPatient = `-- name: GetPatient :one
+
+SELECT id,
+       name,
+       family_group,
+       khmer_name,
+       dob,
+       gender,
+       village,
+       contact_no,
+       drug_allergies
+FROM patient_details
+WHERE id = $1
+`
+
+// Patient --------------------------------------------------------------------
+func (q *Queries) GetPatient(ctx context.Context, id int32) (PatientDetail, error) {
+	row := q.db.QueryRow(ctx, getPatient, id)
+	var i PatientDetail
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.FamilyGroup,
+		&i.KhmerName,
+		&i.Dob,
+		&i.Gender,
+		&i.Village,
+		&i.ContactNo,
+		&i.DrugAllergies,
+	)
+	return i, err
+}
+
 const getPatientVisitMetaByDate = `-- name: GetPatientVisitMetaByDate :many
 SELECT DISTINCT ON (a.id)
   a.id,
   a.vid,
-  a.family_group,
+  p.family_group,
   a.reg_date,
   a.queue_no,
-  a.name,
-  a.khmer_name,
-  a.gender,
-  a.village,
-  a.contact_no,
-  a.drug_allergies,
+  p.name,
+  p.khmer_name,
+  p.gender,
+  p.village,
+  p.contact_no,
+  p.drug_allergies,
   a.sent_to_id,
   dc.referral_needed,
   EXISTS (
@@ -584,6 +592,7 @@ SELECT DISTINCT ON (a.id)
       AND pr.is_dispensed = TRUE
   ) AS prescription_dispensed
 FROM admin a
+JOIN patient_details p ON p.id = a.id
 LEFT JOIN doctors_consultation dc
   ON a.id = dc.id AND a.vid = dc.vid
 WHERE a.reg_date = $1
@@ -656,15 +665,15 @@ WITH LatestDates AS (
 SELECT DISTINCT ON (a.id)
   a.id,
   a.vid,
-  a.family_group,
+  p.family_group,
   a.reg_date,
   a.queue_no,
-  a.name,
-  a.khmer_name,
-  a.gender,
-  a.village,
-  a.contact_no,
-  a.drug_allergies,
+  p.name,
+  p.khmer_name,
+  p.gender,
+  p.village,
+  p.contact_no,
+  p.drug_allergies,
   a.sent_to_id,
   dc.referral_needed,
   EXISTS (
@@ -699,6 +708,7 @@ SELECT DISTINCT ON (a.id)
       AND pr.is_dispensed = TRUE
   ) AS prescription_dispensed
 FROM admin a
+JOIN patient_details p ON p.id = a.id
 LEFT JOIN doctors_consultation dc
   ON a.id = dc.id AND a.vid = dc.vid
 INNER JOIN LatestDates ld
@@ -926,103 +936,66 @@ func (q *Queries) GetVitalStatistics(ctx context.Context, arg GetVitalStatistics
 }
 
 const insertPatient = `-- name: InsertPatient :one
-INSERT INTO admin (
-  family_group,
-  reg_date,
-  queue_no,
+INSERT INTO patient_details (
   name,
+  family_group,
   khmer_name,
   dob,
   gender,
   village,
   contact_no,
-  pregnant,
-  last_menstrual_period,
-  drug_allergies,
-  sent_to_id
+  drug_allergies
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
-)
-RETURNING id, vid
+  $1, $2, $3, $4, $5, $6, $7, $8
+) RETURNING id
 `
 
 type InsertPatientParams struct {
-	FamilyGroup         string     `json:"family_group"`
-	RegDate             time.Time  `json:"reg_date"`
-	QueueNo             string     `json:"queue_no"`
-	Name                string     `json:"name"`
-	KhmerName           string     `json:"khmer_name"`
-	Dob                 time.Time  `json:"dob"`
-	Gender              string     `json:"gender"`
-	Village             string     `json:"village"`
-	ContactNo           string     `json:"contact_no"`
-	Pregnant            bool       `json:"pregnant"`
-	LastMenstrualPeriod *time.Time `json:"last_menstrual_period"`
-	DrugAllergies       *string    `json:"drug_allergies"`
-	SentToID            bool       `json:"sent_to_id"`
+	Name          string    `json:"name"`
+	FamilyGroup   string    `json:"family_group"`
+	KhmerName     string    `json:"khmer_name"`
+	Dob           time.Time `json:"dob"`
+	Gender        string    `json:"gender"`
+	Village       string    `json:"village"`
+	ContactNo     string    `json:"contact_no"`
+	DrugAllergies *string   `json:"drug_allergies"`
 }
 
-type InsertPatientRow struct {
-	ID  int32 `json:"id"`
-	Vid int32 `json:"vid"`
-}
-
-func (q *Queries) InsertPatient(ctx context.Context, arg InsertPatientParams) (InsertPatientRow, error) {
+func (q *Queries) InsertPatient(ctx context.Context, arg InsertPatientParams) (int32, error) {
 	row := q.db.QueryRow(ctx, insertPatient,
-		arg.FamilyGroup,
-		arg.RegDate,
-		arg.QueueNo,
 		arg.Name,
+		arg.FamilyGroup,
 		arg.KhmerName,
 		arg.Dob,
 		arg.Gender,
 		arg.Village,
 		arg.ContactNo,
-		arg.Pregnant,
-		arg.LastMenstrualPeriod,
 		arg.DrugAllergies,
-		arg.SentToID,
 	)
-	var i InsertPatientRow
-	err := row.Scan(&i.ID, &i.Vid)
-	return i, err
+	var id int32
+	err := row.Scan(&id)
+	return id, err
 }
 
 const insertPatientVisit = `-- name: InsertPatientVisit :one
 INSERT INTO admin (
   id,
-  family_group,
   reg_date,
   queue_no,
-  name,
-  khmer_name,
-  dob,
-  gender,
-  village,
-  contact_no,
   pregnant,
   last_menstrual_period,
-  drug_allergies,
   sent_to_id
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+  $1, $2, $3, $4, $5, $6
 ) RETURNING id, vid
 `
 
 type InsertPatientVisitParams struct {
 	ID                  int32      `json:"id"`
-	FamilyGroup         string     `json:"family_group"`
 	RegDate             time.Time  `json:"reg_date"`
 	QueueNo             string     `json:"queue_no"`
-	Name                string     `json:"name"`
-	KhmerName           string     `json:"khmer_name"`
-	Dob                 time.Time  `json:"dob"`
-	Gender              string     `json:"gender"`
-	Village             string     `json:"village"`
-	ContactNo           string     `json:"contact_no"`
 	Pregnant            bool       `json:"pregnant"`
 	LastMenstrualPeriod *time.Time `json:"last_menstrual_period"`
-	DrugAllergies       *string    `json:"drug_allergies"`
 	SentToID            bool       `json:"sent_to_id"`
 }
 
@@ -1034,18 +1007,10 @@ type InsertPatientVisitRow struct {
 func (q *Queries) InsertPatientVisit(ctx context.Context, arg InsertPatientVisitParams) (InsertPatientVisitRow, error) {
 	row := q.db.QueryRow(ctx, insertPatientVisit,
 		arg.ID,
-		arg.FamilyGroup,
 		arg.RegDate,
 		arg.QueueNo,
-		arg.Name,
-		arg.KhmerName,
-		arg.Dob,
-		arg.Gender,
-		arg.Village,
-		arg.ContactNo,
 		arg.Pregnant,
 		arg.LastMenstrualPeriod,
-		arg.DrugAllergies,
 		arg.SentToID,
 	)
 	var i InsertPatientVisitRow
@@ -1087,36 +1052,20 @@ func (q *Queries) ListAdminVisits(ctx context.Context, id int32) ([]ListAdminVis
 
 const updateAdmin = `-- name: UpdateAdmin :exec
 UPDATE admin
-SET family_group         = $1,
-    reg_date             = $2,
-    queue_no             = $3,
-    name                 = $4,
-    khmer_name           = $5,
-    dob                  = $6,
-    gender               = $7,
-    village              = $8,
-    contact_no           = $9,
-    pregnant             = $10,
-    last_menstrual_period = $11,
-    drug_allergies       = $12,
-    sent_to_id           = $13
-WHERE id = $14
-  AND vid = $15
+SET reg_date              = $1,
+    queue_no              = $2,
+    pregnant              = $3,
+    last_menstrual_period = $4,
+    sent_to_id            = $5
+WHERE id = $6
+  AND vid = $7
 `
 
 type UpdateAdminParams struct {
-	FamilyGroup         string     `json:"family_group"`
 	RegDate             time.Time  `json:"reg_date"`
 	QueueNo             string     `json:"queue_no"`
-	Name                string     `json:"name"`
-	KhmerName           string     `json:"khmer_name"`
-	Dob                 time.Time  `json:"dob"`
-	Gender              string     `json:"gender"`
-	Village             string     `json:"village"`
-	ContactNo           string     `json:"contact_no"`
 	Pregnant            bool       `json:"pregnant"`
 	LastMenstrualPeriod *time.Time `json:"last_menstrual_period"`
-	DrugAllergies       *string    `json:"drug_allergies"`
 	SentToID            bool       `json:"sent_to_id"`
 	ID                  int32      `json:"id"`
 	Vid                 int32      `json:"vid"`
@@ -1124,21 +1073,53 @@ type UpdateAdminParams struct {
 
 func (q *Queries) UpdateAdmin(ctx context.Context, arg UpdateAdminParams) error {
 	_, err := q.db.Exec(ctx, updateAdmin,
-		arg.FamilyGroup,
 		arg.RegDate,
 		arg.QueueNo,
+		arg.Pregnant,
+		arg.LastMenstrualPeriod,
+		arg.SentToID,
+		arg.ID,
+		arg.Vid,
+	)
+	return err
+}
+
+const updatePatient = `-- name: UpdatePatient :exec
+UPDATE patient_details
+SET name           = $1,
+    family_group   = $2,
+    khmer_name     = $3,
+    dob            = $4,
+    gender         = $5,
+    village        = $6,
+    contact_no     = $7,
+    drug_allergies = $8
+WHERE id = $9
+`
+
+type UpdatePatientParams struct {
+	Name          string    `json:"name"`
+	FamilyGroup   string    `json:"family_group"`
+	KhmerName     string    `json:"khmer_name"`
+	Dob           time.Time `json:"dob"`
+	Gender        string    `json:"gender"`
+	Village       string    `json:"village"`
+	ContactNo     string    `json:"contact_no"`
+	DrugAllergies *string   `json:"drug_allergies"`
+	ID            int32     `json:"id"`
+}
+
+func (q *Queries) UpdatePatient(ctx context.Context, arg UpdatePatientParams) error {
+	_, err := q.db.Exec(ctx, updatePatient,
 		arg.Name,
+		arg.FamilyGroup,
 		arg.KhmerName,
 		arg.Dob,
 		arg.Gender,
 		arg.Village,
 		arg.ContactNo,
-		arg.Pregnant,
-		arg.LastMenstrualPeriod,
 		arg.DrugAllergies,
-		arg.SentToID,
 		arg.ID,
-		arg.Vid,
 	)
 	return err
 }

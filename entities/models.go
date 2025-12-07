@@ -9,6 +9,7 @@ import (
 
 // Aggregated patient view returned by APIs.
 type Patient struct {
+	PatientDetails      *db.PatientDetail       `json:"patientdetails"`
 	Admin               *db.Admin               `json:"admin"`
 	PastMedicalHistory  *db.PastMedicalHistory  `json:"past_medical_history"`
 	SocialHistory       *db.SocialHistory       `json:"social_history"`
@@ -112,7 +113,9 @@ type LoginPayload struct {
 
 type PatientUseCase interface {
 	GetPatientVisit(ctx context.Context, id int32, vid int32) (*Patient, error)
-	CreatePatient(ctx context.Context, admin *db.Admin) (int32, error)
+	CreatePatient(ctx context.Context, patient *db.PatientDetail) (int32, error)
+	UpdatePatient(ctx context.Context, id int32, patient *db.PatientDetail) error
+	DeletePatient(ctx context.Context, id int32) error
 	CreatePatientVisit(ctx context.Context, id int32, admin *db.Admin) (int32, error)
 	DeletePatientVisit(ctx context.Context, id int32, vid int32) error
 	UpdatePatientVisit(ctx context.Context, id int32, vid int32, patient *Patient) error
@@ -122,7 +125,9 @@ type PatientUseCase interface {
 
 type PatientRepository interface {
 	GetPatientVisit(ctx context.Context, id int32, vid int32) (*Patient, error)
-	CreatePatient(ctx context.Context, admin *db.Admin) (int32, error)
+	CreatePatient(ctx context.Context, patient *db.PatientDetail) (int32, error)
+	UpdatePatient(ctx context.Context, id int32, patient *db.PatientDetail) error
+	DeletePatient(ctx context.Context, id int32) error
 	CreatePatientVisit(ctx context.Context, id int32, admin *db.Admin) (int32, error)
 	DeletePatientVisit(ctx context.Context, id int32, vid int32) error
 	UpdatePatientVisit(ctx context.Context, id int32, vid int32, patient *Patient) error
