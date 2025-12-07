@@ -86,6 +86,74 @@ func displayLabel(d entities.Drug) string {
 	return base
 }
 
+// findFirstEmptyBackwards finds the first empty spot going backwards from startCode down to minCode (inclusive).
+// Returns the empty spot or minCode if no gap found.
+func findFirstEmptyBackwards(ctx context.Context, tx *sql.Tx, startCode, minCode int64) (int64, error) {
+	var firstEmpty sql.NullInt64
+	err := tx.QueryRowContext(ctx, `
+		SELECT MAX(series_value)
+		FROM generate_series($1::INTEGER, $2::INTEGER) AS series_value
+		WHERE NOT EXISTS (
+			SELECT 1 FROM drugs WHERE drug_code = series_value
+		)
+	`, minCode, startCode).Scan(&firstEmpty)
+	if err != nil {
+		return 0, err
+	}
+
+	if firstEmpty.Valid {
+		return firstEmpty.Int64, nil
+	}
+
+	// No gap found, return minCode
+	return minCode, nil
+}
+
+// findFirstEmptyForwards finds the first empty spot going forwards from startCode up to maxCode (inclusive).
+// Returns the empty spot or maxCode if no gap found.
+func findFirstEmptyForwards(ctx context.Context, tx *sql.Tx, startCode, maxCode int64) (int64, error) {
+	var firstEmpty sql.NullInt64
+	err := tx.QueryRowContext(ctx, `
+		SELECT MIN(series_value)
+		FROM generate_series($1::INTEGER, $2::INTEGER) AS series_value
+		WHERE NOT EXISTS (
+			SELECT 1 FROM drugs WHERE drug_code = series_value
+		)
+	`, startCode, maxCode).Scan(&firstEmpty)
+	if err != nil {
+		return 0, err
+	}
+
+	if firstEmpty.Valid {
+		return firstEmpty.Int64, nil
+	}
+
+	// No gap found, return maxCode
+	return maxCode, nil
+}
+
+// findFirstEmptyDrugCode finds the first available drug_code starting from startCode.
+// Returns startCode if it's available, otherwise finds the next gap.
+func findFirstEmptyDrugCode(ctx context.Context, tx *sql.Tx, startCode int64) (int64, error) {
+
+	// Find the maximum existing drug_code
+	var maxCode sql.NullInt64
+	err := tx.QueryRowContext(ctx, `
+		SELECT MAX(drug_code) FROM drugs WHERE drug_code IS NOT NULL
+	`).Scan(&maxCode)
+	if err != nil {
+		return 0, err
+	}
+
+	// If no codes exist or startCode is beyond max, startCode is available
+	if !maxCode.Valid || startCode > maxCode.Int64 {
+		return startCode, nil
+	}
+
+	return findFirstEmptyForwards(ctx, tx, startCode, maxCode.Int64+1)
+
+}
+
 func derefFloat(p *float64) float64 {
 	if p == nil {
 		return 0
@@ -197,13 +265,18 @@ func (r *postgresPharmacyRepository) CreateDrug(ctx context.Context, d *entities
 	}
 
 	if d.DrugCode != nil {
+		// Find the first empty spot starting from the requested code
+		firstEmptySpot, err := findFirstEmptyDrugCode(ctx, tx, *d.DrugCode)
+		if err != nil {
+			return nil, fmt.Errorf("failed to find empty drug code: %w", err)
+		}
 
-		// Increment all rows with code > new_code by 1
-		_, err := tx.ExecContext(ctx, `
+		// If the first empty spot is greater than requested code, shift codes to make room
+		_, err = tx.ExecContext(ctx, `
 			UPDATE drugs
 			SET drug_code = drug_code + 1
-			WHERE drug_code >= $1
-		`, d.DrugCode)
+			WHERE drug_code >= $1 AND drug_code < $2
+		`, *d.DrugCode, firstEmptySpot)
 		if err != nil {
 			return nil, fmt.Errorf("failed to shift drug codes: %w", err)
 		}
@@ -301,6 +374,87 @@ func (r *postgresPharmacyRepository) UpdateDrug(ctx context.Context, d *entities
 		if prescriptionCount > 0 {
 			return nil, fmt.Errorf("cannot modify drug properties (strength, dispense unit, piece content) because this drug is already used in %d prescription(s). Only safe fields (name, drug code, dosage form, route, notes, barcode, active status, display percentage) can be edited", prescriptionCount)
 		}
+	}
+
+	// Handle drug_code shifting
+	oldCode := currentDrug.DrugCode
+	newCode := d.DrugCode
+
+	if oldCode == nil && newCode != nil {
+		// Case 1: Creating a code (previously no code) - follow create logic
+		firstEmptySpot, err := findFirstEmptyDrugCode(ctx, tx, *newCode)
+		if err != nil {
+			return nil, fmt.Errorf("failed to find empty drug code: %w", err)
+		}
+
+		if firstEmptySpot > *newCode {
+			_, err = tx.ExecContext(ctx, `
+				UPDATE drugs
+				SET drug_code = drug_code + 1
+				WHERE drug_code >= $1 AND drug_code < $2
+				AND id != $3
+			`, *newCode, firstEmptySpot, d.ID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to shift drug codes: %w", err)
+			}
+		}
+
+	} else if oldCode != nil && newCode == nil {
+		// Case 2: Deleting a code - decrement all codes after old_code (pull up all till the end)
+		_, err = tx.ExecContext(ctx, `
+			UPDATE drugs
+			SET drug_code = drug_code - 1
+			WHERE drug_code > $1
+			AND id != $2
+		`, *oldCode, d.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to shift drug codes: %w", err)
+		}
+
+	} else if oldCode != nil && newCode != nil && *oldCode != *newCode {
+		if *newCode > *oldCode {
+			// Case 3: Increasing code - decrement codes from new_code backwards until empty spot or old_code
+			// Find first empty spot going backwards from new_code to old_code
+			firstEmpty, err := findFirstEmptyBackwards(ctx, tx, *newCode, *oldCode)
+			if err != nil {
+				return nil, fmt.Errorf("failed to find empty spot backwards: %w", err)
+			}
+
+			// Decrement all codes in range (firstEmpty, newCode] down by 1
+			if firstEmpty < *newCode {
+				_, err = tx.ExecContext(ctx, `
+					UPDATE drugs
+					SET drug_code = drug_code - 1
+					WHERE drug_code > $1 AND drug_code <= $2
+					AND id != $3
+				`, firstEmpty, *newCode, d.ID)
+				if err != nil {
+					return nil, fmt.Errorf("failed to shift drug codes: %w", err)
+				}
+			}
+
+		} else if *newCode < *oldCode {
+			// Case 2: Decreasing code - increment codes from new_code forwards until empty spot or old_code
+			// Find first empty spot going forwards from new_code to old_code
+			firstEmpty, err := findFirstEmptyForwards(ctx, tx, *newCode, *oldCode)
+			if err != nil {
+				return nil, fmt.Errorf("failed to find empty spot forwards: %w", err)
+			}
+
+			// Increment all codes in range [newCode, firstEmpty) up by 1
+			if firstEmpty > *newCode {
+				_, err = tx.ExecContext(ctx, `
+					UPDATE drugs
+					SET drug_code = drug_code + 1
+					WHERE drug_code >= $1 AND drug_code < $2
+					AND id != $3
+				`, *newCode, firstEmpty, d.ID)
+				if err != nil {
+					return nil, fmt.Errorf("failed to shift drug codes: %w", err)
+				}
+			}
+		}
+		// If oldCode == newCode, no shifting needed
 	}
 
 	res, err := tx.ExecContext(ctx, qDrugUpdate,
