@@ -52,7 +52,7 @@ INSERT INTO frequency_codes (code, label, schedule_kind, every_n, frequency_per_
   ('TDS', '3 times a day',       'day',  1, 3),
   ('QDS', '4 times a day',       'day',  1, 4),
   ('EOD', 'Every other day',     'day',  2, 1),
-  ('q5h', 'Every 5 hours',       'hour', 5, 1),
+  ('q4h', 'Every 4 hours',       'hour', 4, 1),
   ('q6h', 'Every 6 hours',       'hour', 6, 1),
   ('q8h', 'Every 8 hours',       'hour', 8, 1),
   ('q12h','Every 12 hours',      'hour', 12, 1);
