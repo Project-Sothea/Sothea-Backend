@@ -1,7 +1,0 @@
--- DROP TABLE IF EXISTS past_medical_history;
--- DROP TABLE IF EXISTS social_history;
--- DROP TABLE IF EXISTS vital_statistics;
--- DROP TABLE IF EXISTS height_and_weight;
--- DROP TABLE IF EXISTS visual_acuity;
--- DROP TABLE IF EXISTS doctors_consultation;
--- DROP TABLE IF EXISTS admin;
