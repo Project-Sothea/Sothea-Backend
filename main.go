@@ -1,16 +1,18 @@
 package main
 
 import (
-	"database/sql"
+	"context"
 	"log"
 	"strings"
 	"time"
 
+	_httpDelivery "sothea-backend/controllers"
+	_postgresRepository "sothea-backend/repository/postgres"
+	_useCase "sothea-backend/usecases"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	_httpDelivery "github.com/jieqiboh/sothea_backend/controllers"
-	_postgresRepository "github.com/jieqiboh/sothea_backend/repository/postgres"
-	_useCase "github.com/jieqiboh/sothea_backend/usecases"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 	"github.com/spf13/viper"
 )
@@ -23,28 +25,15 @@ func main() {
 	connStr := viper.GetString("DATABASE_URL")
 	secretKey := []byte(viper.GetString("SECRET_KEY"))
 
-	// Open a database connection
-	db, err := sql.Open("postgres", connStr)
+	pool, err := pgxpool.New(context.Background(), connStr)
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	// You might want to check the connection here to handle errors
-	err = db.Ping()
-	if err != nil {
-		log.Fatal("Database connection failed:", err)
-	}
-
-	defer func() {
-		err := db.Close()
-		if err != nil {
-			log.Fatal(err)
-		}
-	}()
+	defer pool.Close()
 
 	router := gin.Default()
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"*"}, // or specific origin
+		AllowOrigins:     []string{"*"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
@@ -53,32 +42,27 @@ func main() {
 	}))
 	router.Static("/app", "./dist")
 
-	// Root router group for all public API endpoints
 	api := router.Group("/api")
 
-	patientRepo := _postgresRepository.NewPostgresPatientRepository(db)
-	// Set up login routes
+	patientRepo := _postgresRepository.NewPostgresPatientRepository(pool)
 	loginUseCase := _useCase.NewLoginUseCase(patientRepo, 30*time.Second, secretKey)
 	_httpDelivery.NewLoginHandler(api, loginUseCase, secretKey)
 
-	// Set up patient routes
 	patientUseCase := _useCase.NewPatientUsecase(patientRepo, 30*time.Second)
 	_httpDelivery.NewPatientHandler(api, patientUseCase, secretKey)
 
-	pharmacyRepo := _postgresRepository.NewPostgresPharmacyRepository(db)
+	pharmacyRepo := _postgresRepository.NewPostgresPharmacyRepository(pool)
 	pharmacyUseCase := _useCase.NewPharmacyUsecase(pharmacyRepo, 30*time.Second)
-	_httpDelivery.NewPharmacyHandler(api, pharmacyUseCase, secretKey, db)
+	_httpDelivery.NewPharmacyHandler(api, pharmacyUseCase, secretKey, pool)
 
-	prescriptionRepo := _postgresRepository.NewPostgresPrescriptionRepository(db)
+	prescriptionRepo := _postgresRepository.NewPostgresPrescriptionRepository(pool)
 	prescriptionUseCase := _useCase.NewPrescriptionUsecase(prescriptionRepo, pharmacyRepo, 30*time.Second)
-	_httpDelivery.NewPrescriptionHandler(api, prescriptionUseCase, secretKey, db)
+	_httpDelivery.NewPrescriptionHandler(api, prescriptionUseCase, secretKey, pool)
 
 	router.NoRoute(func(c *gin.Context) {
-		// Only serve index.html for non-API requests
 		if !strings.HasPrefix(c.Request.URL.Path, "/api") {
 			c.File("./dist/index.html")
 		}
 	})
-
 	router.Run("0.0.0.0:" + port)
 }

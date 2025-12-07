@@ -1,13 +1,13 @@
 /*******************
     Drop the tables
 ********************/
-DROP TABLE IF EXISTS pastmedicalhistory;
-DROP TABLE IF EXISTS socialhistory;
-DROP TABLE IF EXISTS vitalstatistics;
-DROP TABLE IF EXISTS heightandweight;
-DROP TABLE IF EXISTS visualacuity;
-DROP TABLE IF EXISTS fallrisk;
-DROP TABLE IF EXISTS doctorsconsultation;
+DROP TABLE IF EXISTS past_medical_history;
+DROP TABLE IF EXISTS social_history;
+DROP TABLE IF EXISTS vital_statistics;
+DROP TABLE IF EXISTS height_and_weight;
+DROP TABLE IF EXISTS visual_acuity;
+DROP TABLE IF EXISTS fall_risk;
+DROP TABLE IF EXISTS doctors_consultation;
 DROP TABLE IF EXISTS admin;
 
 /*******************
@@ -23,19 +23,18 @@ CREATE TABLE IF NOT EXISTS admin
   queue_no              TEXT       NOT NULL,
   name                  TEXT       NOT NULL,
   khmer_name            TEXT       NOT NULL,
-  dob                   DATE,
-  age                   INTEGER,
+  dob                   DATE       NOT NULL,
   gender                VARCHAR(1) NOT NULL,
   village               TEXT       NOT NULL,
   contact_no            TEXT       NOT NULL,
   pregnant              BOOLEAN    NOT NULL,
-  last_menstrual_period Date,
+  last_menstrual_period DATE,
   drug_allergies        TEXT,
   sent_to_id            BOOLEAN    NOT NULL,
   PRIMARY KEY (id, vid)         -- Composite primary key
 );
 
-CREATE TABLE IF NOT EXISTS pastmedicalhistory
+CREATE TABLE IF NOT EXISTS past_medical_history
 (
     id                           INTEGER NOT NULL,                       -- Use INTEGER to match the id type from admin
     vid                          INTEGER NOT NULL,                       -- Add vid to match the vid type from admin
@@ -59,7 +58,7 @@ CREATE TABLE IF NOT EXISTS pastmedicalhistory
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
 );
 
-CREATE TABLE IF NOT EXISTS socialhistory
+CREATE TABLE IF NOT EXISTS social_history
 (
     id                      INTEGER NOT NULL,                            -- Use INTEGER to match the id type from admin
     vid                     INTEGER NOT NULL,                            -- Add vid to match the vid type from admin
@@ -73,7 +72,7 @@ CREATE TABLE IF NOT EXISTS socialhistory
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
 );
 
-CREATE TABLE IF NOT EXISTS vitalstatistics
+CREATE TABLE IF NOT EXISTS vital_statistics
 (
     id                        INTEGER       NOT NULL,                    -- Use INTEGER to match the id type from admin
     vid                       INTEGER       NOT NULL,                    -- Add vid to match the vid type from admin
@@ -88,13 +87,13 @@ CREATE TABLE IF NOT EXISTS vitalstatistics
     hr1                       NUMERIC(5, 1) NOT NULL,
     hr2                       NUMERIC(5, 1) NOT NULL,
     avg_hr                    NUMERIC(5, 1) NOT NULL,
-    rand_blood_glucose_mmoll  NUMERIC(5, 1),
+    rand_blood_glucose_mmol_l  NUMERIC(5, 1),
     icope_high_bp             BOOLEAN,
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
 );
 
-CREATE TABLE IF NOT EXISTS heightandweight
+CREATE TABLE IF NOT EXISTS height_and_weight
 (
     id           INTEGER       NOT NULL,                                 -- Use INTEGER to match the id type from admin
     vid          INTEGER       NOT NULL,                                 -- Add vid to match the vid type from admin
@@ -111,7 +110,7 @@ CREATE TABLE IF NOT EXISTS heightandweight
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
 );
 
-CREATE TABLE IF NOT EXISTS visualacuity
+CREATE TABLE IF NOT EXISTS visual_acuity
 (
     id                      INTEGER NOT NULL,                            -- Use INTEGER to match the id type from admin
     vid                     INTEGER NOT NULL,                            -- Add vid to match the vid type from admin
@@ -146,7 +145,7 @@ CREATE TABLE IF NOT EXISTS dental
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
 );
 
-CREATE TABLE IF NOT EXISTS fallrisk
+CREATE TABLE IF NOT EXISTS fall_risk
 (
     id           INTEGER       NOT NULL,                                 -- Use INTEGER to match the id type from admin
     vid          INTEGER       NOT NULL,                                 -- Add vid to match the vid type from admin
@@ -163,7 +162,7 @@ CREATE TABLE IF NOT EXISTS fallrisk
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
 );
 
-CREATE TABLE IF NOT EXISTS doctorsconsultation
+CREATE TABLE IF NOT EXISTS doctors_consultation
 (
     id                 INTEGER NOT NULL,                                 -- Use INTEGER to match the id type from admin
     vid                INTEGER NOT NULL,                                 -- Add vid to match the vid type from admin
@@ -246,7 +245,7 @@ VALUES ('S001', '2024-01-10', '1A', 'John Doe', '១២៣៤ ៥៦៧៨៩០
        ('S005A', '2024-01-10', '5C', 'Charlie Davis', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1982-01-10', 40, 'M', 'R1', '09876543', FALSE,
         NULL, NULL, FALSE);
 
-INSERT INTO pastmedicalhistory
+INSERT INTO past_medical_history
   (id, vid,
    cough, fever, blocked_nose, sore_throat, night_sweats, unintentional_weight_loss,
    tuberculosis, tuberculosis_has_been_treated,
@@ -260,7 +259,7 @@ VALUES
   (4, 1, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,  FALSE, FALSE, TRUE,  FALSE, TRUE,  FALSE,  TRUE,  'Syphilis', NULL),
   (5, 1, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,  FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, '','');
 
-INSERT INTO socialhistory (id, vid, past_smoking_history, no_of_years, current_smoking_history,
+INSERT INTO social_history (id, vid, past_smoking_history, no_of_years, current_smoking_history,
                            cigarettes_per_day, alcohol_history, how_regular)
 VALUES (1, 1, TRUE, 15, FALSE, NULL, TRUE, 'A'),
        (2, 1, FALSE, NULL, TRUE, 10, TRUE, 'D'),
@@ -268,14 +267,14 @@ VALUES (1, 1, TRUE, 15, FALSE, NULL, TRUE, 'A'),
        (4, 1, TRUE, 10, FALSE, NULL, TRUE, 'B'),
        (5, 1, FALSE, NULL, FALSE, NULL, FALSE, NULL);
 
-INSERT INTO vitalstatistics (id, vid, temperature, spo2, systolic_bp1, diastolic_bp1, systolic_bp2, diastolic_bp2,
-                             avg_systolic_bp, avg_diastolic_bp, hr1, hr2, avg_hr, rand_blood_glucose_mmoll, icope_high_bp)
+INSERT INTO vital_statistics (id, vid, temperature, spo2, systolic_bp1, diastolic_bp1, systolic_bp2, diastolic_bp2,
+                             avg_systolic_bp, avg_diastolic_bp, hr1, hr2, avg_hr, rand_blood_glucose_mmol_l, icope_high_bp)
 VALUES (1, 1, 36.5, 98, 120, 80, 122, 78, 121, 79, 72, 71, 71.5, 5.4, FALSE),
        (2, 1, 37.0, 97, 130, 85, 128, 82, 129, 83, 68, 70, 69, 5.7, TRUE),
        (3, 1, 36.8, 99, 118, 78, 120, 76, 119, 77, 75, 76, 75.5, 5.6, TRUE),
        (4, 1, 36.7, 98, 125, 82, 124, 80, 124.5, 81, 70, 72, 71, 5.3, FALSE);
 
-INSERT INTO heightandweight
+INSERT INTO height_and_weight
   (id, vid, height, weight, bmi, bmi_analysis, paeds_height, paeds_weight,
    icope_lost_weight_past_months, icope_no_desire_to_eat)
 VALUES
@@ -283,14 +282,14 @@ VALUES
   (2, 1, 165, 55, 20.2, 'normal weight', 95, 90, FALSE, FALSE),
   (3, 1, 180, 85, 26.2, 'overweight',     80, 95, FALSE, FALSE);
 
-INSERT INTO visualacuity
+INSERT INTO visual_acuity
   (id, vid, l_eye_vision, r_eye_vision, additional_intervention,
    sent_to_opto, referred_for_glasses, icope_eye_problem, icope_treated_for_diabetes_or_bp)
 VALUES
   (1, 1, 20, 20, 'VISUAL FIELD TEST REQUIRED', FALSE, FALSE, FALSE, FALSE),
   (2, 1, 15, 20, 'REFERRED TO BOC',            FALSE, FALSE, FALSE, FALSE);
 
-INSERT INTO fallrisk
+INSERT INTO fall_risk
   (id, vid,
    side_to_side_balance, semi_tandem_balance, tandem_balance,
    gait_speed_test, chair_stand_test, fall_risk_score,
@@ -320,7 +319,7 @@ VALUES
    'None');
 
 
-INSERT INTO doctorsconsultation (id, vid, well, msk, cvs, respi, gu, git, eye, derm, others,
+INSERT INTO doctors_consultation (id, vid, well, msk, cvs, respi, gu, git, eye, derm, others,
                                  consultation_notes, diagnosis, treatment, referral_needed,
                                  referral_loc, remarks)
 VALUES (1, 1, TRUE, FALSE, FALSE, TRUE, TRUE, FALSE, TRUE, FALSE, 'LEUKAEMIA',
@@ -362,7 +361,7 @@ VALUES (2, 'B009', '2023-10-03', 'Q125', 'Walter White', 'អាលីស ស្
     Add remaining categories for second visit for patient 1 and 2
  */
 
-INSERT INTO pastmedicalhistory
+INSERT INTO past_medical_history
   (id, vid,
    cough, fever, blocked_nose, sore_throat, night_sweats, unintentional_weight_loss,
    tuberculosis, tuberculosis_has_been_treated,
@@ -373,37 +372,37 @@ VALUES
   (1, 2, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE,  FALSE, FALSE, TRUE,  FALSE, FALSE, TRUE,  TRUE, 'TRICHOMONAS', 'None'),
   (2, 2, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE,  TRUE,  TRUE,  FALSE, FALSE, FALSE, '', 'CHILDHOOD LEUKAEMIA');
 
-INSERT INTO socialhistory (id, vid, past_smoking_history, no_of_years, current_smoking_history,
+INSERT INTO social_history (id, vid, past_smoking_history, no_of_years, current_smoking_history,
                            cigarettes_per_day, alcohol_history, how_regular)
 VALUES (1, 2, TRUE, 15, FALSE, NULL, TRUE, 'A'),
        (2, 2, FALSE, NULL, TRUE, 10, TRUE, 'D');
 
-INSERT INTO vitalstatistics (id, vid, temperature, spo2, systolic_bp1, diastolic_bp1, systolic_bp2, diastolic_bp2,
-                             avg_systolic_bp, avg_diastolic_bp, hr1, hr2, avg_hr, rand_blood_glucose_mmoll, icope_high_bp)
+INSERT INTO vital_statistics (id, vid, temperature, spo2, systolic_bp1, diastolic_bp1, systolic_bp2, diastolic_bp2,
+                             avg_systolic_bp, avg_diastolic_bp, hr1, hr2, avg_hr, rand_blood_glucose_mmol_l, icope_high_bp)
 VALUES (1, 2, 36.5, 98, 120, 80, 122, 78, 121, 79, 72, 71, 71.5, 5.4, TRUE),
        (2, 2, 37.0, 97, 130, 85, 128, 82, 129, 83, 68, 70, 69, 5.7, FALSE);
 
-INSERT INTO heightandweight
+INSERT INTO height_and_weight
   (id, vid, height, weight, bmi, bmi_analysis, paeds_height, paeds_weight,
    icope_lost_weight_past_months, icope_no_desire_to_eat)
 VALUES
   (1, 2, 170, 70, 24.2, 'normal weight', 90, 80, FALSE, FALSE),
   (2, 2, 165, 55, 20.2, 'normal weight', 95, 90, FALSE, FALSE);
 
-INSERT INTO visualacuity
+INSERT INTO visual_acuity
   (id, vid, l_eye_vision, r_eye_vision, additional_intervention,
    sent_to_opto, referred_for_glasses, icope_eye_problem, icope_treated_for_diabetes_or_bp)
 VALUES
   (1, 2, 20, 20, 'VISUAL FIELD TEST REQUIRED', FALSE, FALSE, FALSE, FALSE),
   (2, 2, 15, 20, 'REFERRED TO BOC',            FALSE, FALSE, FALSE, FALSE);
 
-INSERT INTO doctorsconsultation (id, vid, well, msk, cvs, respi, gu, git, eye, derm, others,
+INSERT INTO doctors_consultation (id, vid, well, msk, cvs, respi, gu, git, eye, derm, others,
                                  consultation_notes, diagnosis, treatment, referral_needed,
                                  referral_loc, remarks)
 VALUES (1, 2, TRUE, FALSE, FALSE, TRUE, TRUE, FALSE, TRUE, FALSE, 'others',
         'CHEST PAIN, SHORTNESS OF BREATH, COUGH', 'ACUTE BRONCHITIS',
         'REST, HYDRATION, COUGH SYRUP', TRUE, NULL, 'MONITOR FOR RESOLUTION');
-INSERT INTO doctorsconsultation (id, vid, well, msk, cvs, respi, gu, git, eye, derm, others,
+INSERT INTO doctors_consultation (id, vid, well, msk, cvs, respi, gu, git, eye, derm, others,
                                  consultation_notes, diagnosis, treatment, referral_needed,
                                  referral_loc, remarks)
 VALUES (2, 2, TRUE, FALSE, FALSE, TRUE, TRUE, FALSE, TRUE, FALSE, 'LEUKAEMIA',

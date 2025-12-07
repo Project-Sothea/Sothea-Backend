@@ -3,12 +3,12 @@
 -- /*******************
 --     Drop the tables
 -- ********************/
--- DROP TABLE IF EXISTS pastmedicalhistory;
--- DROP TABLE IF EXISTS socialhistory;
--- DROP TABLE IF EXISTS vitalstatistics;
--- DROP TABLE IF EXISTS heightandweight;
--- DROP TABLE IF EXISTS visualacuity;
--- DROP TABLE IF EXISTS doctorsconsultation;
+-- DROP TABLE IF EXISTS past_medical_history;
+-- DROP TABLE IF EXISTS social_history;
+-- DROP TABLE IF EXISTS vital_statistics;
+-- DROP TABLE IF EXISTS height_and_weight;
+-- DROP TABLE IF EXISTS visual_acuity;
+-- DROP TABLE IF EXISTS doctors_consultation;
 -- DROP TABLE IF EXISTS admin;
 -- DROP TABLE IF EXISTS users;
 --
@@ -38,7 +38,7 @@
 --     PRIMARY KEY (id, vid)         -- Composite primary key
 -- );
 --
--- CREATE TABLE IF NOT EXISTS pastmedicalhistory
+-- CREATE TABLE IF NOT EXISTS past_medical_history
 -- (
 --     id                           INTEGER NOT NULL,                       -- Use INTEGER to match the id type from admin
 --     vid                          INTEGER NOT NULL,                       -- Add vid to match the vid type from admin
@@ -55,7 +55,7 @@
 --     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
 -- );
 --
--- CREATE TABLE IF NOT EXISTS socialhistory
+-- CREATE TABLE IF NOT EXISTS social_history
 -- (
 --     id                      INTEGER NOT NULL,                            -- Use INTEGER to match the id type from admin
 --     vid                     INTEGER NOT NULL,                            -- Add vid to match the vid type from admin
@@ -69,7 +69,7 @@
 --     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
 -- );
 --
--- CREATE TABLE IF NOT EXISTS vitalstatistics
+-- CREATE TABLE IF NOT EXISTS vital_statistics
 -- (
 --     id                        INTEGER       NOT NULL,                    -- Use INTEGER to match the id type from admin
 --     vid                       INTEGER       NOT NULL,                    -- Add vid to match the vid type from admin
@@ -84,12 +84,12 @@
 --     hr1                       NUMERIC(5, 1) NOT NULL,
 --     hr2                       NUMERIC(5, 1) NOT NULL,
 --     avg_hr                    NUMERIC(5, 1) NOT NULL,
---     rand_blood_glucose_mmoll  NUMERIC(5, 1) NOT NULL,
+--     rand_blood_glucose_mmol_l  NUMERIC(5, 1) NOT NULL,
 --     PRIMARY KEY (id, vid),                                               -- Composite primary key
 --     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
 -- );
 --
--- CREATE TABLE IF NOT EXISTS heightandweight
+-- CREATE TABLE IF NOT EXISTS height_and_weight
 -- (
 --     id           INTEGER       NOT NULL,                                 -- Use INTEGER to match the id type from admin
 --     vid          INTEGER       NOT NULL,                                 -- Add vid to match the vid type from admin
@@ -103,7 +103,7 @@
 --     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
 -- );
 --
--- CREATE TABLE IF NOT EXISTS visualacuity
+-- CREATE TABLE IF NOT EXISTS visual_acuity
 -- (
 --     id                      INTEGER NOT NULL,                            -- Use INTEGER to match the id type from admin
 --     vid                     INTEGER NOT NULL,                            -- Add vid to match the vid type from admin
@@ -114,7 +114,7 @@
 --     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
 -- );
 --
--- CREATE TABLE IF NOT EXISTS doctorsconsultation
+-- CREATE TABLE IF NOT EXISTS doctors_consultation
 -- (
 --     id                 INTEGER NOT NULL,                                 -- Use INTEGER to match the id type from admin
 --     vid                INTEGER NOT NULL,                                 -- Add vid to match the vid type from admin

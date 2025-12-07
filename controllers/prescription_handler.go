@@ -1,14 +1,15 @@
 package controllers
 
 import (
-	"database/sql"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/jieqiboh/sothea_backend/controllers/middleware"
-	"github.com/jieqiboh/sothea_backend/entities"
+	"sothea-backend/controllers/middleware"
+	"sothea-backend/entities"
+	db "sothea-backend/repository/sqlc"
 )
 
 // -----------------------------------------------------------------------------
@@ -19,12 +20,12 @@ type PrescriptionHandler struct {
 	Usecase entities.PrescriptionUseCase
 }
 
-func NewPrescriptionHandler(r gin.IRouter, uc entities.PrescriptionUseCase, secretKey []byte, db *sql.DB) {
+func NewPrescriptionHandler(r gin.IRouter, uc entities.PrescriptionUseCase, secretKey []byte, pool *pgxpool.Pool) {
 	h := &PrescriptionHandler{Usecase: uc}
 
 	grp := r.Group("/prescriptions")
 	grp.Use(middleware.AuthRequired(secretKey))
-	grp.Use(middleware.WithTx(db))
+	grp.Use(middleware.WithTx(pool))
 
 	// Header CRUD
 	grp.GET("", h.ListPrescriptions)
@@ -169,16 +170,18 @@ func (h *PrescriptionHandler) AddLine(c *gin.Context) {
 	}
 
 	line := entities.PrescriptionLine{
-		PrescriptionID: prescriptionID,
-		DrugID:         req.DrugID,
-		Remarks:        req.Remarks,
-		Prn:            req.Prn,
-		DoseAmount:     req.DoseAmount,
-		DoseUnit:       req.DoseUnit,
-		FrequencyCode:  req.FrequencyCode,
-		// schedule fields are derived from frequencyCode in DB trigger
-		Duration:     req.Duration,
-		DurationUnit: req.DurationUnit,
+		PrescriptionLine: db.PrescriptionLine{
+			PrescriptionID: prescriptionID,
+			DrugID:         req.DrugID,
+			Remarks:        req.Remarks,
+			Prn:            req.Prn,
+			DoseAmount:     req.DoseAmount,
+			DoseUnit:       req.DoseUnit,
+			FrequencyCode:  req.FrequencyCode,
+			// schedule fields are derived from frequencyCode in DB trigger
+			Duration:     req.Duration,
+			DurationUnit: req.DurationUnit,
+		},
 	}
 
 	ctx := c.Request.Context()
@@ -204,16 +207,18 @@ func (h *PrescriptionHandler) UpdateLine(c *gin.Context) {
 	}
 
 	line := entities.PrescriptionLine{
-		ID:            lineID,
-		DrugID:        req.DrugID,
-		Remarks:       req.Remarks,
-		Prn:           req.Prn,
-		DoseAmount:    req.DoseAmount,
-		DoseUnit:      req.DoseUnit,
-		FrequencyCode: req.FrequencyCode,
-		// schedule fields are derived from frequencyCode in DB trigger
-		Duration:     req.Duration,
-		DurationUnit: req.DurationUnit,
+		PrescriptionLine: db.PrescriptionLine{
+			ID:            lineID,
+			DrugID:        req.DrugID,
+			Remarks:       req.Remarks,
+			Prn:           req.Prn,
+			DoseAmount:    req.DoseAmount,
+			DoseUnit:      req.DoseUnit,
+			FrequencyCode: req.FrequencyCode,
+			// schedule fields are derived from frequencyCode in DB trigger
+			Duration:     req.Duration,
+			DurationUnit: req.DurationUnit,
+		},
 	}
 
 	ctx := c.Request.Context()
@@ -269,12 +274,12 @@ func (h *PrescriptionHandler) SetLineAllocations(c *gin.Context) {
 		handleBindErr(c, err)
 		return
 	}
-	allocs := make([]entities.LineAllocation, 0, len(req.Allocations))
+	allocs := make([]db.PrescriptionBatchItem, 0, len(req.Allocations))
 	for _, a := range req.Allocations {
-		allocs = append(allocs, entities.LineAllocation{
+		allocs = append(allocs, db.PrescriptionBatchItem{
 			LineID:          lineID, // will be set again in UC/repo but harmless
 			BatchLocationID: a.BatchLocationID,
-			Quantity:        a.Quantity,
+			Quantity:        int32(a.Quantity),
 		})
 	}
 

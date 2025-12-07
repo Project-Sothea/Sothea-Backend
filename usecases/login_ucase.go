@@ -4,8 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/jieqiboh/sothea_backend/controllers/middleware"
-	"github.com/jieqiboh/sothea_backend/entities"
+	"sothea-backend/controllers/middleware"
+	"sothea-backend/entities"
+
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -24,7 +25,7 @@ func NewLoginUseCase(p entities.PatientRepository, timeout time.Duration, secret
 	}
 }
 
-func (l *loginUsecase) Login(ctx context.Context, user entities.User) (string, error) {
+func (l *loginUsecase) Login(ctx context.Context, user entities.LoginPayload) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, l.contextTimeout)
 	defer cancel()
 
@@ -38,7 +39,7 @@ func (l *loginUsecase) Login(ctx context.Context, user entities.User) (string, e
 		return "", entities.ErrLoginFailed
 	}
 
-	token, err := middleware.CreateToken(dbUser.Id, user.Username, l.secretKey)
+	token, err := middleware.CreateToken(dbUser.ID, user.Username, l.secretKey)
 	if err != nil {
 		return "", err
 	}

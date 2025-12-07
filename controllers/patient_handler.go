@@ -11,11 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"sothea-backend/controllers/middleware"
+	"sothea-backend/entities"
+	db "sothea-backend/repository/sqlc"
+	"sothea-backend/util"
+
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
-	"github.com/jieqiboh/sothea_backend/controllers/middleware"
-	"github.com/jieqiboh/sothea_backend/entities"
-	"github.com/jieqiboh/sothea_backend/util"
 )
 
 // PatientHandler represent the httphandler for patient
@@ -41,7 +43,6 @@ func NewPatientHandler(r gin.IRouter, us entities.PatientUseCase, secretKey []by
 		authorized.PATCH("/patient/:id/:vid", handler.UpdatePatientVisit)
 		authorized.GET("/patient-meta/:id", handler.GetPatientMeta)
 		authorized.GET("/all-patient-visit-meta/:date", handler.GetAllPatientVisitMeta)
-		authorized.GET("/export-db", handler.ExportDatabaseToCSV)
 	}
 }
 
@@ -121,7 +122,7 @@ func (p *PatientHandler) CreatePatient(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "admin JSON is required"})
 		return
 	}
-	var patientAdmin entities.Admin
+	var patientAdmin db.Admin
 	if err := json.Unmarshal([]byte(adminJSON), &patientAdmin); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid admin JSON"})
 		return
@@ -183,7 +184,7 @@ func (p *PatientHandler) CreatePatientVisit(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "admin JSON is required"})
 		return
 	}
-	var patientAdmin entities.Admin
+	var patientAdmin db.Admin
 	if err := json.Unmarshal([]byte(adminJSON), &patientAdmin); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid admin JSON"})
 		return
@@ -198,12 +199,12 @@ func (p *PatientHandler) CreatePatientVisit(c *gin.Context) {
 
 	// If a photo was included, store to filesystem
 	if data, present, err := readUploadedFile(c, "photo"); err != nil {
-		_ = p.Usecase.DeletePatientVisit(ctx, id32, int32(vid))
+		_ = p.Usecase.DeletePatientVisit(ctx, id32, vid)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file"})
 		return
 	} else if present {
 		if _, valErr := util.ValidateImageBytes(data); valErr != nil {
-			_ = p.Usecase.DeletePatientVisit(ctx, id32, int32(vid))
+			_ = p.Usecase.DeletePatientVisit(ctx, id32, vid)
 			if valErr.Error() == "file too large" {
 				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": valErr.Error()})
 			} else {
@@ -211,8 +212,8 @@ func (p *PatientHandler) CreatePatientVisit(c *gin.Context) {
 			}
 			return
 		}
-		if err := util.SavePatientPhoto(id32, int32(vid), data); err != nil {
-			_ = p.Usecase.DeletePatientVisit(ctx, id32, int32(vid))
+		if err := util.SavePatientPhoto(id32, vid, data); err != nil {
+			_ = p.Usecase.DeletePatientVisit(ctx, id32, vid)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to store photo"})
 			return
 		}
@@ -274,7 +275,7 @@ func (p *PatientHandler) UpdatePatientVisit(c *gin.Context) {
 		var patient entities.Patient
 		adminJSON := c.PostForm("admin")
 		if adminJSON != "" {
-			var admin entities.Admin
+			var admin db.Admin
 			if err := json.Unmarshal([]byte(adminJSON), &admin); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid admin JSON"})
 				return
@@ -380,24 +381,6 @@ func (p *PatientHandler) GetAllPatientVisitMeta(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, patientVisitMeta)
-}
-
-func (p *PatientHandler) ExportDatabaseToCSV(c *gin.Context) {
-	ctx := c.Request.Context()
-	filePath := util.MustGitPath("repository/tmp/output.csv")
-	err := p.Usecase.ExportDatabaseToCSV(ctx)
-	if err != nil {
-		log.Printf("Failed to export data to CSV: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to export data"})
-		return
-	}
-
-	c.Writer.Header().Set("Content-Type", "text/csv")
-	// Set the content disposition header to force download
-	c.Writer.Header().Set("Content-Disposition", "attachment")
-
-	// Write the contents of the CSV file to the response
-	c.FileAttachment(filePath, "output.csv")
 }
 
 func getStatusCode(err error) int {

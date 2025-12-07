@@ -2,281 +2,125 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
 	"errors"
-	"log"
-	"os"
 	"time"
 
-	"github.com/jieqiboh/sothea_backend/entities"
-	"github.com/jieqiboh/sothea_backend/util"
-	"github.com/joho/sqltocsv"
-	_ "github.com/lib/pq"
+	"sothea-backend/entities"
+	db "sothea-backend/repository/sqlc"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type postgresPatientRepository struct {
-	Conn *sql.DB
+	Conn    *pgxpool.Pool
+	queries *db.Queries
 }
 
 // NewPostgresPatientRepository will create an object that represent the patient.Repository interface
-func NewPostgresPatientRepository(conn *sql.DB) entities.PatientRepository {
-	return &postgresPatientRepository{conn}
+func NewPostgresPatientRepository(conn *pgxpool.Pool) entities.PatientRepository {
+	return &postgresPatientRepository{
+		Conn:    conn,
+		queries: db.New(conn),
+	}
 }
 
 // GetPatientVisit returns a Patient struct representing a single visit based on ID, and Visit ID. Only guaranteed field is Admin
-func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int32, vid int32) (res *entities.Patient, err error) {
-	// Start a new transaction
-	tx, err := p.Conn.BeginTx(ctx, nil)
+func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int32, vid int32) (*entities.Patient, error) {
+	tx, err := p.Conn.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Defer a rollback in case anything fails.
-	defer tx.Rollback()
+	q := p.queries.WithTx(tx)
 
-	rows := tx.QueryRowContext(ctx, "SELECT * FROM admin WHERE id = $1 AND vid = $2;", id, vid)
-	admin := entities.Admin{}
-	err = rows.Scan(
-		&admin.ID,
-		&admin.VID,
-		&admin.FamilyGroup,
-		&admin.RegDate,
-		&admin.QueueNo,
-		&admin.Name,
-		&admin.KhmerName,
-		&admin.Dob,
-		&admin.Age,
-		&admin.Gender,
-		&admin.Village,
-		&admin.ContactNo,
-		&admin.Pregnant,
-		&admin.LastMenstrualPeriod,
-		&admin.DrugAllergies,
-		&admin.SentToID,
-	)
-	if err != nil { // no admin found
+	adminRow, err := q.GetAdmin(ctx, db.GetAdminParams{ID: id, Vid: vid})
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, entities.ErrPatientVisitNotFound
 	}
+	if err != nil {
+		return nil, err
+	}
+	admin := &adminRow
 
-	rows = tx.QueryRowContext(ctx, "SELECT * FROM pastmedicalhistory WHERE pastmedicalhistory.id = $1 AND pastmedicalhistory.vid = $2;", id, vid)
-	pastmedicalhistory := &entities.PastMedicalHistory{}
-	err = rows.Scan(
-		&pastmedicalhistory.ID,
-		&pastmedicalhistory.VID,
-
-		&pastmedicalhistory.Cough,
-		&pastmedicalhistory.Fever,
-		&pastmedicalhistory.BlockedNose,
-		&pastmedicalhistory.SoreThroat,
-		&pastmedicalhistory.NightSweats,
-		&pastmedicalhistory.UnintentionalWeightLoss,
-
-		&pastmedicalhistory.Tuberculosis,
-		&pastmedicalhistory.TuberculosisHasBeenTreated,
-
-		&pastmedicalhistory.Diabetes,
-		&pastmedicalhistory.Hypertension,
-		&pastmedicalhistory.Hyperlipidemia,
-		&pastmedicalhistory.ChronicJointPains,
-		&pastmedicalhistory.ChronicMuscleAches,
-		&pastmedicalhistory.SexuallyTransmittedDisease,
-		&pastmedicalhistory.SpecifiedSTDs,
-		&pastmedicalhistory.Others,
-	)
-	if errors.Is(err, sql.ErrNoRows) { // no pastmedicalhistory found
-		pastmedicalhistory = nil
-	} else if err != nil { // unknown error
+	var pastmedicalhistory *db.PastMedicalHistory
+	if row, err := q.GetPastMedicalHistory(ctx, db.GetPastMedicalHistoryParams{ID: id, Vid: vid}); err == nil {
+		pastmedicalhistory = &row
+	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
 
-	rows = tx.QueryRowContext(ctx, "SELECT * FROM socialhistory WHERE socialhistory.id = $1 AND socialhistory.vid = $2;", id, vid)
-	socialhistory := &entities.SocialHistory{}
-	err = rows.Scan(
-		&socialhistory.ID,
-		&socialhistory.VID,
-		&socialhistory.PastSmokingHistory,
-		&socialhistory.NumberOfYears,
-		&socialhistory.CurrentSmokingHistory,
-		&socialhistory.CigarettesPerDay,
-		&socialhistory.AlcoholHistory,
-		&socialhistory.HowRegular,
-	)
-	if errors.Is(err, sql.ErrNoRows) { // no socialhistory found
-		socialhistory = nil
-	} else if err != nil { // unknown error
+	var socialhistory *db.SocialHistory
+	if row, err := q.GetSocialHistory(ctx, db.GetSocialHistoryParams{ID: id, Vid: vid}); err == nil {
+		socialhistory = &row
+	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
 
-	rows = tx.QueryRowContext(ctx, "SELECT * FROM vitalstatistics WHERE vitalstatistics.id = $1 AND vitalstatistics.vid = $2;", id, vid)
-	vitalstatistics := &entities.VitalStatistics{}
-	err = rows.Scan(
-		&vitalstatistics.ID,
-		&vitalstatistics.VID,
-		&vitalstatistics.Temperature,
-		&vitalstatistics.SpO2,
-		&vitalstatistics.SystolicBP1,
-		&vitalstatistics.DiastolicBP1,
-		&vitalstatistics.SystolicBP2,
-		&vitalstatistics.DiastolicBP2,
-		&vitalstatistics.AverageSystolicBP,
-		&vitalstatistics.AverageDiastolicBP,
-		&vitalstatistics.HR1,
-		&vitalstatistics.HR2,
-		&vitalstatistics.AverageHR,
-		&vitalstatistics.RandomBloodGlucoseMmolL,
-		&vitalstatistics.IcopeHighBp,
-	)
-	if errors.Is(err, sql.ErrNoRows) { // no vitalstatistics found
-		vitalstatistics = nil
-	} else if err != nil { // unknown error
+	var vitalstatistics *db.VitalStatistic
+	if row, err := q.GetVitalStatistics(ctx, db.GetVitalStatisticsParams{ID: id, Vid: vid}); err == nil {
+		vitalstatistics = &row
+	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
 
-	rows = tx.QueryRowContext(ctx, "SELECT * FROM heightandweight WHERE heightandweight.id = $1 AND heightandweight.vid = $2;", id, vid)
-	heightandweight := &entities.HeightAndWeight{}
-	err = rows.Scan(
-		&heightandweight.ID,
-		&heightandweight.VID,
-		&heightandweight.Height,
-		&heightandweight.Weight,
-		&heightandweight.BMI,
-		&heightandweight.BMIAnalysis,
-		&heightandweight.PaedsHeight,
-		&heightandweight.PaedsWeight,
-		&heightandweight.IcopeLostWeightPastMonths,
-		&heightandweight.IcopeNoDesireToEat,
-	)
-	if errors.Is(err, sql.ErrNoRows) { // no heightandweight found
-		heightandweight = nil
-	} else if err != nil { // unknown error
+	var heightandweight *db.HeightAndWeight
+	if row, err := q.GetHeightAndWeight(ctx, db.GetHeightAndWeightParams{ID: id, Vid: vid}); err == nil {
+		heightandweight = &row
+	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
 
-	rows = tx.QueryRowContext(ctx, "SELECT * FROM visualacuity WHERE visualacuity.id = $1 AND visualacuity.vid = $2;", id, vid)
-	visualacuity := &entities.VisualAcuity{}
-	err = rows.Scan(
-		&visualacuity.ID,
-		&visualacuity.VID,
-		&visualacuity.LEyeVision,
-		&visualacuity.REyeVision,
-		&visualacuity.AdditionalIntervention,
-		&visualacuity.SentToOpto,
-		&visualacuity.ReferredForGlasses,
-		&visualacuity.IcopeEyeProblem,
-		&visualacuity.IcopeTreatedForDiabetesOrBp,
-	)
-	if errors.Is(err, sql.ErrNoRows) { // no visualacuity found
-		visualacuity = nil
-	} else if err != nil { // unknown error
+	var visualacuity *db.VisualAcuity
+	if row, err := q.GetVisualAcuity(ctx, db.GetVisualAcuityParams{ID: id, Vid: vid}); err == nil {
+		visualacuity = &row
+	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
 
-	rows = tx.QueryRowContext(ctx, "SELECT * FROM fallrisk WHERE fallrisk.id = $1 AND fallrisk.vid = $2;", id, vid)
-	fallrisk := &entities.FallRisk{}
-	err = rows.Scan(
-		&fallrisk.ID,
-		&fallrisk.VID,
-		&fallrisk.SideToSideBalance,
-		&fallrisk.SemiTandemBalance,
-		&fallrisk.TandemBalance,
-		&fallrisk.GaitSpeedTest,
-		&fallrisk.ChairStandTest,
-		&fallrisk.FallRiskScore,
-		&fallrisk.IcopeCompleteChairStands,
-		&fallrisk.IcopeChairStandsTime,
-	)
-	if errors.Is(err, sql.ErrNoRows) { // no fallrisk found
-		fallrisk = nil
-	} else if err != nil { // unknown error
+	var fallrisk *db.FallRisk
+	if row, err := q.GetFallRisk(ctx, db.GetFallRiskParams{ID: id, Vid: vid}); err == nil {
+		fallrisk = &row
+	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
 
-	rows = tx.QueryRowContext(ctx, `
-		SELECT id, vid,
-		       fluoride_exposure, diet, bacterial_exposure,
-		       oral_symptoms, drink_other_water,
-		       risk_for_dental_carries, icope_difficulty_chewing, icope_pain_in_mouth,
-		       dental_notes
-		FROM dental
-		WHERE dental.id = $1 AND dental.vid = $2;`, id, vid)
-	dental := &entities.Dental{}
-	err = rows.Scan(
-		&dental.ID,
-		&dental.VID,
-		&dental.FluorideExposure,
-		&dental.Diet,
-		&dental.BacterialExposure,
-		&dental.OralSymptoms,
-		&dental.DrinkOtherWater,
-		&dental.RiskForDentalCarries,
-		&dental.IcopeDifficultyChewing,
-		&dental.IcopePainInMouth,
-		&dental.DentalNotes,
-	)
-	if errors.Is(err, sql.ErrNoRows) { // no dental found
-		dental = nil
-	} else if err != nil { // unknown error
+	var dental *db.Dental
+	if row, err := q.GetDental(ctx, db.GetDentalParams{ID: id, Vid: vid}); err == nil {
+		dental = &row
+	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
 
-	rows = tx.QueryRowContext(ctx, "SELECT * FROM physiotherapy WHERE physiotherapy.id = $1 AND physiotherapy.vid = $2;", id, vid)
-	physiotherapy := &entities.Physiotherapy{}
-	err = rows.Scan(
-		&physiotherapy.ID,
-		&physiotherapy.VID,
-		&physiotherapy.SubjectiveAssessment,
-		&physiotherapy.PainScale,
-		&physiotherapy.ObjectiveAssessment,
-		&physiotherapy.Intervention,
-		&physiotherapy.Evaluation,
-	)
-	if errors.Is(err, sql.ErrNoRows) { // no physiotherapy found
-		physiotherapy = nil
-	} else if err != nil { // unknown error
+	var physiotherapy *db.Physiotherapy
+	if row, err := q.GetPhysiotherapy(ctx, db.GetPhysiotherapyParams{ID: id, Vid: vid}); err == nil {
+		physiotherapy = &row
+	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
 
-	rows = tx.QueryRowContext(ctx, "SELECT * FROM doctorsconsultation WHERE doctorsconsultation.id = $1 AND doctorsconsultation.vid = $2;", id, vid)
-	doctorsconsultation := &entities.DoctorsConsultation{}
-	err = rows.Scan(
-		&doctorsconsultation.ID,
-		&doctorsconsultation.VID,
-		&doctorsconsultation.Well,
-		&doctorsconsultation.Msk,
-		&doctorsconsultation.Cvs,
-		&doctorsconsultation.Respi,
-		&doctorsconsultation.Gu,
-		&doctorsconsultation.Git,
-		&doctorsconsultation.Eye,
-		&doctorsconsultation.Derm,
-		&doctorsconsultation.Others,
-		&doctorsconsultation.ConsultationNotes,
-		&doctorsconsultation.Diagnosis,
-		&doctorsconsultation.Treatment,
-		&doctorsconsultation.ReferralNeeded,
-		&doctorsconsultation.ReferralLoc,
-		&doctorsconsultation.Remarks,
-	)
-	if errors.Is(err, sql.ErrNoRows) { // no doctorsconsultation found
-		doctorsconsultation = nil
-	} else if err != nil { // unknown error
+	var doctorsconsultation *db.DoctorsConsultation
+	if row, err := q.GetDoctorsConsultation(ctx, db.GetDoctorsConsultationParams{ID: id, Vid: vid}); err == nil {
+		doctorsconsultation = &row
+	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
 
 	patient := entities.Patient{
-		Admin:               &admin,
+		Admin:               admin,
 		PastMedicalHistory:  pastmedicalhistory,
 		SocialHistory:       socialhistory,
 		VitalStatistics:     vitalstatistics,
 		HeightAndWeight:     heightandweight,
 		VisualAcuity:        visualacuity,
-		FallRisk:            fallrisk,
 		Dental:              dental,
+		FallRisk:            fallrisk,
 		Physiotherapy:       physiotherapy,
 		DoctorsConsultation: doctorsconsultation,
 	}
 
-	if err = tx.Commit(); err != nil { // commit transaction
+	if err = tx.Commit(ctx); err != nil {
 		return nil, err
 	}
 
@@ -284,830 +128,641 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 }
 
 // CreatePatient inserts a new Admin category for a new patient and returns the new id if successful.
-func (p *postgresPatientRepository) CreatePatient(ctx context.Context, admin *entities.Admin) (int32, error) {
-	// Start a new transaction
-	tx, err := p.Conn.BeginTx(ctx, nil)
-	if err != nil { // error starting transaction
-		return -1, err
-	}
-
-	// Defer a rollback in case anything fails.
-	defer tx.Rollback()
-
-	var patientid int32
-	if admin == nil { // no admin field
+func (p *postgresPatientRepository) CreatePatient(ctx context.Context, admin *db.Admin) (int32, error) {
+	if admin == nil {
 		return -1, entities.ErrMissingAdminCategory
 	}
-	rows := tx.QueryRowContext(ctx, `INSERT INTO admin (family_group, reg_date, queue_no, name, khmer_name, dob, age, gender, village, 
-		contact_no, pregnant, last_menstrual_period, drug_allergies, sent_to_id) 
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
-		admin.FamilyGroup, admin.RegDate, admin.QueueNo, admin.Name, admin.KhmerName, admin.Dob, admin.Age, admin.Gender, admin.Village, admin.ContactNo,
-		admin.Pregnant, admin.LastMenstrualPeriod, admin.DrugAllergies, admin.SentToID)
-	err = rows.Scan(&patientid)
-	if err != nil { // error inserting admin
+
+	tx, err := p.Conn.Begin(ctx)
+	if err != nil {
+		return -1, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	q := p.queries.WithTx(tx)
+	params, err := toInsertPatientParams(admin)
+	if err != nil {
 		return -1, err
 	}
 
-	if err = tx.Commit(); err != nil {
+	row, err := q.InsertPatient(ctx, params)
+	if err != nil {
 		return -1, err
 	}
-	return patientid, nil
+
+	if err = tx.Commit(ctx); err != nil {
+		return -1, err
+	}
+	return row.ID, nil
 }
 
-// CreatePatientVisit inserts a new Admin category for an existing patient and returns the new vid if successful. Only required field is Admin
-func (p *postgresPatientRepository) CreatePatientVisit(ctx context.Context, id int32, admin *entities.Admin) (int32, error) {
-	// Start a new transaction
-	tx, err := p.Conn.BeginTx(ctx, nil)
-	if err != nil { // error starting transaction
-		return -1, err
-	}
-	// Defer a rollback in case anything fails.
-	defer tx.Rollback()
-
-	var patientid int32
-	if admin == nil { // no admin field
+// CreatePatientVisit inserts a new Admin category for an existing patient and returns the new vid if successful.
+func (p *postgresPatientRepository) CreatePatientVisit(ctx context.Context, id int32, admin *db.Admin) (int32, error) {
+	if admin == nil {
 		return -1, entities.ErrMissingAdminCategory
 	}
 
-	// Check that patient exists
-	doesPatientExist, err := p.checkPatientExists(ctx, id)
-	if err != nil { // query error
+	tx, err := p.Conn.Begin(ctx)
+	if err != nil {
 		return -1, err
-	} else if !doesPatientExist { // no query error, and patient doesn't exist
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	q := p.queries.WithTx(tx)
+	exists, err := checkPatientExists(ctx, q, id)
+	if err != nil {
+		return -1, err
+	}
+	if !exists {
 		return -1, entities.ErrPatientNotFound
 	}
 
-	rows := tx.QueryRowContext(ctx, `INSERT INTO admin (id, family_group, reg_date, queue_no, name, khmer_name, dob, age, gender, village, 
-		contact_no, pregnant, last_menstrual_period, drug_allergies, sent_to_id) 
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING vid`,
-		id, admin.FamilyGroup, admin.RegDate, admin.QueueNo, admin.Name, admin.KhmerName, admin.Dob, admin.Age, admin.Gender, admin.Village, admin.ContactNo,
-		admin.Pregnant, admin.LastMenstrualPeriod, admin.DrugAllergies, admin.SentToID)
-	err = rows.Scan(&patientid)
-	if err != nil { // error inserting admin
+	params, err := toInsertPatientVisitParams(id, admin)
+	if err != nil {
 		return -1, err
 	}
 
-	if err = tx.Commit(); err != nil {
+	row, err := q.InsertPatientVisit(ctx, params)
+	if err != nil {
 		return -1, err
 	}
-	return patientid, nil
+
+	if err = tx.Commit(ctx); err != nil {
+		return -1, err
+	}
+	return row.Vid, nil
 }
 
-// Deletes all patient entries where id and vid match
+// DeletePatientVisit removes all patient entries where id and vid match.
 func (p *postgresPatientRepository) DeletePatientVisit(ctx context.Context, id int32, vid int32) error {
-	// Start a new transaction
-	tx, err := p.Conn.BeginTx(ctx, nil)
+	tx, err := p.Conn.Begin(ctx)
 	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	q := p.queries.WithTx(tx)
+
+	if err = runDelete(ctx, q.DeletePastMedicalHistory, db.DeletePastMedicalHistoryParams{ID: id, Vid: vid}); err != nil {
+		return err
+	}
+	if err = runDelete(ctx, q.DeleteSocialHistory, db.DeleteSocialHistoryParams{ID: id, Vid: vid}); err != nil {
+		return err
+	}
+	if err = runDelete(ctx, q.DeleteVitalStatistics, db.DeleteVitalStatisticsParams{ID: id, Vid: vid}); err != nil {
+		return err
+	}
+	if err = runDelete(ctx, q.DeleteHeightAndWeight, db.DeleteHeightAndWeightParams{ID: id, Vid: vid}); err != nil {
+		return err
+	}
+	if err = runDelete(ctx, q.DeleteVisualAcuity, db.DeleteVisualAcuityParams{ID: id, Vid: vid}); err != nil {
+		return err
+	}
+	if err = runDelete(ctx, q.DeleteFallRisk, db.DeleteFallRiskParams{ID: id, Vid: vid}); err != nil {
+		return err
+	}
+	if err = runDelete(ctx, q.DeleteDental, db.DeleteDentalParams{ID: id, Vid: vid}); err != nil {
+		return err
+	}
+	if err = runDelete(ctx, q.DeletePhysiotherapy, db.DeletePhysiotherapyParams{ID: id, Vid: vid}); err != nil {
+		return err
+	}
+	if err = runDelete(ctx, q.DeleteDoctorsConsultation, db.DeleteDoctorsConsultationParams{ID: id, Vid: vid}); err != nil {
 		return err
 	}
 
-	// Defer a rollback in case anything fails.
-	defer tx.Rollback()
-
-	_, err = tx.Exec("DELETE FROM pastmedicalhistory WHERE pastmedicalhistory.id = $1 AND pastmedicalhistory.vid = $2;", id, vid)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec("DELETE FROM socialhistory WHERE socialhistory.id = $1 AND socialhistory.vid = $2;", id, vid)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec("DELETE FROM vitalstatistics WHERE vitalstatistics.id = $1 AND vitalstatistics.vid = $2;", id, vid)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec("DELETE FROM heightandweight WHERE heightandweight.id = $1 AND heightandweight.vid = $2;", id, vid)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec("DELETE FROM visualacuity WHERE visualacuity.id = $1 AND visualacuity.vid = $2;", id, vid)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec("DELETE FROM fallrisk WHERE fallrisk.id = $1 AND fallrisk.vid = $2;", id, vid)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec("DELETE FROM dental WHERE dental.id = $1 AND dental.vid = $2;", id, vid)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec("DELETE FROM physiotherapy WHERE physiotherapy.id = $1 AND physiotherapy.vid = $2;", id, vid)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec("DELETE FROM doctorsconsultation WHERE doctorsconsultation.id = $1 AND doctorsconsultation.vid = $2;", id, vid)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec("DELETE FROM prescriptions WHERE prescriptions.id = $1 AND prescriptions.vid = $2;", id, vid)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec("DELETE FROM admin WHERE id = $1 AND vid = $2", id, vid)
-	if err != nil {
+	// Prescriptions rely on the same visit identifiers.
+	if _, err := tx.Exec(ctx, "DELETE FROM prescriptions WHERE prescriptions.id = $1 AND prescriptions.vid = $2;", id, vid); err != nil {
 		return err
 	}
 
-	if err = tx.Commit(); err != nil {
+	if err = runDelete(ctx, q.DeleteAdmin, db.DeleteAdminParams{ID: id, Vid: vid}); err != nil {
+		return err
+	}
+
+	if err = tx.Commit(ctx); err != nil {
 		return err
 	}
 	return nil
 }
 
-// UpdatePatientVisit updates a visit for an existing patient, filling out or overriding any of its fields
+// UpdatePatientVisit updates a visit for an existing patient, filling out or overriding any of its fields.
 func (p *postgresPatientRepository) UpdatePatientVisit(ctx context.Context, id int32, vid int32, patient *entities.Patient) error {
-	// Checks that a patient exists by searching for admin field
-	// Then for each non-nil field in patient, updates it
-	// Start a new transaction
-	tx, err := p.Conn.BeginTx(ctx, nil)
+	tx, err := p.Conn.Begin(ctx)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Defer a rollback in case anything fails.
-	defer tx.Rollback()
+	q := p.queries.WithTx(tx)
 
-	// Check that patient visit exists
-	doesPatientVisitExist, err := p.checkPatientVisitExists(ctx, id, vid)
+	exists, err := checkPatientVisitExists(ctx, q, id, vid)
 	if err != nil {
 		return err
-	} else if !doesPatientVisitExist {
+	}
+	if !exists {
 		return entities.ErrPatientVisitNotFound
 	}
 
-	a := patient.Admin
-	pmh := patient.PastMedicalHistory
-	socialhistory := patient.SocialHistory
-	vs := patient.VitalStatistics
-	haw := patient.HeightAndWeight
-	va := patient.VisualAcuity
-	fr := patient.FallRisk
-	d := patient.Dental
-	phy := patient.Physiotherapy
-	dc := patient.DoctorsConsultation
-	if a != nil { // Update admin
-		_, err = tx.ExecContext(ctx, `UPDATE admin SET family_group = $1, reg_date = $2, queue_no = $3, name = $4, khmer_name = $5, dob = $6, age = $7, 
-		gender = $8, village = $9, contact_no = $10, pregnant = $11, last_menstrual_period = $12, drug_allergies = $13,
-		sent_to_id = $14 WHERE id = $15 AND vid = $16`, a.FamilyGroup, a.RegDate, a.QueueNo, a.Name, a.KhmerName, a.Dob, a.Age, a.Gender, a.Village, a.ContactNo,
-			a.Pregnant, a.LastMenstrualPeriod, a.DrugAllergies, a.SentToID, id, vid)
+	if patient.Admin != nil {
+		params, err := toUpdateAdminParams(id, vid, patient.Admin)
 		if err != nil {
 			return err
 		}
-	}
-	if pmh != nil { // Update pastmedicalhistory, use insert into on conflict update because not it isn't guaranteed to exist
-		_, err = tx.ExecContext(ctx, `
-		INSERT INTO pastmedicalhistory (
-			id, vid,
-			cough, fever, blocked_nose, sore_throat, night_sweats, unintentional_weight_loss,
-			tuberculosis, tuberculosis_has_been_treated,
-			diabetes, hypertension, hyperlipidemia, chronic_joint_pains,
-			chronic_muscle_aches, sexually_transmitted_disease, specified_stds, others) 
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) 
-		ON CONFLICT (id, vid) DO UPDATE SET
-			cough = $3, 
-			fever = $4,
-			blocked_nose = $5,
-			sore_throat = $6,
-			night_sweats = $7,
-			unintentional_weight_loss = $8,
-			tuberculosis = $9,
-			tuberculosis_has_been_treated = $10,
-			diabetes = $11,
-			hypertension = $12,
-			hyperlipidemia = $13,
-			chronic_joint_pains = $14,
-			chronic_muscle_aches = $15,
-			sexually_transmitted_disease = $16,
-			specified_stds = $17,
-			others = $18
-		`,
-			id, vid,
-			pmh.Cough, pmh.Fever, pmh.BlockedNose, pmh.SoreThroat, pmh.NightSweats, pmh.UnintentionalWeightLoss,
-			pmh.Tuberculosis, pmh.TuberculosisHasBeenTreated,
-			pmh.Diabetes, pmh.Hypertension, pmh.Hyperlipidemia, pmh.ChronicJointPains,
-			pmh.ChronicMuscleAches, pmh.SexuallyTransmittedDisease, pmh.SpecifiedSTDs, pmh.Others,
-		)
-		if err != nil {
-			return err
-		}
-	}
-	if socialhistory != nil {
-		_, err = tx.ExecContext(ctx, `
-		INSERT INTO socialhistory (id, vid, past_smoking_history, no_of_years, current_smoking_history, cigarettes_per_day, 
-		alcohol_history, how_regular) 
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
-		ON CONFLICT (id, vid) DO UPDATE SET
-			past_smoking_history = $3,
-			no_of_years = $4,
-			current_smoking_history = $5,
-			cigarettes_per_day = $6,
-			alcohol_history = $7,
-			how_regular = $8
-		`, id, vid, socialhistory.PastSmokingHistory, socialhistory.NumberOfYears, socialhistory.CurrentSmokingHistory,
-			socialhistory.CigarettesPerDay, socialhistory.AlcoholHistory, socialhistory.HowRegular)
-
-		if err != nil {
-			return err
-		}
-	}
-	if vs != nil {
-		_, err = tx.ExecContext(ctx, `
-		INSERT INTO vitalstatistics (
-			id, vid,
-			temperature, spO2, systolic_bp1, diastolic_bp1, systolic_bp2, diastolic_bp2, 
-			avg_systolic_bp, avg_diastolic_bp, hr1, hr2, avg_hr, rand_blood_glucose_mmoll,
-			icope_high_bp
-		) 
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) 
-		ON CONFLICT (id, vid) DO UPDATE SET
-			temperature = $3,
-			spO2 = $4,
-			systolic_bp1 = $5,
-			diastolic_bp1 = $6,
-			systolic_bp2 = $7,
-			diastolic_bp2 = $8,
-			avg_systolic_bp = $9,
-			avg_diastolic_bp = $10,
-			hr1 = $11,
-			hr2 = $12,
-			avg_hr = $13,
-			rand_blood_glucose_mmoll = $14,
-			icope_high_bp = $15
-		`,
-			id, vid,
-			vs.Temperature, vs.SpO2, vs.SystolicBP1, vs.DiastolicBP1, vs.SystolicBP2, vs.DiastolicBP2,
-			vs.AverageSystolicBP, vs.AverageDiastolicBP, vs.HR1, vs.HR2, vs.AverageHR, vs.RandomBloodGlucoseMmolL,
-			vs.IcopeHighBp,
-		)
-
-		if err != nil {
-			return err
-		}
-	}
-	if haw != nil {
-		_, err = tx.ExecContext(ctx, `
-		INSERT INTO heightandweight (
-			id, vid,
-			height, weight, bmi, bmi_analysis, paeds_height, paeds_weight,
-			icope_lost_weight_past_months, icope_no_desire_to_eat
-		) 
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
-		ON CONFLICT (id, vid) DO UPDATE SET
-			height = $3,
-			weight = $4,
-			bmi = $5,
-			bmi_analysis = $6,
-			paeds_height = $7,
-			paeds_weight = $8,
-			icope_lost_weight_past_months = $9,
-			icope_no_desire_to_eat = $10
-		`, id, vid, haw.Height, haw.Weight, haw.BMI, haw.BMIAnalysis, haw.PaedsHeight, haw.PaedsWeight, haw.IcopeLostWeightPastMonths, haw.IcopeNoDesireToEat)
-
-		if err != nil {
-			return err
-		}
-	}
-	if va != nil {
-		_, err = tx.ExecContext(ctx, `
-		INSERT INTO visualacuity (
-			id, vid,
-			l_eye_vision, r_eye_vision, additional_intervention,
-			sent_to_opto, referred_for_glasses,
-			icope_eye_problem, icope_treated_for_diabetes_or_bp
-		) 
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
-		ON CONFLICT (id, vid) DO UPDATE SET
-			l_eye_vision = $3,
-			r_eye_vision = $4,
-			additional_intervention = $5,
-			sent_to_opto = $6,
-			referred_for_glasses = $7,
-			icope_eye_problem = $8,
-			icope_treated_for_diabetes_or_bp = $9
-		`, id, vid, va.LEyeVision, va.REyeVision, va.AdditionalIntervention,
-			va.SentToOpto, va.ReferredForGlasses, va.IcopeEyeProblem, va.IcopeTreatedForDiabetesOrBp)
-
-		if err != nil {
-			return err
-		}
-	}
-	if fr != nil {
-		_, err = tx.ExecContext(ctx, `
-		INSERT INTO fallrisk (
-			id, vid,
-			side_to_side_balance, semi_tandem_balance, tandem_balance,
-			gait_speed_test, chair_stand_test,
-			fall_risk_score,
-			icope_complete_chair_stands, icope_chair_stands_time
-		) 
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
-		ON CONFLICT (id, vid) DO UPDATE SET
-		    side_to_side_balance = $3,
-		    semi_tandem_balance = $4,
-			tandem_balance = $5,
-			gait_speed_test = $6,
-			chair_stand_test = $7,
-			fall_risk_score= $8,
-			icope_complete_chair_stands = $9,
-			icope_chair_stands_time = $10
-		`,
-			id, vid,
-			fr.SideToSideBalance, fr.SemiTandemBalance, fr.TandemBalance,
-			fr.GaitSpeedTest, fr.ChairStandTest,
-			fr.FallRiskScore,
-			fr.IcopeCompleteChairStands,
-			fr.IcopeChairStandsTime,
-		)
-
-		if err != nil {
-			return err
-		}
-	}
-	if d != nil {
-		_, err = tx.ExecContext(ctx, `
-		INSERT INTO dental (
-			id, vid,
-			fluoride_exposure, diet, bacterial_exposure,
-			oral_symptoms, drink_other_water,
-			risk_for_dental_carries,
-			icope_difficulty_chewing, icope_pain_in_mouth,
-			dental_notes
-		) 
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
-		ON CONFLICT (id, vid) DO UPDATE SET
-			fluoride_exposure = $3,
-			diet = $4,
-			bacterial_exposure = $5,
-			oral_symptoms =  $6,
-			drink_other_water = $7,
-			risk_for_dental_carries = $8,
-			icope_difficulty_chewing = $9,
-			icope_pain_in_mouth = $10,
-			dental_notes = $11
-		`,
-			id, vid,
-			d.FluorideExposure, d.Diet, d.BacterialExposure,
-			d.OralSymptoms, d.DrinkOtherWater,
-			d.RiskForDentalCarries,
-			d.IcopeDifficultyChewing, d.IcopePainInMouth,
-			d.DentalNotes,
-		)
-
-		if err != nil {
-			return err
-		}
-	}
-	if phy != nil {
-		_, err = tx.ExecContext(ctx, `
-		INSERT INTO physiotherapy (id, vid, subjective_assessment, pain_scale, objective_assessment, intervention, evaluation) 
-		VALUES ($1, $2, $3, $4, $5, $6, $7) 
-		ON CONFLICT (id, vid) DO UPDATE SET
-			subjective_assessment = $3,
-			pain_scale = $4,
-			objective_assessment = $5,
-			intervention = $6,
-			evaluation = $7
-		`, id, vid, phy.SubjectiveAssessment, phy.PainScale, phy.ObjectiveAssessment, phy.Intervention, phy.Evaluation)
-
-		if err != nil {
-			return err
-		}
-	}
-	if dc != nil {
-		_, err = tx.ExecContext(ctx, `
-		INSERT INTO doctorsconsultation (id, vid, well, msk, cvs, respi, gu, git, eye, derm, others, 
-		consultation_notes, diagnosis, treatment, referral_needed, referral_loc, remarks) 
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) 
-		ON CONFLICT(id, vid) 
-		DO UPDATE SET
-			well = $3,
-			msk = $4,
-			cvs = $5,
-			respi = $6,
-			gu = $7,
-			git = $8,
-			eye = $9,
-			derm = $10,
-			others = $11,
-			consultation_notes = $12,
-			diagnosis = $13,
-			treatment = $14,
-			referral_needed = $15,
-			referral_loc = $16,
-			remarks = $17
-		`,
-			id, vid, dc.Well, dc.Msk, dc.Cvs, dc.Respi, dc.Gu, dc.Git, dc.Eye, dc.Derm, dc.Others, dc.ConsultationNotes,
-			dc.Diagnosis, dc.Treatment, dc.ReferralNeeded, dc.ReferralLoc, dc.Remarks)
-
-		if err != nil {
+		if err = q.UpdateAdmin(ctx, params); err != nil {
 			return err
 		}
 	}
 
-	if err = tx.Commit(); err != nil {
+	if patient.PastMedicalHistory != nil {
+		params := toPastMedicalHistoryParams(id, vid, patient.PastMedicalHistory)
+		if err = q.UpsertPastMedicalHistory(ctx, params); err != nil {
+			return err
+		}
+	}
+
+	if patient.SocialHistory != nil {
+		params, err := toSocialHistoryParams(id, vid, patient.SocialHistory)
+		if err != nil {
+			return err
+		}
+		if err = q.UpsertSocialHistory(ctx, params); err != nil {
+			return err
+		}
+	}
+
+	if patient.VitalStatistics != nil {
+		params, err := toVitalStatisticsParams(id, vid, patient.VitalStatistics)
+		if err != nil {
+			return err
+		}
+		if err = q.UpsertVitalStatistics(ctx, params); err != nil {
+			return err
+		}
+	}
+
+	if patient.HeightAndWeight != nil {
+		params, err := toHeightAndWeightParams(id, vid, patient.HeightAndWeight)
+		if err != nil {
+			return err
+		}
+		if err = q.UpsertHeightAndWeight(ctx, params); err != nil {
+			return err
+		}
+	}
+
+	if patient.VisualAcuity != nil {
+		params, err := toVisualAcuityParams(id, vid, patient.VisualAcuity)
+		if err != nil {
+			return err
+		}
+		if err = q.UpsertVisualAcuity(ctx, params); err != nil {
+			return err
+		}
+	}
+
+	if patient.FallRisk != nil {
+		params, err := toFallRiskParams(id, vid, patient.FallRisk)
+		if err != nil {
+			return err
+		}
+		if err = q.UpsertFallRisk(ctx, params); err != nil {
+			return err
+		}
+	}
+
+	if patient.Dental != nil {
+		params, err := toDentalParams(id, vid, patient.Dental)
+		if err != nil {
+			return err
+		}
+		if err = q.UpsertDental(ctx, params); err != nil {
+			return err
+		}
+	}
+
+	if patient.Physiotherapy != nil {
+		params := toPhysiotherapyParams(id, vid, patient.Physiotherapy)
+		if err = q.UpsertPhysiotherapy(ctx, params); err != nil {
+			return err
+		}
+	}
+
+	if patient.DoctorsConsultation != nil {
+		params, err := toDoctorsConsultationParams(id, vid, patient.DoctorsConsultation)
+		if err != nil {
+			return err
+		}
+		if err = q.UpsertDoctorsConsultation(ctx, params); err != nil {
+			return err
+		}
+	}
+
+	if err = tx.Commit(ctx); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (p *postgresPatientRepository) GetPatientMeta(ctx context.Context, id int32) (*entities.PatientMeta, error) {
-	// Check that patient exists
-	doesPatientExist, err := p.checkPatientExists(ctx, id)
-	if err != nil { // query error
+	q := p.queries
+
+	exists, err := checkPatientExists(ctx, q, id)
+	if err != nil {
 		return nil, err
-	} else if !doesPatientExist { // no query error, and patient doesn't exist
+	}
+	if !exists {
 		return nil, entities.ErrPatientNotFound
 	}
 
-	// Gets metadata for a specific patient, invoked when navigating to other visits of a patient
-	// For FamilyGroup, RegDate, QueueNo, Name and KhmerName, the values from the latest visit are used
-	patientMeta := entities.PatientMeta{}
-	patientMeta.Visits = make(map[int32]time.Time) // Initialize the Visits map
-
-	// Get latest row
-	latestRow := p.Conn.QueryRowContext(ctx, `SELECT id, vid, family_group, reg_date, queue_no, name, khmer_name FROM admin WHERE id = $1 ORDER BY reg_date DESC LIMIT 1`, id)
-	err = latestRow.Scan(&patientMeta.ID, &patientMeta.VID, &patientMeta.FamilyGroup, &patientMeta.RegDate, &patientMeta.QueueNo, &patientMeta.Name, &patientMeta.KhmerName)
+	latestRow, err := q.GetLatestAdmin(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get vid and reg_date
-	rows, err := p.Conn.QueryContext(ctx, "SELECT vid, reg_date FROM ADMIN WHERE id = $1", id)
+	patientMeta := entities.PatientMeta{
+		ID:          latestRow.ID,
+		Vid:         latestRow.Vid,
+		FamilyGroup: latestRow.FamilyGroup,
+		RegDate:     latestRow.RegDate,
+		QueueNo:     latestRow.QueueNo,
+		Name:        latestRow.Name,
+		KhmerName:   latestRow.KhmerName,
+		Visits:      make(map[int32]time.Time),
+	}
+
+	visitRows, err := q.ListAdminVisits(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	// Iterate through the result set and populate the Visits map
-	for rows.Next() {
-		var vid int32
-		var visitDate time.Time
-		if err := rows.Scan(&vid, &visitDate); err != nil {
-			return nil, err
-		}
-		patientMeta.Visits[vid] = visitDate
-	}
-	if err = rows.Err(); err != nil {
-		return nil, err
+	for _, row := range visitRows {
+		patientMeta.Visits[row.Vid] = row.RegDate
 	}
 
 	return &patientMeta, nil
 }
 
 func (p *postgresPatientRepository) GetAllPatientVisitMeta(ctx context.Context, date time.Time) ([]entities.PatientVisitMeta, error) {
-	// If date is non-empty, for every patient, return patientvisitmeta of their visit on that date if it exists
-	// If date is empty aka default constructor, for every patient, return patientvisitmeta of their latest visit
-	var rows *sql.Rows
-	var err error
-	result := make([]entities.PatientVisitMeta, 0)
-
-	if date.IsZero() { // Date is empty
-		rows, err = p.Conn.QueryContext(ctx, `WITH LatestDates AS (
-													SELECT id, MAX(reg_date) AS latest_reg_date
-													FROM admin
-													GROUP BY id
-												)
-												SELECT DISTINCT ON (a.id) 
-													a.id,
-													a.vid,
-													a.family_group,
-													a.reg_date,
-													a.queue_no,
-													a.name,
-													a.khmer_name,
-													a.gender,
-													a.village,
-													a.contact_no,
-													a.drug_allergies,
-													a.sent_to_id,
-													dc.referral_needed,
-													-- Has at least one prescription line (i.e. at least one drug) for this visit
-													EXISTS (
-														SELECT 1
-														FROM prescriptions pr
-														JOIN prescription_lines pl ON pl.prescription_id = pr.id
-														WHERE pr.patient_id = a.id
-														  AND pr.vid = a.vid
-													) AS has_prescription_with_drug,
-													-- If there are lines, TRUE only when none are unpacked
-													CASE
-														WHEN EXISTS (
-															SELECT 1
-															FROM prescriptions pr
-															JOIN prescription_lines pl ON pl.prescription_id = pr.id
-															WHERE pr.patient_id = a.id
-															  AND pr.vid = a.vid
-														) THEN NOT EXISTS (
-															SELECT 1
-															FROM prescriptions pr
-															JOIN prescription_lines pl ON pl.prescription_id = pr.id
-															WHERE pr.patient_id = a.id
-															  AND pr.vid = a.vid
-															  AND (pl.is_packed IS NOT TRUE)
-														)
-														ELSE FALSE
-													END AS all_prescription_drugs_packed,
-													-- Any prescription for this visit has been dispensed
-													EXISTS (
-														SELECT 1
-														FROM prescriptions pr
-														WHERE pr.patient_id = a.id
-														  AND pr.vid = a.vid
-														  AND pr.is_dispensed = TRUE
-													) AS prescription_dispensed
-												FROM 
-													admin a
-												LEFT JOIN 
-													doctorsconsultation dc
-												ON 
-													a.id = dc.id AND a.vid = dc.vid -- assuming the foreign key relationship
-												INNER JOIN 
-													LatestDates ld
-												ON 
-													a.id = ld.id AND a.reg_date = ld.latest_reg_date
-												ORDER BY 
-													a.id, 
-													a.vid DESC;`)
+	q := p.queries
+	if date.IsZero() {
+		rows, err := q.GetPatientVisitMetaLatest(ctx)
 		if err != nil {
 			return nil, err
 		}
-	} else { // Date is non-empty
-		formattedDate := date.Format("2006-01-02")
-		rows, err = p.Conn.QueryContext(ctx, `SELECT DISTINCT ON (a.id) 
-													a.id,
-													a.vid,
-													a.family_group,
-													a.reg_date,
-													a.queue_no,
-													a.name,
-													a.khmer_name,
-													a.gender,
-													a.village,
-													a.contact_no,
-													a.drug_allergies,
-													a.sent_to_id,
-													dc.referral_needed,
-													EXISTS (
-														SELECT 1
-														FROM prescriptions pr
-														JOIN prescription_lines pl ON pl.prescription_id = pr.id
-														WHERE pr.patient_id = a.id
-														  AND pr.vid = a.vid
-													) AS has_prescription_with_drug,
-													CASE
-														WHEN EXISTS (
-															SELECT 1
-															FROM prescriptions pr
-															JOIN prescription_lines pl ON pl.prescription_id = pr.id
-															WHERE pr.patient_id = a.id
-															  AND pr.vid = a.vid
-														) THEN NOT EXISTS (
-															SELECT 1
-															FROM prescriptions pr
-															JOIN prescription_lines pl ON pl.prescription_id = pr.id
-															WHERE pr.patient_id = a.id
-															  AND pr.vid = a.vid
-															  AND (pl.is_packed IS NOT TRUE)
-														)
-														ELSE FALSE
-													END AS all_prescription_drugs_packed,
-													EXISTS (
-														SELECT 1
-														FROM prescriptions pr
-														WHERE pr.patient_id = a.id
-														  AND pr.vid = a.vid
-														  AND pr.is_dispensed = TRUE
-													) AS prescription_dispensed
-												FROM 
-													admin a
-												LEFT JOIN 
-													doctorsconsultation dc
-												ON 
-													a.id = dc.id AND a.vid = dc.vid
-												WHERE 
-													a.reg_date = $1
-												ORDER BY 
-													a.id, 
-													a.vid DESC;`, formattedDate)
-
-		if err != nil {
-			return nil, err
+		result := make([]entities.PatientVisitMeta, 0, len(rows))
+		for _, row := range rows {
+			result = append(result, toPatientVisitMetaLatest(row))
 		}
+		return result, nil
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		patientVisitMeta := entities.PatientVisitMeta{}
-		err = rows.Scan(
-			&patientVisitMeta.ID,
-			&patientVisitMeta.VID,
-			&patientVisitMeta.FamilyGroup,
-			&patientVisitMeta.RegDate,
-			&patientVisitMeta.QueueNo,
-			&patientVisitMeta.Name,
-			&patientVisitMeta.KhmerName,
-			&patientVisitMeta.Gender,
-			&patientVisitMeta.Village,
-			&patientVisitMeta.ContactNo,
-			&patientVisitMeta.DrugAllergies,
-			&patientVisitMeta.SentToID,
-			&patientVisitMeta.ReferralNeeded,
-			&patientVisitMeta.HasPrescriptionWithDrug,
-			&patientVisitMeta.AllPrescriptionDrugsPacked,
-			&patientVisitMeta.PrescriptionDispensed)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, patientVisitMeta)
-	}
-	if err = rows.Err(); err != nil {
+	rows, err := q.GetPatientVisitMetaByDate(ctx, date)
+	if err != nil {
 		return nil, err
 	}
-
+	result := make([]entities.PatientVisitMeta, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, toPatientVisitMetaByDate(row))
+	}
 	return result, nil
 }
 
-func (p *postgresPatientRepository) ExportDatabaseToCSV(ctx context.Context) error {
-	// Base query
-	query := `SELECT
-        a.id,
-        a.vid,
-        a.family_group AS a_family_group,
-        a.reg_date AS a_reg_date,
-        a.queue_no AS a_queue_no,
-		a.name AS a_name,
-		a.khmer_name AS a_khmer_name,
-		a.dob AS a_dob,
-		a.age AS a_age,
-		a.gender AS a_gender,
-		a.village AS a_village,
-		a.contact_no AS a_contact_no,
-		a.pregnant AS a_pregnant,
-		a.last_menstrual_period AS a_last_menstrual_period,
-		a.drug_allergies AS a_drug_allergies,
-		a.sent_to_id AS a_sent_to_id,
-        -- Past Medical History
-		pmh.tuberculosis AS pmh_tuberculosis,
-		pmh.diabetes AS pmh_diabetes,
-		pmh.hypertension AS pmh_hypertension,
-		pmh.hyperlipidemia AS pmh_hyperlipidemia,
-		pmh.chronic_joint_pains AS pmh_chronic_joint_pains,
-		pmh.chronic_muscle_aches AS pmh_chronic_muscle_aches,
-		pmh.sexually_transmitted_disease AS pmh_sexually_transmitted_disease,
-		pmh.specified_stds AS pmh_specified_stds,
-		pmh.others AS pmh_others,
-        -- Social History
-		sh.past_smoking_history AS sh_past_smoking_history,
-		sh.no_of_years AS sh_no_of_years,
-		sh.current_smoking_history AS sh_current_smoking_history,
-		sh.cigarettes_per_day AS sh_cigarettes_per_day,
-		sh.alcohol_history AS sh_alcohol_history,
-		sh.how_regular AS sh_how_regular,
-        -- Vital Statistics
-		vs.temperature AS vs_temperature,
-		vs.spo2 AS vs_spo2,
-		vs.systolic_bp1 AS vs_systolic_bp1,
-		vs.diastolic_bp1 AS vs_diastolic_bp1,
-		vs.systolic_bp2 AS vs_systolic_bp2,
-		vs.diastolic_bp2 AS vs_diastolic_bp2,
-		vs.avg_systolic_bp AS vs_avg_systolic_bp,
-		vs.avg_diastolic_bp AS vs_avg_diastolic_bp,
-		vs.hr1 AS vs_hr1,
-		vs.hr2 AS vs_hr2,
-		vs.avg_hr AS vs_avg_hr,
-		vs.rand_blood_glucose_mmoll AS vs_rand_blood_glucose_mmoll,
-        -- Height and Weight
-        haw.height AS haw_height,
-        haw.weight AS haw_weight,
-        haw.bmi AS haw_bmi,
-        haw.bmi_analysis AS haw_bmi_analysis,
-        haw.paeds_height AS haw_paeds_height,
-        haw.paeds_weight AS haw_paeds_weight,
-        -- Visual Acuity
-        va.l_eye_vision AS va_l_eye_vision,
-        va.r_eye_vision AS va_r_eye_vision,
-        va.additional_intervention AS va_additional_intervention,
-        -- Dental
-        d.fluoride_exposure AS d_fluoride_exposure,
-        d.diet AS d_diet,
-        d.bacterial_exposure AS d_bacterial_exposure,
-        d.oral_symptoms AS d_oral_symptoms,
-        d.drink_other_water AS d_drink_other_water,
-        d.risk_for_dental_carries AS d_risk_for_dental_carries,
-        d.icope_difficulty_chewing AS d_icope_difficulty_chewing,
-        d.icope_pain_in_mouth AS d_icope_pain_in_mouth,
-        d.dental_notes AS d_dental_notes,
-        -- Fall Risk
-        fr.fall_worries AS fr_fall_worries,
-        fr.fall_history AS fr_fall_history,
-        fr.cognitive_status AS fr_cognitive_status,
-        fr.continence_problems AS fr_continence_problems,
-        fr.safety_awareness AS fr_safety_awareness,
-        fr.unsteadiness AS fr_unsteadiness,
-        fr.fall_risk_score AS fr_fall_risk_score,
-        -- Doctors Consultation
-        dc.well AS dc_well,
-        dc.msk AS dc_msk,
-        dc.cvs AS dc_cvs,
-        dc.respi AS dc_respi,
-        dc.gu AS dc_gu,
-        dc.git AS dc_git,
-        dc.eye AS dc_eye,
-        dc.derm AS dc_derm,
-        dc.others AS dc_others,
-        dc.consultation_notes AS dc_consultation_notes,
-        dc.diagnosis AS dc_diagnosis,
-        dc.treatment AS dc_treatment,
-        dc.referral_needed AS dc_referral_needed,
-        dc.referral_loc AS dc_referral_loc,
-		dc.remarks AS dc_remarks,
-		-- Physiotherapy
-		p.subjective_assessment AS p_subjective_assessment,
-		p.pain_scale AS p_pain_scale,
-		p.objective_assessment AS p_objective_assessment,
-		p.intervention AS p_intervention,
-		p.evaluation AS p_evaluation
-		FROM
-        admin a
-    LEFT JOIN
-        pastmedicalhistory pmh ON a.id = pmh.id AND a.vid = pmh.vid
-    LEFT JOIN
-        socialhistory sh ON a.id = sh.id AND a.vid = sh.vid
-    LEFT JOIN
-        vitalstatistics vs ON a.id = vs.id AND a.vid = vs.vid
-    LEFT JOIN
-        heightandweight haw ON a.id = haw.id AND a.vid = haw.vid
-    LEFT JOIN
-        visualacuity va ON a.id = va.id AND a.vid = va.vid
-    LEFT JOIN 
-		dental d ON a.id = d.id AND a.vid = d.vid
-    LEFT JOIN
-        fallrisk fr ON a.id = fr.id AND a.vid = fr.vid
-	LEFT JOIN
-		physiotherapy p ON a.id = p.id AND a.vid = p.vid
-	LEFT JOIN
-		doctorsconsultation dc ON a.id = dc.id AND a.vid = dc.vid`
-
-	// Execute the query
-	rows, err := p.Conn.QueryContext(ctx, query)
-	if err != nil {
-		return err
-	}
-
-	filePath := util.MustGitPath("repository/tmp/output.csv")
-	file, err := os.Create(filePath)
-	if err != nil {
-		log.Fatalf("Error creating file: %v", err)
-	}
-	defer file.Close()
-
-	conv := sqltocsv.New(rows)
-	conv.TimeFormat = "2006-01-02"
-
-	err = conv.WriteFile(filePath)
-	if err != nil {
-		panic(err)
-	}
-
-	return nil
-}
-
-func (p *postgresPatientRepository) GetDBUser(ctx context.Context, username string) (*entities.DBUser, error) {
-	user := entities.DBUser{}
-
-	// Get latest row
-	latestRow := p.Conn.QueryRowContext(ctx, `SELECT id, username, password_hash FROM users WHERE username = $1`, username)
-	err := latestRow.Scan(&user.Id, &user.Username, &user.PasswordHash)
+func (p *postgresPatientRepository) GetDBUser(ctx context.Context, username string) (*db.User, error) {
+	row, err := p.queries.GetUserByUsername(ctx, username)
 	if err != nil {
 		return nil, err
 	}
-	return &user, nil
+	return &db.User{
+		ID:           row.ID,
+		Username:     row.Username,
+		PasswordHash: row.PasswordHash,
+	}, nil
 }
 
-func (p *postgresPatientRepository) checkPatientExists(ctx context.Context, id int32) (bool, error) {
-	// Helper method to check that a patient exists
-	var resId int32
-	err := p.Conn.QueryRowContext(ctx, "SELECT id FROM admin WHERE id = $1;", id).Scan(&resId)
-	if err == sql.ErrNoRows {
+// Helpers --------------------------------------------------------------------
+
+func checkPatientExists(ctx context.Context, q *db.Queries, id int32) (bool, error) {
+	_, err := q.CheckPatientExists(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
-	} else if err != nil {
-		log.Fatalf("query error: %v\n", err)
+	}
+	if err != nil {
 		return false, err
 	}
-
 	return true, nil
 }
 
-func (p *postgresPatientRepository) checkPatientVisitExists(ctx context.Context, id int32, vid int32) (bool, error) {
-	var resId int32
-	var resVid int32
-	err := p.Conn.QueryRowContext(ctx, "SELECT id, vid FROM admin WHERE id = $1 AND vid = $2;", id, vid).Scan(&resId, &resVid)
-	if err == sql.ErrNoRows {
+func checkPatientVisitExists(ctx context.Context, q *db.Queries, id int32, vid int32) (bool, error) {
+	_, err := q.CheckPatientVisitExists(ctx, db.CheckPatientVisitExistsParams{ID: id, Vid: vid})
+	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
-	} else if err != nil {
-		log.Fatalf("query error: %v\n", err)
+	}
+	if err != nil {
 		return false, err
 	}
-
 	return true, nil
+}
+
+func runDelete[T any](ctx context.Context, fn func(context.Context, T) error, params T) error {
+	return fn(ctx, params)
+}
+
+// Parameter builders ---------------------------------------------------------
+
+func toInsertPatientParams(admin *db.Admin) (db.InsertPatientParams, error) {
+	return db.InsertPatientParams{
+		FamilyGroup:         admin.FamilyGroup,
+		RegDate:             admin.RegDate,
+		QueueNo:             admin.QueueNo,
+		Name:                admin.Name,
+		KhmerName:           admin.KhmerName,
+		Dob:                 admin.Dob,
+		Gender:              admin.Gender,
+		Village:             admin.Village,
+		ContactNo:           admin.ContactNo,
+		Pregnant:            admin.Pregnant,
+		LastMenstrualPeriod: admin.LastMenstrualPeriod,
+		DrugAllergies:       admin.DrugAllergies,
+		SentToID:            admin.SentToID,
+	}, nil
+}
+
+func toInsertPatientVisitParams(id int32, admin *db.Admin) (db.InsertPatientVisitParams, error) {
+	base, err := toInsertPatientParams(admin)
+	if err != nil {
+		return db.InsertPatientVisitParams{}, err
+	}
+	return db.InsertPatientVisitParams{
+		ID:                  id,
+		FamilyGroup:         base.FamilyGroup,
+		RegDate:             base.RegDate,
+		QueueNo:             base.QueueNo,
+		Name:                base.Name,
+		KhmerName:           base.KhmerName,
+		Dob:                 base.Dob,
+		Gender:              base.Gender,
+		Village:             base.Village,
+		ContactNo:           base.ContactNo,
+		Pregnant:            base.Pregnant,
+		LastMenstrualPeriod: base.LastMenstrualPeriod,
+		DrugAllergies:       base.DrugAllergies,
+		SentToID:            base.SentToID,
+	}, nil
+}
+
+func toUpdateAdminParams(id int32, vid int32, admin *db.Admin) (db.UpdateAdminParams, error) {
+	base, err := toInsertPatientParams(admin)
+	if err != nil {
+		return db.UpdateAdminParams{}, err
+	}
+
+	return db.UpdateAdminParams{
+		FamilyGroup:         base.FamilyGroup,
+		RegDate:             base.RegDate,
+		QueueNo:             base.QueueNo,
+		Name:                base.Name,
+		KhmerName:           base.KhmerName,
+		Dob:                 base.Dob,
+		Gender:              base.Gender,
+		Village:             base.Village,
+		ContactNo:           base.ContactNo,
+		Pregnant:            base.Pregnant,
+		LastMenstrualPeriod: base.LastMenstrualPeriod,
+		DrugAllergies:       base.DrugAllergies,
+		SentToID:            base.SentToID,
+		ID:                  id,
+		Vid:                 vid,
+	}, nil
+}
+
+func toPastMedicalHistoryParams(id int32, vid int32, pmh *db.PastMedicalHistory) db.UpsertPastMedicalHistoryParams {
+	return db.UpsertPastMedicalHistoryParams{
+		ID:                         id,
+		Vid:                        vid,
+		Cough:                      pmh.Cough,
+		Fever:                      pmh.Fever,
+		BlockedNose:                pmh.BlockedNose,
+		SoreThroat:                 pmh.SoreThroat,
+		NightSweats:                pmh.NightSweats,
+		UnintentionalWeightLoss:    pmh.UnintentionalWeightLoss,
+		Tuberculosis:               pmh.Tuberculosis,
+		TuberculosisHasBeenTreated: pmh.TuberculosisHasBeenTreated,
+		Diabetes:                   pmh.Diabetes,
+		Hypertension:               pmh.Hypertension,
+		Hyperlipidemia:             pmh.Hyperlipidemia,
+		ChronicJointPains:          pmh.ChronicJointPains,
+		ChronicMuscleAches:         pmh.ChronicMuscleAches,
+		SexuallyTransmittedDisease: pmh.SexuallyTransmittedDisease,
+		SpecifiedStds:              pmh.SpecifiedStds,
+		Others:                     pmh.Others,
+	}
+}
+
+func toSocialHistoryParams(id int32, vid int32, sh *db.SocialHistory) (db.UpsertSocialHistoryParams, error) {
+	return db.UpsertSocialHistoryParams{
+		ID:                    id,
+		Vid:                   vid,
+		PastSmokingHistory:    sh.PastSmokingHistory,
+		NoOfYears:             sh.NoOfYears,
+		CurrentSmokingHistory: sh.CurrentSmokingHistory,
+		CigarettesPerDay:      sh.CigarettesPerDay,
+		AlcoholHistory:        sh.AlcoholHistory,
+		HowRegular:            sh.HowRegular,
+	}, nil
+}
+
+func toVitalStatisticsParams(id int32, vid int32, vs *db.VitalStatistic) (db.UpsertVitalStatisticsParams, error) {
+	return db.UpsertVitalStatisticsParams{
+		ID:                    id,
+		Vid:                   vid,
+		Temperature:           vs.Temperature,
+		Spo2:                  vs.Spo2,
+		SystolicBp1:           vs.SystolicBp1,
+		DiastolicBp1:          vs.DiastolicBp1,
+		SystolicBp2:           vs.SystolicBp2,
+		DiastolicBp2:          vs.DiastolicBp2,
+		AvgSystolicBp:         vs.AvgSystolicBp,
+		AvgDiastolicBp:        vs.AvgDiastolicBp,
+		Hr1:                   vs.Hr1,
+		Hr2:                   vs.Hr2,
+		AvgHr:                 vs.AvgHr,
+		RandBloodGlucoseMmolL: vs.RandBloodGlucoseMmolL,
+		IcopeHighBp:           vs.IcopeHighBp,
+	}, nil
+}
+
+func toHeightAndWeightParams(id int32, vid int32, haw *db.HeightAndWeight) (db.UpsertHeightAndWeightParams, error) {
+	return db.UpsertHeightAndWeightParams{
+		ID:                        id,
+		Vid:                       vid,
+		Height:                    haw.Height,
+		Weight:                    haw.Weight,
+		Bmi:                       haw.Bmi,
+		BmiAnalysis:               haw.BmiAnalysis,
+		PaedsHeight:               haw.PaedsHeight,
+		PaedsWeight:               haw.PaedsWeight,
+		IcopeLostWeightPastMonths: haw.IcopeLostWeightPastMonths,
+		IcopeNoDesireToEat:        haw.IcopeNoDesireToEat,
+	}, nil
+}
+
+func toVisualAcuityParams(id int32, vid int32, va *db.VisualAcuity) (db.UpsertVisualAcuityParams, error) {
+	return db.UpsertVisualAcuityParams{
+		ID:                          id,
+		Vid:                         vid,
+		LEyeVision:                  va.LEyeVision,
+		REyeVision:                  va.REyeVision,
+		AdditionalIntervention:      va.AdditionalIntervention,
+		SentToOpto:                  va.SentToOpto,
+		ReferredForGlasses:          va.ReferredForGlasses,
+		IcopeEyeProblem:             va.IcopeEyeProblem,
+		IcopeTreatedForDiabetesOrBp: va.IcopeTreatedForDiabetesOrBp,
+	}, nil
+}
+
+func toFallRiskParams(id int32, vid int32, fr *db.FallRisk) (db.UpsertFallRiskParams, error) {
+	return db.UpsertFallRiskParams{
+		ID:                       id,
+		Vid:                      vid,
+		SideToSideBalance:        fr.SideToSideBalance,
+		SemiTandemBalance:        fr.SemiTandemBalance,
+		TandemBalance:            fr.TandemBalance,
+		GaitSpeedTest:            fr.GaitSpeedTest,
+		ChairStandTest:           fr.ChairStandTest,
+		FallRiskScore:            fr.FallRiskScore,
+		IcopeCompleteChairStands: fr.IcopeCompleteChairStands,
+		IcopeChairStandsTime:     fr.IcopeChairStandsTime,
+	}, nil
+}
+
+func toDentalParams(id int32, vid int32, d *db.Dental) (db.UpsertDentalParams, error) {
+	return db.UpsertDentalParams{
+		ID:                     id,
+		Vid:                    vid,
+		FluorideExposure:       d.FluorideExposure,
+		Diet:                   d.Diet,
+		BacterialExposure:      d.BacterialExposure,
+		OralSymptoms:           d.OralSymptoms,
+		DrinkOtherWater:        d.DrinkOtherWater,
+		RiskForDentalCarries:   d.RiskForDentalCarries,
+		IcopeDifficultyChewing: d.IcopeDifficultyChewing,
+		IcopePainInMouth:       d.IcopePainInMouth,
+		DentalNotes:            d.DentalNotes,
+	}, nil
+}
+
+func toPhysiotherapyParams(id int32, vid int32, phy *db.Physiotherapy) db.UpsertPhysiotherapyParams {
+	return db.UpsertPhysiotherapyParams{
+		ID:                   id,
+		Vid:                  vid,
+		SubjectiveAssessment: phy.SubjectiveAssessment,
+		PainScale:            phy.PainScale,
+		ObjectiveAssessment:  phy.ObjectiveAssessment,
+		Intervention:         phy.Intervention,
+		Evaluation:           phy.Evaluation,
+	}
+}
+
+func toDoctorsConsultationParams(id int32, vid int32, dc *db.DoctorsConsultation) (db.UpsertDoctorsConsultationParams, error) {
+	return db.UpsertDoctorsConsultationParams{
+		ID:                id,
+		Vid:               vid,
+		Well:              dc.Well,
+		Msk:               dc.Msk,
+		Cvs:               dc.Cvs,
+		Respi:             dc.Respi,
+		Gu:                dc.Gu,
+		Git:               dc.Git,
+		Eye:               dc.Eye,
+		Derm:              dc.Derm,
+		Others:            dc.Others,
+		ConsultationNotes: dc.ConsultationNotes,
+		Diagnosis:         dc.Diagnosis,
+		Treatment:         dc.Treatment,
+		ReferralNeeded:    dc.ReferralNeeded,
+		ReferralLoc:       dc.ReferralLoc,
+		Remarks:           dc.Remarks,
+	}, nil
+}
+
+// Entity builders ------------------------------------------------------------
+
+func toPatientVisitMetaLatest(row db.GetPatientVisitMetaLatestRow) entities.PatientVisitMeta {
+	return buildPatientVisitMeta(
+		row.ID,
+		row.Vid,
+		row.FamilyGroup,
+		row.RegDate,
+		row.QueueNo,
+		row.Name,
+		row.KhmerName,
+		row.Gender,
+		row.Village,
+		row.ContactNo,
+		row.DrugAllergies,
+		row.SentToID,
+		row.ReferralNeeded,
+		row.HasPrescriptionWithDrug,
+		row.AllPrescriptionDrugsPacked,
+		row.PrescriptionDispensed,
+	)
+}
+
+func toPatientVisitMetaByDate(row db.GetPatientVisitMetaByDateRow) entities.PatientVisitMeta {
+	return buildPatientVisitMeta(
+		row.ID,
+		row.Vid,
+		row.FamilyGroup,
+		row.RegDate,
+		row.QueueNo,
+		row.Name,
+		row.KhmerName,
+		row.Gender,
+		row.Village,
+		row.ContactNo,
+		row.DrugAllergies,
+		row.SentToID,
+		row.ReferralNeeded,
+		row.HasPrescriptionWithDrug,
+		row.AllPrescriptionDrugsPacked,
+		row.PrescriptionDispensed,
+	)
+}
+
+func buildPatientVisitMeta(
+	id int32,
+	vid int32,
+	familyGroup string,
+	regDate time.Time,
+	queueNo string,
+	name string,
+	khmerName string,
+	gender string,
+	village string,
+	contactNo string,
+	drugAllergies *string,
+	sentToID bool,
+	referralNeeded *bool,
+	hasPrescription bool,
+	allPrescriptionPacked bool,
+	prescriptionDispensed bool,
+) entities.PatientVisitMeta {
+	return entities.PatientVisitMeta{
+		ID:                         id,
+		Vid:                        vid,
+		FamilyGroup:                familyGroup,
+		RegDate:                    regDate,
+		QueueNo:                    queueNo,
+		Name:                       name,
+		KhmerName:                  khmerName,
+		Gender:                     gender,
+		Village:                    village,
+		ContactNo:                  contactNo,
+		DrugAllergies:              drugAllergies,
+		SentToID:                   sentToID,
+		ReferralNeeded:             referralNeeded,
+		HasPrescriptionWithDrug:    hasPrescription,
+		AllPrescriptionDrugsPacked: allPrescriptionPacked,
+		PrescriptionDispensed:      prescriptionDispensed,
+	}
 }

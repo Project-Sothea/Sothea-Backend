@@ -1,15 +1,16 @@
 package controllers
 
 import (
-	"database/sql"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
+	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/jieqiboh/sothea_backend/controllers/middleware"
-	"github.com/jieqiboh/sothea_backend/entities"
+	"sothea-backend/controllers/middleware"
+	"sothea-backend/entities"
+	db "sothea-backend/repository/sqlc"
 )
 
 // -----------------------------------------------------------------------------
@@ -21,12 +22,12 @@ type PharmacyHandler struct {
 }
 
 // Registers /pharmacy/* routes and applies JWT + Tx middlewares.
-func NewPharmacyHandler(r gin.IRouter, uc entities.PharmacyUseCase, secretKey []byte, db *sql.DB) {
+func NewPharmacyHandler(r gin.IRouter, uc entities.PharmacyUseCase, secretKey []byte, pool *pgxpool.Pool) {
 	h := &PharmacyHandler{Usecase: uc}
 
 	grp := r.Group("/pharmacy")
 	grp.Use(middleware.AuthRequired(secretKey))
-	grp.Use(middleware.WithTx(db))
+	grp.Use(middleware.WithTx(pool))
 
 	// ---------------- DRUGS ----------------
 	grp.GET("/drugs", h.ListDrugs) // ?q=parac
@@ -73,7 +74,7 @@ func (h *PharmacyHandler) ListDrugs(c *gin.Context) {
 }
 
 func (h *PharmacyHandler) CreateDrug(c *gin.Context) {
-	var d entities.Drug
+	var d db.Drug
 	if err := c.ShouldBindJSON(&d); err != nil {
 		handleBindErr(c, err)
 		return
@@ -123,7 +124,7 @@ func (h *PharmacyHandler) UpdateDrug(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid drugId"})
 		return
 	}
-	var d entities.Drug
+	var d db.Drug
 	if err := c.ShouldBindJSON(&d); err != nil {
 		handleBindErr(c, err)
 		return
@@ -178,8 +179,8 @@ func (h *PharmacyHandler) CreateBatch(c *gin.Context) {
 		return
 	}
 	var body struct {
-		Batch     entities.DrugBatch           `json:"batch"`
-		Locations []entities.DrugBatchLocation `json:"locations"`
+		Batch     db.DrugBatch       `json:"batch"`
+		Locations []db.BatchLocation `json:"locations"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		handleBindErr(c, err)
@@ -211,7 +212,7 @@ func (h *PharmacyHandler) ListAllBatches(c *gin.Context) {
 	all := make([]entities.BatchDetail, 0, 128)
 
 	for _, d := range drugs {
-		batches, err := h.Usecase.ListBatches(ctx, d.ID)
+		batches, err := h.Usecase.ListBatches(ctx, d.Drug.ID)
 		if err != nil {
 			c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 			return
@@ -244,8 +245,8 @@ func (h *PharmacyHandler) UpdateBatch(c *gin.Context) {
 		return
 	}
 	var body struct {
-		Batch     entities.DrugBatch           `json:"batch"`
-		Locations []entities.DrugBatchLocation `json:"locations"`
+		Batch     db.DrugBatch       `json:"batch"`
+		Locations []db.BatchLocation `json:"locations"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		handleBindErr(c, err)
@@ -301,7 +302,7 @@ func (h *PharmacyHandler) CreateBatchLocation(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid batchId"})
 		return
 	}
-	var loc entities.DrugBatchLocation
+	var loc db.BatchLocation
 	if err := c.ShouldBindJSON(&loc); err != nil {
 		handleBindErr(c, err)
 		return
@@ -323,7 +324,7 @@ func (h *PharmacyHandler) UpdateBatchLocation(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid locationId"})
 		return
 	}
-	var loc entities.DrugBatchLocation
+	var loc db.BatchLocation
 	if err := c.ShouldBindJSON(&loc); err != nil {
 		handleBindErr(c, err)
 		return

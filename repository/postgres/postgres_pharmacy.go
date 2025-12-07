@@ -2,14 +2,15 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"sort"
-	"time"
 
-	"github.com/jieqiboh/sothea_backend/entities"
-	"github.com/lib/pq"
+	"sothea-backend/entities"
+	db "sothea-backend/repository/sqlc"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // -----------------------------------------------------------------------------
@@ -17,168 +18,118 @@ import (
 // -----------------------------------------------------------------------------
 
 type postgresPharmacyRepository struct {
-	Conn *sql.DB
+	Conn    *pgxpool.Pool
+	queries *db.Queries
 }
 
-func NewPostgresPharmacyRepository(conn *sql.DB) entities.PharmacyRepository {
-	return &postgresPharmacyRepository{Conn: conn}
+func (r *postgresPharmacyRepository) q(ctx context.Context) *db.Queries {
+	if tx, ok := TxFromCtx(ctx); ok && tx != nil {
+		return r.queries.WithTx(tx)
+	}
+	return r.queries
+}
+
+func NewPostgresPharmacyRepository(conn *pgxpool.Pool) entities.PharmacyRepository {
+	return &postgresPharmacyRepository{
+		Conn:    conn,
+		queries: db.New(conn),
+	}
 }
 
 // -----------------------------------------------------------------------------
 //  HELPERS (label builders; keep in repo so FE gets nice strings)
 // -----------------------------------------------------------------------------
 
-func displayStrength(d entities.Drug) string {
-	if d.StrengthDen == nil || d.StrengthUnitDen == nil {
-		// solids (no denominator), e.g. "500 mg TAB"
-		if d.StrengthNum != nil && d.StrengthUnitNum != nil {
-			return fmt.Sprintf("%g %s %s", *d.StrengthNum, *d.StrengthUnitNum, d.DosageFormCode)
+func displayStrength(d db.Drug) string {
+	// d.Strength* may be pgtype.Numeric and units as *string; guard nils
+	hasNum := d.StrengthUnitNum != nil
+	hasDen := d.StrengthUnitDen != nil
+
+	if !hasDen {
+		if hasNum {
+			return fmt.Sprintf("%s %s", *d.StrengthUnitNum, d.DosageFormCode)
 		}
-		// Unknown strength: show dosage form
 		return d.DosageFormCode
 	}
-	// liquids/creams, e.g. "250 mg/5 mL SYR"
-	if d.StrengthNum != nil && d.StrengthUnitNum != nil {
-		numUnit := derefStr(d.StrengthUnitNum)
-		denUnit := derefStr(d.StrengthUnitDen)
-		numVal := derefFloat(d.StrengthNum)
-		denVal := derefFloat(d.StrengthDen)
 
-		// Check if we should display as percentage (based on drug setting)
-		if d.DisplayAsPercentage && denVal > 0 {
-			percentage := (numVal / denVal) * 100
-			return fmt.Sprintf("%g%% %s", percentage, d.DosageFormCode)
-		}
-
-		return fmt.Sprintf("%g %s/%g %s %s",
-			numVal, numUnit,
-			denVal, denUnit,
-			d.DosageFormCode)
+	if hasNum {
+		numUnit := *d.StrengthUnitNum
+		denUnit := *d.StrengthUnitDen
+		return fmt.Sprintf("%s/%s %s", numUnit, denUnit, d.DosageFormCode)
 	}
-	// Unknown strength liquid: show dosage form
 	return d.DosageFormCode
 }
 
-func displayLabel(d entities.Drug) string {
+func displayLabel(d db.Drug) string {
 	strength := displayStrength(d)
 	route := d.RouteCode
-
-	// Build base label: "GenericName Strength (Route)"
 	base := fmt.Sprintf("%s %s (%s)", d.GenericName, strength, route)
-
-	// Add piece content info if applicable (bottles, tubes, inhalers)
-	if d.PieceContentAmount != nil && d.PieceContentUnit != nil {
+	if d.PieceContentUnit != nil {
 		switch d.DispenseUnit {
 		case "bottle":
-			base = fmt.Sprintf("%s - bottle %g %s", base, *d.PieceContentAmount, *d.PieceContentUnit)
+			base = fmt.Sprintf("%s - bottle [?] %s", base, *d.PieceContentUnit)
 		case "tube":
-			base = fmt.Sprintf("%s - tube %g %s", base, *d.PieceContentAmount, *d.PieceContentUnit)
+			base = fmt.Sprintf("%s - tube [?] %s", base, *d.PieceContentUnit)
 		case "inhaler":
-			base = fmt.Sprintf("%s - inhaler %g %s", base, *d.PieceContentAmount, *d.PieceContentUnit)
+			base = fmt.Sprintf("%s - inhaler [?] %s", base, *d.PieceContentUnit)
 		}
 	}
-
-	// Prepend Drug code with a dot if present
 	if d.DrugCode != nil {
 		return fmt.Sprintf("%d. %s", *d.DrugCode, base)
 	}
-
 	return base
 }
 
 // findFirstEmptyBackwards finds the first empty spot going backwards from startCode down to minCode (inclusive).
 // Returns the empty spot or minCode if no gap found.
-func findFirstEmptyBackwards(ctx context.Context, tx *sql.Tx, startCode, minCode int64) (int64, error) {
-	var firstEmpty sql.NullInt64
-	err := tx.QueryRowContext(ctx, `
+func findFirstEmptyBackwards(ctx context.Context, tx pgx.Tx, startCode, minCode int64) (int64, error) {
+	var firstEmpty *int64
+	if err := tx.QueryRow(ctx, `
 		SELECT MAX(series_value)
 		FROM generate_series($1::INTEGER, $2::INTEGER) AS series_value
 		WHERE NOT EXISTS (
 			SELECT 1 FROM drugs WHERE drug_code = series_value
 		)
-	`, minCode, startCode).Scan(&firstEmpty)
-	if err != nil {
+	`, minCode, startCode).Scan(&firstEmpty); err != nil {
 		return 0, err
 	}
-
-	if firstEmpty.Valid {
-		return firstEmpty.Int64, nil
+	if firstEmpty != nil {
+		return *firstEmpty, nil
 	}
-
-	// No gap found, return minCode
 	return minCode, nil
 }
 
-// findFirstEmptyForwards finds the first empty spot going forwards from startCode up to maxCode (inclusive).
-// Returns the empty spot or maxCode if no gap found.
-func findFirstEmptyForwards(ctx context.Context, tx *sql.Tx, startCode, maxCode int64) (int64, error) {
-	var firstEmpty sql.NullInt64
-	err := tx.QueryRowContext(ctx, `
+func findFirstEmptyForwards(ctx context.Context, tx pgx.Tx, startCode, maxCode int64) (int64, error) {
+	var firstEmpty *int64
+	if err := tx.QueryRow(ctx, `
 		SELECT MIN(series_value)
 		FROM generate_series($1::INTEGER, $2::INTEGER) AS series_value
 		WHERE NOT EXISTS (
 			SELECT 1 FROM drugs WHERE drug_code = series_value
 		)
-	`, startCode, maxCode).Scan(&firstEmpty)
-	if err != nil {
+	`, startCode, maxCode).Scan(&firstEmpty); err != nil {
 		return 0, err
 	}
-
-	if firstEmpty.Valid {
-		return firstEmpty.Int64, nil
+	if firstEmpty != nil {
+		return *firstEmpty, nil
 	}
-
-	// No gap found, return maxCode
 	return maxCode, nil
 }
 
-// findFirstEmptyDrugCode finds the first available drug_code starting from startCode.
-// Returns startCode if it's available, otherwise finds the next gap.
-func findFirstEmptyDrugCode(ctx context.Context, tx *sql.Tx, startCode int64) (int64, error) {
-
-	// Find the maximum existing drug_code
-	var maxCode sql.NullInt64
-	err := tx.QueryRowContext(ctx, `
+func findFirstEmptyDrugCode(ctx context.Context, tx pgx.Tx, startCode int64) (int64, error) {
+	var maxCode *int64
+	if err := tx.QueryRow(ctx, `
 		SELECT MAX(drug_code) FROM drugs WHERE drug_code IS NOT NULL
-	`).Scan(&maxCode)
-	if err != nil {
+	`).Scan(&maxCode); err != nil {
 		return 0, err
 	}
-
-	// If no codes exist or startCode is beyond max, startCode is available
-	if !maxCode.Valid || startCode > maxCode.Int64 {
+	if maxCode == nil || startCode > *maxCode {
 		return startCode, nil
 	}
-
-	return findFirstEmptyForwards(ctx, tx, startCode, maxCode.Int64+1)
-
+	return findFirstEmptyForwards(ctx, tx, startCode, *maxCode+1)
 }
 
-func derefFloat(p *float64) float64 {
-	if p == nil {
-		return 0
-	}
-	return *p
-}
-func derefStr(p *string) string {
-	if p == nil {
-		return ""
-	}
-	return *p
-}
-
-// Helper functions for comparing pointers
-func equalFloatPtr(a, b *float64) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	return *a == *b
-}
-
-func equalStrPtr(a, b *string) bool {
+func equalPtrString(a, b *string) bool {
 	if a == nil && b == nil {
 		return true
 	}
@@ -192,157 +143,137 @@ func equalStrPtr(a, b *string) bool {
 //  DRUGS
 // -----------------------------------------------------------------------------
 
-const qDrugsList = `
-  SELECT id, generic_name, brand_name, drug_code, dosage_form_code, route_code,
-    strength_num, strength_unit_num, strength_den, strength_unit_den,
-    dispense_unit, piece_content_amount, piece_content_unit,
-    is_fractional_allowed, display_as_percentage, barcode, notes, is_active, created_at, updated_at
-  FROM drugs
-  /* optional WHERE added dynamically */
-  ORDER BY generic_name, COALESCE(brand_name,''), dosage_form_code, route_code`
-
 func (r *postgresPharmacyRepository) ListDrugs(ctx context.Context, q *string) ([]entities.DrugView, error) {
-	dbx := DBFromCtx(ctx, r.Conn)
+	qx := r.q(ctx)
 
-	query := qDrugsList
-	args := []any{}
+	var rows []db.Drug
+	var err error
 	if q != nil && *q != "" {
-		query = `
-		  SELECT id, generic_name, brand_name, drug_code, dosage_form_code, route_code,
-		    strength_num, strength_unit_num, strength_den, strength_unit_den,
-		    dispense_unit, piece_content_amount, piece_content_unit,
-		    is_fractional_allowed, display_as_percentage, barcode, notes, is_active, created_at, updated_at
-		  FROM drugs
-		  WHERE generic_name ILIKE $1 OR COALESCE(brand_name,'') ILIKE $1
-		  ORDER BY generic_name, COALESCE(brand_name,''), dosage_form_code, route_code`
-		args = append(args, "%"+*q+"%")
+		searchRows, e := qx.SearchDrugs(ctx, "%"+*q+"%")
+		err = e
+		for _, row := range searchRows {
+			rows = append(rows, db.Drug{
+				ID:                  row.ID,
+				GenericName:         row.GenericName,
+				BrandName:           row.BrandName,
+				DrugCode:            row.DrugCode,
+				DosageFormCode:      row.DosageFormCode,
+				RouteCode:           row.RouteCode,
+				StrengthNum:         row.StrengthNum,
+				StrengthUnitNum:     row.StrengthUnitNum,
+				StrengthDen:         row.StrengthDen,
+				StrengthUnitDen:     row.StrengthUnitDen,
+				DispenseUnit:        row.DispenseUnit,
+				PieceContentAmount:  row.PieceContentAmount,
+				PieceContentUnit:    row.PieceContentUnit,
+				IsFractionalAllowed: row.IsFractionalAllowed,
+				DisplayAsPercentage: row.DisplayAsPercentage,
+				Barcode:             row.Barcode,
+				Notes:               row.Notes,
+				IsActive:            row.IsActive,
+				CreatedAt:           row.CreatedAt,
+				UpdatedAt:           row.UpdatedAt,
+			})
+		}
+	} else {
+		listRows, e := qx.ListDrugs(ctx)
+		err = e
+		for _, row := range listRows {
+			rows = append(rows, db.Drug{
+				ID:                  row.ID,
+				GenericName:         row.GenericName,
+				BrandName:           row.BrandName,
+				DrugCode:            row.DrugCode,
+				DosageFormCode:      row.DosageFormCode,
+				RouteCode:           row.RouteCode,
+				StrengthNum:         row.StrengthNum,
+				StrengthUnitNum:     row.StrengthUnitNum,
+				StrengthDen:         row.StrengthDen,
+				StrengthUnitDen:     row.StrengthUnitDen,
+				DispenseUnit:        row.DispenseUnit,
+				PieceContentAmount:  row.PieceContentAmount,
+				PieceContentUnit:    row.PieceContentUnit,
+				IsFractionalAllowed: row.IsFractionalAllowed,
+				DisplayAsPercentage: row.DisplayAsPercentage,
+				Barcode:             row.Barcode,
+				Notes:               row.Notes,
+				IsActive:            row.IsActive,
+				CreatedAt:           row.CreatedAt,
+				UpdatedAt:           row.UpdatedAt,
+			})
+		}
 	}
-
-	rows, err := dbx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	out := []entities.DrugView{}
-	for rows.Next() {
-		var d entities.Drug
-		if err := rows.Scan(
-			&d.ID, &d.GenericName, &d.BrandName, &d.DrugCode,
-			&d.DosageFormCode, &d.RouteCode,
-			&d.StrengthNum, &d.StrengthUnitNum, &d.StrengthDen, &d.StrengthUnitDen,
-			&d.DispenseUnit, &d.PieceContentAmount, &d.PieceContentUnit,
-			&d.IsFractionalAllowed, &d.DisplayAsPercentage, &d.Barcode, &d.Notes, &d.IsActive,
-			&d.CreatedAt, &d.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		dv := entities.DrugView{
-			Drug:            d,
-			DisplayStrength: displayStrength(d),
-			DisplayRoute:    d.RouteCode,
-			DisplayLabel:    displayLabel(d),
-		}
-		out = append(out, dv)
+	out := make([]entities.DrugView, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, entities.DrugView{
+			Drug:            row,
+			DisplayStrength: displayStrength(row),
+			DisplayRoute:    row.RouteCode,
+			DisplayLabel:    displayLabel(row),
+		})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
-const qDrugCreate = `
-  INSERT INTO drugs (
-    generic_name, brand_name, drug_code, dosage_form_code, route_code,
-    strength_num, strength_unit_num, strength_den, strength_unit_den,
-    dispense_unit, piece_content_amount, piece_content_unit,
-    is_fractional_allowed, display_as_percentage, barcode, notes, is_active
-  )
-  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,COALESCE($13,FALSE),COALESCE($14,FALSE),$15,$16,COALESCE($17,TRUE))
-  RETURNING id`
-
-func (r *postgresPharmacyRepository) CreateDrug(ctx context.Context, d *entities.Drug) (*entities.DrugView, error) {
+func (r *postgresPharmacyRepository) CreateDrug(ctx context.Context, d *db.Drug) (*entities.DrugView, error) {
 	tx, ok := TxFromCtx(ctx)
 	if !ok {
 		return nil, errors.New("transaction not found")
 	}
+	q := r.queries.WithTx(tx)
 
 	if d.DrugCode != nil {
 		// Find the first empty spot starting from the requested code
-		firstEmptySpot, err := findFirstEmptyDrugCode(ctx, tx, *d.DrugCode)
+		firstEmptySpot, err := findFirstEmptyDrugCode(ctx, tx, int64(*d.DrugCode))
 		if err != nil {
 			return nil, fmt.Errorf("failed to find empty drug code: %w", err)
 		}
 
 		// If the first empty spot is greater than requested code, shift codes to make room
-		_, err = tx.ExecContext(ctx, `
+		if _, err = tx.Exec(ctx, `
 			UPDATE drugs
 			SET drug_code = drug_code + 1
 			WHERE drug_code >= $1 AND drug_code < $2
-		`, *d.DrugCode, firstEmptySpot)
-		if err != nil {
+		`, *d.DrugCode, firstEmptySpot); err != nil {
 			return nil, fmt.Errorf("failed to shift drug codes: %w", err)
 		}
 	}
 
-	var id int64
-	if err := tx.QueryRowContext(ctx, qDrugCreate,
-		d.GenericName, d.BrandName, d.DrugCode,
-		d.DosageFormCode, d.RouteCode,
-		d.StrengthNum, d.StrengthUnitNum, d.StrengthDen, d.StrengthUnitDen,
-		d.DispenseUnit, d.PieceContentAmount, d.PieceContentUnit,
-		d.IsFractionalAllowed, d.DisplayAsPercentage, d.Barcode, d.Notes, d.IsActive,
-	).Scan(&id); err != nil {
+	params := toInsertDrugParams(d)
+	row, err := q.InsertDrug(ctx, params)
+	if err != nil {
 		return nil, err
 	}
-
-	return r.GetDrug(ctx, id)
+	return r.GetDrug(ctx, row)
 }
 
-const qDrugGet = `
-  SELECT id, generic_name, brand_name, drug_code, dosage_form_code, route_code,
-    strength_num, strength_unit_num, strength_den, strength_unit_den,
-    dispense_unit, piece_content_amount, piece_content_unit,
-    is_fractional_allowed, display_as_percentage, barcode, notes, is_active, created_at, updated_at
-  FROM drugs WHERE id=$1`
-
 func (r *postgresPharmacyRepository) GetDrug(ctx context.Context, id int64) (*entities.DrugView, error) {
-	dbx := DBFromCtx(ctx, r.Conn)
-	var d entities.Drug
-	err := dbx.QueryRowContext(ctx, qDrugGet, id).Scan(
-		&d.ID, &d.GenericName, &d.BrandName, &d.DrugCode,
-		&d.DosageFormCode, &d.RouteCode,
-		&d.StrengthNum, &d.StrengthUnitNum, &d.StrengthDen, &d.StrengthUnitDen,
-		&d.DispenseUnit, &d.PieceContentAmount, &d.PieceContentUnit,
-		&d.IsFractionalAllowed, &d.DisplayAsPercentage, &d.Barcode, &d.Notes, &d.IsActive,
-		&d.CreatedAt, &d.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
+	row, err := r.q(ctx).GetDrug(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errors.New("drug not found")
 	}
 	if err != nil {
 		return nil, err
 	}
-	dv := &entities.DrugView{
+	d := toDrugFromGetRow(row)
+	return &entities.DrugView{
 		Drug:            d,
 		DisplayStrength: displayStrength(d),
 		DisplayRoute:    d.RouteCode,
 		DisplayLabel:    displayLabel(d),
-	}
-	return dv, nil
+	}, nil
 }
 
-const qDrugUpdate = `
-  UPDATE drugs SET
-    generic_name=$2, brand_name=$3, drug_code=$4,
-    dosage_form_code=$5, route_code=$6,
-    strength_num=$7, strength_unit_num=$8, strength_den=$9, strength_unit_den=$10,
-    dispense_unit=$11, piece_content_amount=$12, piece_content_unit=$13,
-    is_fractional_allowed=$14, display_as_percentage=$15, barcode=$16, notes=$17, is_active=$18, updated_at=NOW()
-  WHERE id=$1`
-
-func (r *postgresPharmacyRepository) UpdateDrug(ctx context.Context, d *entities.Drug) (*entities.DrugView, error) {
+func (r *postgresPharmacyRepository) UpdateDrug(ctx context.Context, d *db.Drug) (*entities.DrugView, error) {
 	tx, ok := TxFromCtx(ctx)
 	if !ok {
 		return nil, errors.New("transaction not found")
 	}
+	q := r.queries.WithTx(tx)
 
 	// Get current drug to compare fields
 	current, err := r.GetDrug(ctx, d.ID)
@@ -353,21 +284,15 @@ func (r *postgresPharmacyRepository) UpdateDrug(ctx context.Context, d *entities
 
 	// Check if any risky fields are being changed
 	riskyFieldChanged :=
-		!equalFloatPtr(currentDrug.StrengthNum, d.StrengthNum) ||
-			!equalStrPtr(currentDrug.StrengthUnitNum, d.StrengthUnitNum) ||
-			!equalFloatPtr(currentDrug.StrengthDen, d.StrengthDen) ||
-			!equalStrPtr(currentDrug.StrengthUnitDen, d.StrengthUnitDen) ||
+		!equalPtrString(currentDrug.StrengthUnitNum, d.StrengthUnitNum) ||
+			!equalPtrString(currentDrug.StrengthUnitDen, d.StrengthUnitDen) ||
 			currentDrug.DispenseUnit != d.DispenseUnit ||
-			!equalFloatPtr(currentDrug.PieceContentAmount, d.PieceContentAmount) ||
-			!equalStrPtr(currentDrug.PieceContentUnit, d.PieceContentUnit)
+			!equalPtrString(currentDrug.PieceContentUnit, d.PieceContentUnit)
 
 	// If risky fields changed, check if drug has prescriptions
 	if riskyFieldChanged {
 		var prescriptionCount int
-		err := tx.QueryRowContext(ctx, `
-			SELECT COUNT(*) FROM prescription_lines WHERE drug_id=$1
-		`, d.ID).Scan(&prescriptionCount)
-		if err != nil {
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM prescription_lines WHERE drug_id=$1`, d.ID).Scan(&prescriptionCount); err != nil {
 			return nil, fmt.Errorf("failed to check prescriptions: %w", err)
 		}
 
@@ -382,74 +307,67 @@ func (r *postgresPharmacyRepository) UpdateDrug(ctx context.Context, d *entities
 
 	if oldCode == nil && newCode != nil {
 		// Case 1: Creating a code (previously no code) - follow create logic
-		firstEmptySpot, err := findFirstEmptyDrugCode(ctx, tx, *newCode)
+		firstEmptySpot, err := findFirstEmptyDrugCode(ctx, tx, int64(*newCode))
 		if err != nil {
 			return nil, fmt.Errorf("failed to find empty drug code: %w", err)
 		}
 
-		if firstEmptySpot > *newCode {
-			_, err = tx.ExecContext(ctx, `
+		if firstEmptySpot > int64(*newCode) {
+			if _, err = tx.Exec(ctx, `
 				UPDATE drugs
 				SET drug_code = drug_code + 1
 				WHERE drug_code >= $1 AND drug_code < $2
 				AND id != $3
-			`, *newCode, firstEmptySpot, d.ID)
-			if err != nil {
+			`, *newCode, firstEmptySpot, d.ID); err != nil {
 				return nil, fmt.Errorf("failed to shift drug codes: %w", err)
 			}
 		}
 
 	} else if oldCode != nil && newCode == nil {
 		// Case 2: Deleting a code - decrement all codes after old_code (pull up all till the end)
-		_, err = tx.ExecContext(ctx, `
-			UPDATE drugs
-			SET drug_code = drug_code - 1
-			WHERE drug_code > $1
-			AND id != $2
-		`, *oldCode, d.ID)
-		if err != nil {
+		if _, err := tx.Exec(ctx, `
+			UPDATE drugs SET drug_code = drug_code - 1 WHERE drug_code > $1 AND id != $2
+		`, *oldCode, d.ID); err != nil {
 			return nil, fmt.Errorf("failed to shift drug codes: %w", err)
 		}
 
-	} else if oldCode != nil && newCode != nil && *oldCode != *newCode {
+	} else if oldCode != nil && *oldCode != *newCode {
 		if *newCode > *oldCode {
 			// Case 3: Increasing code - decrement codes from new_code backwards until empty spot or old_code
 			// Find first empty spot going backwards from new_code to old_code
-			firstEmpty, err := findFirstEmptyBackwards(ctx, tx, *newCode, *oldCode)
+			firstEmpty, err := findFirstEmptyBackwards(ctx, tx, int64(*newCode), int64(*oldCode))
 			if err != nil {
 				return nil, fmt.Errorf("failed to find empty spot backwards: %w", err)
 			}
 
 			// Decrement all codes in range (firstEmpty, newCode] down by 1
-			if firstEmpty < *newCode {
-				_, err = tx.ExecContext(ctx, `
+			if firstEmpty < int64(*newCode) {
+				if _, err = tx.Exec(ctx, `
 					UPDATE drugs
 					SET drug_code = drug_code - 1
 					WHERE drug_code > $1 AND drug_code <= $2
 					AND id != $3
-				`, firstEmpty, *newCode, d.ID)
-				if err != nil {
+				`, firstEmpty, *newCode, d.ID); err != nil {
 					return nil, fmt.Errorf("failed to shift drug codes: %w", err)
 				}
 			}
 
-		} else if *newCode < *oldCode {
+		} else {
 			// Case 2: Decreasing code - increment codes from new_code forwards until empty spot or old_code
 			// Find first empty spot going forwards from new_code to old_code
-			firstEmpty, err := findFirstEmptyForwards(ctx, tx, *newCode, *oldCode)
+			firstEmpty, err := findFirstEmptyForwards(ctx, tx, int64(*newCode), int64(*oldCode))
 			if err != nil {
 				return nil, fmt.Errorf("failed to find empty spot forwards: %w", err)
 			}
 
 			// Increment all codes in range [newCode, firstEmpty) up by 1
-			if firstEmpty > *newCode {
-				_, err = tx.ExecContext(ctx, `
+			if firstEmpty > int64(*newCode) {
+				if _, err = tx.Exec(ctx, `
 					UPDATE drugs
 					SET drug_code = drug_code + 1
 					WHERE drug_code >= $1 AND drug_code < $2
 					AND id != $3
-				`, *newCode, firstEmpty, d.ID)
-				if err != nil {
+				`, *newCode, firstEmpty, d.ID); err != nil {
 					return nil, fmt.Errorf("failed to shift drug codes: %w", err)
 				}
 			}
@@ -457,32 +375,28 @@ func (r *postgresPharmacyRepository) UpdateDrug(ctx context.Context, d *entities
 		// If oldCode == newCode, no shifting needed
 	}
 
-	res, err := tx.ExecContext(ctx, qDrugUpdate,
-		d.ID, d.GenericName, d.BrandName, d.DrugCode,
-		d.DosageFormCode, d.RouteCode,
-		d.StrengthNum, d.StrengthUnitNum, d.StrengthDen, d.StrengthUnitDen,
-		d.DispenseUnit, d.PieceContentAmount, d.PieceContentUnit,
-		d.IsFractionalAllowed, d.DisplayAsPercentage, d.Barcode, d.Notes, d.IsActive,
-	)
-	if err != nil {
+	if err := q.UpdateDrug(ctx, toUpdateDrugParams(d)); err != nil {
 		return nil, err
 	}
-	if aff, _ := res.RowsAffected(); aff == 0 {
+	// Ensure row existed
+	if _, err := q.GetDrug(ctx, d.ID); errors.Is(err, pgx.ErrNoRows) {
 		return nil, errors.New("drug not found")
 	}
 	return r.GetDrug(ctx, d.ID)
 }
 
-const qDrugDelete = `DELETE FROM drugs WHERE id=$1`
-
 func (r *postgresPharmacyRepository) DeleteDrug(ctx context.Context, id int64) error {
-	dbx := DBFromCtx(ctx, r.Conn)
+	q := r.q(ctx)
+
+	// Ensure exists
+	if _, err := q.GetDrug(ctx, id); errors.Is(err, pgx.ErrNoRows) {
+		return errors.New("drug not found")
+	} else if err != nil {
+		return err
+	}
 
 	// Check if drug has any prescriptions
-	var prescriptionCount int
-	err := dbx.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM prescription_lines WHERE drug_id=$1
-	`, id).Scan(&prescriptionCount)
+	prescriptionCount, err := q.CountPrescriptionLinesForDrug(ctx, id)
 	if err != nil {
 		return fmt.Errorf("failed to check prescriptions: %w", err)
 	}
@@ -491,107 +405,72 @@ func (r *postgresPharmacyRepository) DeleteDrug(ctx context.Context, id int64) e
 		return fmt.Errorf("cannot delete drug because it is already used in %d prescription(s)", prescriptionCount)
 	}
 
-	res, err := dbx.ExecContext(ctx, qDrugDelete, id)
-	if err != nil {
-		return err
-	}
-	if aff, _ := res.RowsAffected(); aff == 0 {
-		return errors.New("drug not found")
-	}
-	return nil
+	return q.DeleteDrug(ctx, id)
 }
 
 // -----------------------------------------------------------------------------
 //  BATCHES & LOCATIONS (quantities in DispenseUnit)
 // -----------------------------------------------------------------------------
 
-const qBatchList = `
-  SELECT id, drug_id, batch_number, expiry_date, supplier, quantity, created_at, updated_at
-  FROM drug_batches
-  WHERE drug_id=$1
-  ORDER BY expiry_date NULLS LAST, batch_number, id`
-
 func (r *postgresPharmacyRepository) ListBatches(ctx context.Context, drugID int64) ([]entities.BatchDetail, error) {
-	dbx := DBFromCtx(ctx, r.Conn)
+	q := r.q(ctx)
 
-	rows, err := dbx.QueryContext(ctx, qBatchList, drugID)
+	batchRows, err := q.ListBatchesByDrug(ctx, drugID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	batches := make([]entities.DrugBatch, 0, 64)
-	batchIDs := make([]int64, 0, 64)
-	for rows.Next() {
-		var b entities.DrugBatch
-		if err := rows.Scan(&b.ID, &b.DrugID, &b.BatchNumber, &b.ExpiryDate, &b.Supplier, &b.Quantity, &b.CreatedAt, &b.UpdatedAt); err != nil {
-			return nil, err
-		}
-		batches = append(batches, b)
-		batchIDs = append(batchIDs, b.ID)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if len(batches) == 0 {
+	if len(batchRows) == 0 {
 		return []entities.BatchDetail{}, nil
 	}
 
-	locRows, err := dbx.QueryContext(ctx, `
-		SELECT id, batch_id, location, quantity, created_at, updated_at
-		FROM batch_locations
-		WHERE batch_id = ANY($1)
-		ORDER BY batch_id, location, id`, pq.Array(batchIDs))
+	batchIDs := make([]int64, 0, len(batchRows))
+	batches := make([]db.DrugBatch, 0, len(batchRows))
+	for _, row := range batchRows {
+		batches = append(batches, toBatchFromListRow(row))
+		batchIDs = append(batchIDs, row.ID)
+	}
+
+	locRows, err := q.ListBatchLocationsByBatchIDs(ctx, batchIDs)
 	if err != nil {
 		return nil, err
 	}
-	defer locRows.Close()
-
-	locsByBatch := make(map[int64][]entities.DrugBatchLocation, len(batchIDs))
-	for locRows.Next() {
-		var l entities.DrugBatchLocation
-		if err := locRows.Scan(&l.ID, &l.BatchID, &l.Location, &l.Quantity, &l.CreatedAt, &l.UpdatedAt); err != nil {
-			return nil, err
-		}
-		locsByBatch[l.BatchID] = append(locsByBatch[l.BatchID], l)
-	}
-	if err := locRows.Err(); err != nil {
-		return nil, err
+	locsByBatch := make(map[int64][]db.BatchLocation, len(batchIDs))
+	for _, row := range locRows {
+		locsByBatch[row.BatchID] = append(locsByBatch[row.BatchID], toBatchLocationFromIDsRow(row))
 	}
 
 	out := make([]entities.BatchDetail, 0, len(batches))
 	for _, b := range batches {
-		expKey := b.ExpiryDate
 		out = append(out, entities.BatchDetail{
 			DrugBatch:      b,
 			DispenseUnit:   "", // optional to fill if you join presentation for UI; FE usually knows it
-			ExpirySortKey:  expKey,
+			ExpirySortKey:  b.ExpiryDate,
 			BatchLocations: locsByBatch[b.ID],
 		})
 	}
 	return out, nil
 }
 
-const qBatchGet = `
-  SELECT id, drug_id, batch_number, expiry_date, supplier, quantity, created_at, updated_at
-  FROM drug_batches WHERE id=$1`
-
 func (r *postgresPharmacyRepository) GetBatch(ctx context.Context, batchID int64) (*entities.BatchDetail, error) {
-	dbx := DBFromCtx(ctx, r.Conn)
-	var b entities.DrugBatch
-	err := dbx.QueryRowContext(ctx, qBatchGet, batchID).
-		Scan(&b.ID, &b.DrugID, &b.BatchNumber, &b.ExpiryDate, &b.Supplier, &b.Quantity, &b.CreatedAt, &b.UpdatedAt)
-	if err == sql.ErrNoRows {
+	q := r.q(ctx)
+	bRow, err := q.GetBatch(ctx, batchID)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errors.New("batch not found")
 	}
 	if err != nil {
 		return nil, err
 	}
 
-	locs, err := r.ListBatchLocations(ctx, b.ID)
+	locRows, err := q.ListBatchLocationsByBatch(ctx, batchID)
 	if err != nil {
 		return nil, err
 	}
+	locs := make([]db.BatchLocation, 0, len(locRows))
+	for _, row := range locRows {
+		locs = append(locs, toBatchLocationRow(row))
+	}
+
+	b := toBatchFromGetRow(bRow)
 	return &entities.BatchDetail{
 		DrugBatch:      b,
 		ExpirySortKey:  b.ExpiryDate,
@@ -599,106 +478,96 @@ func (r *postgresPharmacyRepository) GetBatch(ctx context.Context, batchID int64
 	}, nil
 }
 
-const qBatchCreate = `
-  INSERT INTO drug_batches (drug_id, batch_number, expiry_date, supplier, quantity)
-  VALUES ($1,$2,$3,$4,COALESCE($5,0))
-  RETURNING id`
-
-func (r *postgresPharmacyRepository) CreateBatch(ctx context.Context, b *entities.DrugBatch, locations []entities.DrugBatchLocation) (*entities.BatchDetail, error) {
+func (r *postgresPharmacyRepository) CreateBatch(ctx context.Context, b *db.DrugBatch, locations []db.BatchLocation) (*entities.BatchDetail, error) {
 	tx, ok := TxFromCtx(ctx)
 	own := false
 	var err error
 	if !ok {
-		tx, err = r.Conn.BeginTx(ctx, nil)
+		tx, err = r.Conn.Begin(ctx)
 		if err != nil {
 			return nil, err
 		}
 		own = true
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback(ctx) }()
 	}
+	q := r.queries.WithTx(tx)
 
-	var id int64
-	if err := tx.QueryRowContext(ctx, qBatchCreate,
-		b.DrugID, b.BatchNumber, b.ExpiryDate, b.Supplier, b.Quantity,
-	).Scan(&id); err != nil {
+	params := db.InsertBatchParams{
+		DrugID:      b.DrugID,
+		BatchNumber: b.BatchNumber,
+		ExpiryDate:  b.ExpiryDate,
+		Supplier:    b.Supplier,
+		Column5:     b.Quantity,
+	}
+	id, err := q.InsertBatch(ctx, params)
+	if err != nil {
 		return nil, err
 	}
 
 	if len(locations) > 0 {
-		stmt, err := tx.PrepareContext(ctx, `
-		  INSERT INTO batch_locations (batch_id, location, quantity)
-		  VALUES ($1,$2,$3) RETURNING id, created_at, updated_at`)
-		if err != nil {
-			return nil, err
-		}
-		defer stmt.Close()
-
 		for i := range locations {
 			if locations[i].Quantity < 0 {
 				return nil, fmt.Errorf("location %q has negative quantity", locations[i].Location)
 			}
-			var locID int64
-			var ca, ua time.Time
-			if err := stmt.QueryRowContext(ctx, id, locations[i].Location, locations[i].Quantity).Scan(&locID, &ca, &ua); err != nil {
+			locRow, err := q.InsertBatchLocation(ctx, db.InsertBatchLocationParams{
+				BatchID:  id,
+				Location: locations[i].Location,
+				Quantity: locations[i].Quantity,
+			})
+			if err != nil {
 				return nil, err
 			}
-			locations[i].ID = locID
+			locations[i].ID = locRow.ID
 			locations[i].BatchID = id
-			locations[i].CreatedAt = ca
-			locations[i].UpdatedAt = ua
+			locations[i].CreatedAt = locRow.CreatedAt
+			locations[i].UpdatedAt = locRow.UpdatedAt
 		}
 	}
 
 	if own {
-		if err := tx.Commit(); err != nil {
+		if err := tx.Commit(ctx); err != nil {
 			return nil, err
 		}
 	}
 	return r.GetBatch(ctx, id)
 }
 
-const qBatchUpdate = `
-  UPDATE drug_batches
-  SET batch_number=$2, expiry_date=$3, supplier=$4
-  WHERE id=$1`
-
-func (r *postgresPharmacyRepository) UpdateBatch(ctx context.Context, b *entities.DrugBatch, locations []entities.DrugBatchLocation) (*entities.BatchDetail, error) {
+func (r *postgresPharmacyRepository) UpdateBatch(ctx context.Context, b *db.DrugBatch, locations []db.BatchLocation) (*entities.BatchDetail, error) {
 	tx, ok := TxFromCtx(ctx)
 	own := false
 	var err error
 	if !ok {
-		tx, err = r.Conn.BeginTx(ctx, nil)
+		tx, err = r.Conn.Begin(ctx)
 		if err != nil {
 			return nil, err
 		}
 		own = true
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback(ctx) }()
 	}
+	q := r.queries.WithTx(tx)
 
-	// Update batch itself (batch_number, expiry_date, supplier)
-	// drug_id and quantity cannot be edited (drug_id is fixed, quantity is auto-synced from locations)
-	res, err := tx.ExecContext(ctx, qBatchUpdate,
-		b.ID, b.BatchNumber, b.ExpiryDate, b.Supplier)
-	if err != nil {
-		return nil, err
-	}
-	if aff, _ := res.RowsAffected(); aff == 0 {
-		return nil, errors.New("batch not found")
-	}
-
-	// Get current batch locations from database
-	currentLocs, err := r.listBatchLocationsTx(ctx, tx, b.ID)
-	if err != nil {
+	if err := q.UpdateBatch(ctx, db.UpdateBatchParams{
+		ID:          b.ID,
+		BatchNumber: b.BatchNumber,
+		ExpiryDate:  b.ExpiryDate,
+		Supplier:    b.Supplier,
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.New("batch not found")
+		}
 		return nil, err
 	}
 
-	// Build a map of current locations by ID for quick lookup
-	currentLocsMap := make(map[int64]entities.DrugBatchLocation)
-	for _, loc := range currentLocs {
+	currentLocRows, err := q.ListBatchLocationsByBatch(ctx, b.ID)
+	if err != nil {
+		return nil, err
+	}
+	currentLocsMap := make(map[int64]db.BatchLocation)
+	for _, row := range currentLocRows {
+		loc := toBatchLocationRow(row)
 		currentLocsMap[loc.ID] = loc
 	}
 
-	// Build a map of locations to keep (from payload) by ID
 	payloadLocsMap := make(map[int64]bool)
 	for _, loc := range locations {
 		if loc.ID > 0 {
@@ -706,7 +575,6 @@ func (r *postgresPharmacyRepository) UpdateBatch(ctx context.Context, b *entitie
 		}
 	}
 
-	// 1. Update or create locations from payload
 	for i := range locations {
 		loc := &locations[i]
 		if loc.Quantity < 0 {
@@ -714,7 +582,6 @@ func (r *postgresPharmacyRepository) UpdateBatch(ctx context.Context, b *entitie
 		}
 
 		if loc.ID > 0 {
-			// Existing location - check if it belongs to this batch
 			currentLoc, exists := currentLocsMap[loc.ID]
 			if !exists {
 				return nil, fmt.Errorf("batch location with id %d not found", loc.ID)
@@ -723,106 +590,65 @@ func (r *postgresPharmacyRepository) UpdateBatch(ctx context.Context, b *entitie
 				return nil, fmt.Errorf("batch location %d does not belong to batch %d", loc.ID, b.ID)
 			}
 
-			// Update location if location name or quantity changed
 			if currentLoc.Location != loc.Location || currentLoc.Quantity != loc.Quantity {
-				_, err := tx.ExecContext(ctx, `
-					UPDATE batch_locations 
-					SET location=$2, quantity=$3, updated_at=NOW()
-					WHERE id=$1`,
-					loc.ID, loc.Location, loc.Quantity)
-				if err != nil {
+				if err := q.UpdateBatchLocation(ctx, db.UpdateBatchLocationParams{
+					ID:       loc.ID,
+					Location: loc.Location,
+					Quantity: loc.Quantity,
+				}); err != nil {
 					return nil, fmt.Errorf("failed to update batch location %d: %w", loc.ID, err)
 				}
 			}
 		} else {
-			// New location - create it
-			var locID int64
-			var ca, ua time.Time
-			err := tx.QueryRowContext(ctx, `
-				INSERT INTO batch_locations (batch_id, location, quantity)
-				VALUES ($1,$2,$3) RETURNING id, created_at, updated_at`,
-				b.ID, loc.Location, loc.Quantity).Scan(&locID, &ca, &ua)
+			locRow, err := q.InsertBatchLocation(ctx, db.InsertBatchLocationParams{
+				BatchID:  b.ID,
+				Location: loc.Location,
+				Quantity: loc.Quantity,
+			})
 			if err != nil {
 				return nil, fmt.Errorf("failed to create batch location: %w", err)
 			}
-			loc.ID = locID
+			loc.ID = locRow.ID
 			loc.BatchID = b.ID
-			loc.CreatedAt = ca
-			loc.UpdatedAt = ua
+			loc.CreatedAt = locRow.CreatedAt
+			loc.UpdatedAt = locRow.UpdatedAt
 		}
 	}
 
-	// 2. Delete locations that exist in DB but not in payload
-	// First, check if any of these locations are referenced by prescriptions
-	for _, currentLoc := range currentLocs {
+	for _, currentLoc := range currentLocsMap {
 		if !payloadLocsMap[currentLoc.ID] {
-			// Location exists in DB but not in payload - check if referenced
-			var referenceCount int
-			err := tx.QueryRowContext(ctx, `
-				SELECT COUNT(*) 
-				FROM prescription_batch_items 
-				WHERE batch_location_id = $1`,
-				currentLoc.ID).Scan(&referenceCount)
+			referenceCount, err := q.CountPrescriptionAllocationsForLocation(ctx, currentLoc.ID)
 			if err != nil {
 				return nil, fmt.Errorf("failed to check prescription references: %w", err)
 			}
-
 			if referenceCount > 0 {
 				return nil, fmt.Errorf("cannot delete batch location %d (location: %q) because it is allocated to %d prescription line(s)", currentLoc.ID, currentLoc.Location, referenceCount)
 			}
-
-			// Safe to delete
-			_, err = tx.ExecContext(ctx, `DELETE FROM batch_locations WHERE id=$1`, currentLoc.ID)
-			if err != nil {
+			if err := q.DeleteBatchLocation(ctx, currentLoc.ID); err != nil {
 				return nil, fmt.Errorf("failed to delete batch location %d: %w", currentLoc.ID, err)
 			}
 		}
 	}
 
 	if own {
-		if err := tx.Commit(); err != nil {
+		if err := tx.Commit(ctx); err != nil {
 			return nil, err
 		}
 	}
 	return r.GetBatch(ctx, b.ID)
 }
 
-// Helper function to list batch locations within a transaction
-func (r *postgresPharmacyRepository) listBatchLocationsTx(ctx context.Context, tx *sql.Tx, batchID int64) ([]entities.DrugBatchLocation, error) {
-	rows, err := tx.QueryContext(ctx, `
-	  SELECT id, batch_id, location, quantity, created_at, updated_at
-	  FROM batch_locations
-	  WHERE batch_id=$1
-	  ORDER BY location, id`, batchID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []entities.DrugBatchLocation
-	for rows.Next() {
-		var l entities.DrugBatchLocation
-		if err := rows.Scan(&l.ID, &l.BatchID, &l.Location, &l.Quantity, &l.CreatedAt, &l.UpdatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, l)
-	}
-	return out, rows.Err()
-}
-
-const qBatchDelete = `DELETE FROM drug_batches WHERE id=$1`
-
 func (r *postgresPharmacyRepository) DeleteBatch(ctx context.Context, batchID int64) error {
-	dbx := DBFromCtx(ctx, r.Conn)
+	q := r.q(ctx)
+
+	if _, err := q.GetBatch(ctx, batchID); errors.Is(err, pgx.ErrNoRows) {
+		return errors.New("batch not found")
+	} else if err != nil {
+		return err
+	}
 
 	// Check if any batch locations belonging to this batch are referenced by prescriptions
-	var referenceCount int
-	err := dbx.QueryRowContext(ctx, `
-		SELECT COUNT(*) 
-		FROM prescription_batch_items pbi
-		JOIN batch_locations bl ON bl.id = pbi.batch_location_id
-		WHERE bl.batch_id = $1
-	`, batchID).Scan(&referenceCount)
+	referenceCount, err := q.CountPrescriptionAllocationsForBatch(ctx, batchID)
 	if err != nil {
 		return fmt.Errorf("failed to check prescription references: %w", err)
 	}
@@ -831,119 +657,76 @@ func (r *postgresPharmacyRepository) DeleteBatch(ctx context.Context, batchID in
 		return fmt.Errorf("cannot delete batch because its locations are allocated to %d prescription line(s)", referenceCount)
 	}
 
-	res, err := dbx.ExecContext(ctx, qBatchDelete, batchID)
-	if err != nil {
-		return err
-	}
-	if aff, _ := res.RowsAffected(); aff == 0 {
-		return errors.New("batch not found")
-	}
-	return nil
+	return q.DeleteBatch(ctx, batchID)
 }
 
 // -----------------------------------------------------------------------------
 //  LOCATIONS
 // -----------------------------------------------------------------------------
 
-func (r *postgresPharmacyRepository) ListBatchLocations(ctx context.Context, batchID int64) ([]entities.DrugBatchLocation, error) {
-	dbx := DBFromCtx(ctx, r.Conn)
-	rows, err := dbx.QueryContext(ctx, `
-	  SELECT id, batch_id, location, quantity, created_at, updated_at
-	  FROM batch_locations
-	  WHERE batch_id=$1
-	  ORDER BY location, id`, batchID)
+func (r *postgresPharmacyRepository) ListBatchLocations(ctx context.Context, batchID int64) ([]db.BatchLocation, error) {
+	rows, err := r.q(ctx).ListBatchLocationsByBatch(ctx, batchID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	out := make([]db.BatchLocation, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, toBatchLocationRow(row))
+	}
+	return out, nil
+}
 
-	var out []entities.DrugBatchLocation
-	for rows.Next() {
-		var l entities.DrugBatchLocation
-		if err := rows.Scan(&l.ID, &l.BatchID, &l.Location, &l.Quantity, &l.CreatedAt, &l.UpdatedAt); err != nil {
-			return nil, err
+func (r *postgresPharmacyRepository) CreateBatchLocation(ctx context.Context, loc *db.BatchLocation) (*db.BatchLocation, error) {
+	locRow, err := r.q(ctx).InsertBatchLocation(ctx, db.InsertBatchLocationParams{
+		BatchID:  loc.BatchID,
+		Location: loc.Location,
+		Quantity: loc.Quantity,
+	})
+	if err != nil {
+		return nil, err
+	}
+	loc.ID = locRow.ID
+	loc.CreatedAt = locRow.CreatedAt
+	loc.UpdatedAt = locRow.UpdatedAt
+	return r.GetBatchLocation(ctx, loc.ID)
+}
+
+func (r *postgresPharmacyRepository) GetBatchLocation(ctx context.Context, id int64) (*db.BatchLocation, error) {
+	row, err := r.q(ctx).GetBatchLocation(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, errors.New("batch location not found")
+	}
+	if err != nil {
+		return nil, err
+	}
+	loc := toBatchLocationGetRow(row)
+	return &loc, nil
+}
+
+func (r *postgresPharmacyRepository) UpdateBatchLocation(ctx context.Context, loc *db.BatchLocation) (*db.BatchLocation, error) {
+	if err := r.q(ctx).UpdateBatchLocation(ctx, db.UpdateBatchLocationParams{
+		ID:       loc.ID,
+		Location: loc.Location,
+		Quantity: loc.Quantity,
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.New("batch location not found")
 		}
-		out = append(out, l)
-	}
-	return out, rows.Err()
-}
-
-const qLocCreate = `
-  INSERT INTO batch_locations (batch_id, location, quantity)
-  VALUES ($1,$2,$3) RETURNING id, created_at, updated_at`
-
-func (r *postgresPharmacyRepository) CreateBatchLocation(ctx context.Context, loc *entities.DrugBatchLocation) (*entities.DrugBatchLocation, error) {
-	dbx := DBFromCtx(ctx, r.Conn)
-	var id int64
-	var ca, ua time.Time
-	if err := dbx.QueryRowContext(ctx, qLocCreate, loc.BatchID, loc.Location, loc.Quantity).
-		Scan(&id, &ca, &ua); err != nil {
 		return nil, err
-	}
-	return r.GetBatchLocation(ctx, id)
-}
-
-const qLocGet = `
-  SELECT id, batch_id, location, quantity, created_at, updated_at
-  FROM batch_locations WHERE id=$1`
-
-func (r *postgresPharmacyRepository) GetBatchLocation(ctx context.Context, id int64) (*entities.DrugBatchLocation, error) {
-	dbx := DBFromCtx(ctx, r.Conn)
-	var l entities.DrugBatchLocation
-	err := dbx.QueryRowContext(ctx, qLocGet, id).
-		Scan(&l.ID, &l.BatchID, &l.Location, &l.Quantity, &l.CreatedAt, &l.UpdatedAt)
-	if err == sql.ErrNoRows {
-		return nil, errors.New("batch location not found")
-	}
-	return &l, err
-}
-
-const qLocUpdate = `
-  UPDATE batch_locations SET location=$2, quantity=$3, updated_at=NOW()
-  WHERE id=$1`
-
-func (r *postgresPharmacyRepository) UpdateBatchLocation(ctx context.Context, loc *entities.DrugBatchLocation) (*entities.DrugBatchLocation, error) {
-	dbx := DBFromCtx(ctx, r.Conn)
-
-	// Only allow updating location name and quantity
-	res, err := dbx.ExecContext(ctx, qLocUpdate, loc.ID, loc.Location, loc.Quantity)
-	if err != nil {
-		return nil, err
-	}
-	if aff, _ := res.RowsAffected(); aff == 0 {
-		return nil, errors.New("batch location not found")
 	}
 	return r.GetBatchLocation(ctx, loc.ID)
 }
 
-const qLocDelete = `DELETE FROM batch_locations WHERE id=$1`
-
 func (r *postgresPharmacyRepository) DeleteBatchLocation(ctx context.Context, id int64) error {
-	dbx := DBFromCtx(ctx, r.Conn)
-
-	// Check if batch location is referenced by any prescriptions
-	var referenceCount int
-	err := dbx.QueryRowContext(ctx, `
-		SELECT COUNT(*) 
-		FROM prescription_batch_items 
-		WHERE batch_location_id = $1
-	`, id).Scan(&referenceCount)
+	q := r.q(ctx)
+	referenceCount, err := q.CountPrescriptionAllocationsForLocation(ctx, id)
 	if err != nil {
 		return fmt.Errorf("failed to check prescription references: %w", err)
 	}
-
 	if referenceCount > 0 {
 		return fmt.Errorf("cannot delete batch location because it is allocated to %d prescription line(s)", referenceCount)
 	}
-
-	res, err := dbx.ExecContext(ctx, qLocDelete, id)
-	if err != nil {
-		return err
-	}
-	if aff, _ := res.RowsAffected(); aff == 0 {
-		return errors.New("location not found")
-	}
-	return nil
+	return q.DeleteBatchLocation(ctx, id)
 }
 
 // -----------------------------------------------------------------------------
@@ -965,25 +748,26 @@ func (r *postgresPharmacyRepository) GetDrugStock(ctx context.Context, drugID in
 
 	// 3) FEFO order and totals
 	sort.SliceStable(batches, func(i, j int) bool {
-		// nil expiry → last
-		ie, je := batches[i].ExpiryDate, batches[j].ExpiryDate
-		if ie == nil && je != nil {
+		// Use pointer-based expiry sort keys
+		t1 := batches[i].ExpirySortKey
+		t2 := batches[j].ExpirySortKey
+		if t1 == nil && t2 != nil {
 			return false
 		}
-		if ie != nil && je == nil {
+		if t1 != nil && t2 == nil {
 			return true
 		}
-		if ie == nil && je == nil {
-			return batches[i].BatchNumber < batches[j].BatchNumber
+		if t1 == nil && t2 == nil {
+			return batches[i].DrugBatch.BatchNumber < batches[j].DrugBatch.BatchNumber
 		}
-		if ie.Equal(*je) {
-			return batches[i].BatchNumber < batches[j].BatchNumber
+		if t1.Equal(*t2) {
+			return batches[i].DrugBatch.BatchNumber < batches[j].DrugBatch.BatchNumber
 		}
-		return ie.Before(*je)
+		return t1.Before(*t2)
 	})
 	total := 0
 	for _, b := range batches {
-		total += b.Quantity
+		total += int(b.DrugBatch.Quantity)
 	}
 
 	return &entities.DrugStock{
@@ -991,4 +775,137 @@ func (r *postgresPharmacyRepository) GetDrugStock(ctx context.Context, drugID in
 		Batches:  batches,
 		TotalQty: total,
 	}, nil
+}
+
+// -----------------------------------------------------------------------------
+// Helpers (conversion and null handling)
+// -----------------------------------------------------------------------------
+
+func toDrugFromGetRow(row db.GetDrugRow) db.Drug {
+	return db.Drug{
+		ID:                  row.ID,
+		GenericName:         row.GenericName,
+		BrandName:           row.BrandName,
+		DrugCode:            row.DrugCode,
+		DosageFormCode:      row.DosageFormCode,
+		RouteCode:           row.RouteCode,
+		StrengthNum:         row.StrengthNum,
+		StrengthUnitNum:     row.StrengthUnitNum,
+		StrengthDen:         row.StrengthDen,
+		StrengthUnitDen:     row.StrengthUnitDen,
+		DispenseUnit:        row.DispenseUnit,
+		PieceContentAmount:  row.PieceContentAmount,
+		PieceContentUnit:    row.PieceContentUnit,
+		IsFractionalAllowed: row.IsFractionalAllowed,
+		DisplayAsPercentage: row.DisplayAsPercentage,
+		Barcode:             row.Barcode,
+		Notes:               row.Notes,
+		IsActive:            row.IsActive,
+		CreatedAt:           row.CreatedAt,
+		UpdatedAt:           row.UpdatedAt,
+	}
+}
+
+func toInsertDrugParams(d *db.Drug) db.InsertDrugParams {
+	return db.InsertDrugParams{
+		GenericName:        d.GenericName,
+		BrandName:          d.BrandName,
+		DrugCode:           d.DrugCode,
+		DosageFormCode:     d.DosageFormCode,
+		RouteCode:          d.RouteCode,
+		StrengthNum:        d.StrengthNum,
+		StrengthUnitNum:    d.StrengthUnitNum,
+		StrengthDen:        d.StrengthDen,
+		StrengthUnitDen:    d.StrengthUnitDen,
+		DispenseUnit:       d.DispenseUnit,
+		PieceContentAmount: d.PieceContentAmount,
+		PieceContentUnit:   d.PieceContentUnit,
+		Column13:           d.IsFractionalAllowed,
+		Column14:           d.DisplayAsPercentage,
+		Barcode:            d.Barcode,
+		Notes:              d.Notes,
+		Column17:           d.IsActive,
+	}
+}
+
+func toUpdateDrugParams(d *db.Drug) db.UpdateDrugParams {
+	return db.UpdateDrugParams{
+		ID:                  d.ID,
+		GenericName:         d.GenericName,
+		BrandName:           d.BrandName,
+		DrugCode:            d.DrugCode,
+		DosageFormCode:      d.DosageFormCode,
+		RouteCode:           d.RouteCode,
+		StrengthNum:         d.StrengthNum,
+		StrengthUnitNum:     d.StrengthUnitNum,
+		StrengthDen:         d.StrengthDen,
+		StrengthUnitDen:     d.StrengthUnitDen,
+		DispenseUnit:        d.DispenseUnit,
+		PieceContentAmount:  d.PieceContentAmount,
+		PieceContentUnit:    d.PieceContentUnit,
+		IsFractionalAllowed: d.IsFractionalAllowed,
+		DisplayAsPercentage: d.DisplayAsPercentage,
+		Barcode:             d.Barcode,
+		Notes:               d.Notes,
+		IsActive:            d.IsActive,
+	}
+}
+
+func toBatchLocationRow(row db.ListBatchLocationsByBatchRow) db.BatchLocation {
+	return db.BatchLocation{
+		ID:        row.ID,
+		BatchID:   row.BatchID,
+		Location:  row.Location,
+		Quantity:  row.Quantity,
+		CreatedAt: row.CreatedAt,
+		UpdatedAt: row.UpdatedAt,
+	}
+}
+
+func toBatchLocationFromIDsRow(row db.ListBatchLocationsByBatchIDsRow) db.BatchLocation {
+	return db.BatchLocation{
+		ID:        row.ID,
+		BatchID:   row.BatchID,
+		Location:  row.Location,
+		Quantity:  row.Quantity,
+		CreatedAt: row.CreatedAt,
+		UpdatedAt: row.UpdatedAt,
+	}
+}
+
+func toBatchLocationGetRow(row db.GetBatchLocationRow) db.BatchLocation {
+	return db.BatchLocation{
+		ID:        row.ID,
+		BatchID:   row.BatchID,
+		Location:  row.Location,
+		Quantity:  row.Quantity,
+		CreatedAt: row.CreatedAt,
+		UpdatedAt: row.UpdatedAt,
+	}
+}
+
+func toBatchFromListRow(row db.ListBatchesByDrugRow) db.DrugBatch {
+	return db.DrugBatch{
+		ID:          row.ID,
+		DrugID:      row.DrugID,
+		BatchNumber: row.BatchNumber,
+		ExpiryDate:  row.ExpiryDate,
+		Supplier:    row.Supplier,
+		Quantity:    row.Quantity,
+		CreatedAt:   row.CreatedAt,
+		UpdatedAt:   row.UpdatedAt,
+	}
+}
+
+func toBatchFromGetRow(row db.GetBatchRow) db.DrugBatch {
+	return db.DrugBatch{
+		ID:          row.ID,
+		DrugID:      row.DrugID,
+		BatchNumber: row.BatchNumber,
+		ExpiryDate:  row.ExpiryDate,
+		Supplier:    row.Supplier,
+		Quantity:    row.Quantity,
+		CreatedAt:   row.CreatedAt,
+		UpdatedAt:   row.UpdatedAt,
+	}
 }
