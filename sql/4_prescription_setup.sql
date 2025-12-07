@@ -45,17 +45,17 @@ CREATE TABLE frequency_codes (
 );
 
 INSERT INTO frequency_codes (code, label, schedule_kind, every_n, frequency_per_schedule) VALUES
-  ('OM',  'Once Morning',        'day',  1, 1),
-  ('ON',  'Once Night',          'day',  1, 1),
-  ('OA',  'Once Afternoon',      'day',  1, 1),
-  ('BD',  'Twice a day',         'day',  1, 2),
-  ('TDS', '3 times a day',       'day',  1, 3),
-  ('QDS', '4 times a day',       'day',  1, 4),
-  ('EOD', 'Every other day',     'day',  2, 1),
-  ('q5h', 'Every 5 hours',       'hour', 5, 1),
-  ('q6h', 'Every 6 hours',       'hour', 6, 1),
-  ('q8h', 'Every 8 hours',       'hour', 8, 1),
-  ('q12h','Every 12 hours',      'hour', 12, 1);
+  ('OM',  'Once every morning',        'day',  1, 1),
+  ('ON',  'Once every night',          'day',  1, 1),
+  ('OA',  'Once every afternoon',      'day',  1, 1),
+  ('BD',  '2 times a day',             'day',  1, 2),
+  ('TDS', '3 times a day',             'day',  1, 3),
+  ('QDS', '4 times a day',             'day',  1, 4),
+  ('EOD', 'Every other day',           'day',  2, 1),
+  ('q4h', 'Every 4 hours',             'hour', 4, 1),
+  ('q6h', 'Every 6 hours',             'hour', 6, 1),
+  ('q8h', 'Every 8 hours',             'hour', 8, 1),
+  ('q12h','Every 12 hours',            'hour', 12, 1);
 
 -- converts any duration unit to hours
 CREATE OR REPLACE FUNCTION duration_to_hours(

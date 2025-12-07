@@ -78,12 +78,80 @@ func displayLabel(d entities.Drug) string {
 		}
 	}
 
-	// Prepend ATC code with a dot if present
-	if d.ATCCode != nil && *d.ATCCode != "" {
-		return fmt.Sprintf("%s. %s", *d.ATCCode, base)
+	// Prepend Drug code with a dot if present
+	if d.DrugCode != nil {
+		return fmt.Sprintf("%d. %s", *d.DrugCode, base)
 	}
 
 	return base
+}
+
+// findFirstEmptyBackwards finds the first empty spot going backwards from startCode down to minCode (inclusive).
+// Returns the empty spot or minCode if no gap found.
+func findFirstEmptyBackwards(ctx context.Context, tx *sql.Tx, startCode, minCode int64) (int64, error) {
+	var firstEmpty sql.NullInt64
+	err := tx.QueryRowContext(ctx, `
+		SELECT MAX(series_value)
+		FROM generate_series($1::INTEGER, $2::INTEGER) AS series_value
+		WHERE NOT EXISTS (
+			SELECT 1 FROM drugs WHERE drug_code = series_value
+		)
+	`, minCode, startCode).Scan(&firstEmpty)
+	if err != nil {
+		return 0, err
+	}
+
+	if firstEmpty.Valid {
+		return firstEmpty.Int64, nil
+	}
+
+	// No gap found, return minCode
+	return minCode, nil
+}
+
+// findFirstEmptyForwards finds the first empty spot going forwards from startCode up to maxCode (inclusive).
+// Returns the empty spot or maxCode if no gap found.
+func findFirstEmptyForwards(ctx context.Context, tx *sql.Tx, startCode, maxCode int64) (int64, error) {
+	var firstEmpty sql.NullInt64
+	err := tx.QueryRowContext(ctx, `
+		SELECT MIN(series_value)
+		FROM generate_series($1::INTEGER, $2::INTEGER) AS series_value
+		WHERE NOT EXISTS (
+			SELECT 1 FROM drugs WHERE drug_code = series_value
+		)
+	`, startCode, maxCode).Scan(&firstEmpty)
+	if err != nil {
+		return 0, err
+	}
+
+	if firstEmpty.Valid {
+		return firstEmpty.Int64, nil
+	}
+
+	// No gap found, return maxCode
+	return maxCode, nil
+}
+
+// findFirstEmptyDrugCode finds the first available drug_code starting from startCode.
+// Returns startCode if it's available, otherwise finds the next gap.
+func findFirstEmptyDrugCode(ctx context.Context, tx *sql.Tx, startCode int64) (int64, error) {
+
+	// Find the maximum existing drug_code
+	var maxCode sql.NullInt64
+	err := tx.QueryRowContext(ctx, `
+		SELECT MAX(drug_code) FROM drugs WHERE drug_code IS NOT NULL
+	`).Scan(&maxCode)
+	if err != nil {
+		return 0, err
+	}
+
+	// If no codes exist or startCode is beyond max, startCode is available
+	if !maxCode.Valid || startCode > maxCode.Int64 {
+		return startCode, nil
+	}
+
+	return findFirstEmptyForwards(ctx, tx, startCode, maxCode.Int64+1)
+
 }
 
 func derefFloat(p *float64) float64 {
@@ -125,7 +193,7 @@ func equalStrPtr(a, b *string) bool {
 // -----------------------------------------------------------------------------
 
 const qDrugsList = `
-  SELECT id, generic_name, brand_name, atc_code, dosage_form_code, route_code,
+  SELECT id, generic_name, brand_name, drug_code, dosage_form_code, route_code,
     strength_num, strength_unit_num, strength_den, strength_unit_den,
     dispense_unit, piece_content_amount, piece_content_unit,
     is_fractional_allowed, display_as_percentage, barcode, notes, is_active, created_at, updated_at
@@ -140,7 +208,7 @@ func (r *postgresPharmacyRepository) ListDrugs(ctx context.Context, q *string) (
 	args := []any{}
 	if q != nil && *q != "" {
 		query = `
-		  SELECT id, generic_name, brand_name, atc_code, dosage_form_code, route_code,
+		  SELECT id, generic_name, brand_name, drug_code, dosage_form_code, route_code,
 		    strength_num, strength_unit_num, strength_den, strength_unit_den,
 		    dispense_unit, piece_content_amount, piece_content_unit,
 		    is_fractional_allowed, display_as_percentage, barcode, notes, is_active, created_at, updated_at
@@ -160,7 +228,7 @@ func (r *postgresPharmacyRepository) ListDrugs(ctx context.Context, q *string) (
 	for rows.Next() {
 		var d entities.Drug
 		if err := rows.Scan(
-			&d.ID, &d.GenericName, &d.BrandName, &d.ATCCode,
+			&d.ID, &d.GenericName, &d.BrandName, &d.DrugCode,
 			&d.DosageFormCode, &d.RouteCode,
 			&d.StrengthNum, &d.StrengthUnitNum, &d.StrengthDen, &d.StrengthUnitDen,
 			&d.DispenseUnit, &d.PieceContentAmount, &d.PieceContentUnit,
@@ -182,7 +250,7 @@ func (r *postgresPharmacyRepository) ListDrugs(ctx context.Context, q *string) (
 
 const qDrugCreate = `
   INSERT INTO drugs (
-    generic_name, brand_name, atc_code, dosage_form_code, route_code,
+    generic_name, brand_name, drug_code, dosage_form_code, route_code,
     strength_num, strength_unit_num, strength_den, strength_unit_den,
     dispense_unit, piece_content_amount, piece_content_unit,
     is_fractional_allowed, display_as_percentage, barcode, notes, is_active
@@ -191,10 +259,32 @@ const qDrugCreate = `
   RETURNING id`
 
 func (r *postgresPharmacyRepository) CreateDrug(ctx context.Context, d *entities.Drug) (*entities.DrugView, error) {
-	dbx := DBFromCtx(ctx, r.Conn)
+	tx, ok := TxFromCtx(ctx)
+	if !ok {
+		return nil, errors.New("transaction not found")
+	}
+
+	if d.DrugCode != nil {
+		// Find the first empty spot starting from the requested code
+		firstEmptySpot, err := findFirstEmptyDrugCode(ctx, tx, *d.DrugCode)
+		if err != nil {
+			return nil, fmt.Errorf("failed to find empty drug code: %w", err)
+		}
+
+		// If the first empty spot is greater than requested code, shift codes to make room
+		_, err = tx.ExecContext(ctx, `
+			UPDATE drugs
+			SET drug_code = drug_code + 1
+			WHERE drug_code >= $1 AND drug_code < $2
+		`, *d.DrugCode, firstEmptySpot)
+		if err != nil {
+			return nil, fmt.Errorf("failed to shift drug codes: %w", err)
+		}
+	}
+
 	var id int64
-	if err := dbx.QueryRowContext(ctx, qDrugCreate,
-		d.GenericName, d.BrandName, d.ATCCode,
+	if err := tx.QueryRowContext(ctx, qDrugCreate,
+		d.GenericName, d.BrandName, d.DrugCode,
 		d.DosageFormCode, d.RouteCode,
 		d.StrengthNum, d.StrengthUnitNum, d.StrengthDen, d.StrengthUnitDen,
 		d.DispenseUnit, d.PieceContentAmount, d.PieceContentUnit,
@@ -202,11 +292,12 @@ func (r *postgresPharmacyRepository) CreateDrug(ctx context.Context, d *entities
 	).Scan(&id); err != nil {
 		return nil, err
 	}
+
 	return r.GetDrug(ctx, id)
 }
 
 const qDrugGet = `
-  SELECT id, generic_name, brand_name, atc_code, dosage_form_code, route_code,
+  SELECT id, generic_name, brand_name, drug_code, dosage_form_code, route_code,
     strength_num, strength_unit_num, strength_den, strength_unit_den,
     dispense_unit, piece_content_amount, piece_content_unit,
     is_fractional_allowed, display_as_percentage, barcode, notes, is_active, created_at, updated_at
@@ -216,7 +307,7 @@ func (r *postgresPharmacyRepository) GetDrug(ctx context.Context, id int64) (*en
 	dbx := DBFromCtx(ctx, r.Conn)
 	var d entities.Drug
 	err := dbx.QueryRowContext(ctx, qDrugGet, id).Scan(
-		&d.ID, &d.GenericName, &d.BrandName, &d.ATCCode,
+		&d.ID, &d.GenericName, &d.BrandName, &d.DrugCode,
 		&d.DosageFormCode, &d.RouteCode,
 		&d.StrengthNum, &d.StrengthUnitNum, &d.StrengthDen, &d.StrengthUnitDen,
 		&d.DispenseUnit, &d.PieceContentAmount, &d.PieceContentUnit,
@@ -240,7 +331,7 @@ func (r *postgresPharmacyRepository) GetDrug(ctx context.Context, id int64) (*en
 
 const qDrugUpdate = `
   UPDATE drugs SET
-    generic_name=$2, brand_name=$3, atc_code=$4,
+    generic_name=$2, brand_name=$3, drug_code=$4,
     dosage_form_code=$5, route_code=$6,
     strength_num=$7, strength_unit_num=$8, strength_den=$9, strength_unit_den=$10,
     dispense_unit=$11, piece_content_amount=$12, piece_content_unit=$13,
@@ -248,7 +339,10 @@ const qDrugUpdate = `
   WHERE id=$1`
 
 func (r *postgresPharmacyRepository) UpdateDrug(ctx context.Context, d *entities.Drug) (*entities.DrugView, error) {
-	dbx := DBFromCtx(ctx, r.Conn)
+	tx, ok := TxFromCtx(ctx)
+	if !ok {
+		return nil, errors.New("transaction not found")
+	}
 
 	// Get current drug to compare fields
 	current, err := r.GetDrug(ctx, d.ID)
@@ -270,7 +364,7 @@ func (r *postgresPharmacyRepository) UpdateDrug(ctx context.Context, d *entities
 	// If risky fields changed, check if drug has prescriptions
 	if riskyFieldChanged {
 		var prescriptionCount int
-		err := dbx.QueryRowContext(ctx, `
+		err := tx.QueryRowContext(ctx, `
 			SELECT COUNT(*) FROM prescription_lines WHERE drug_id=$1
 		`, d.ID).Scan(&prescriptionCount)
 		if err != nil {
@@ -278,12 +372,93 @@ func (r *postgresPharmacyRepository) UpdateDrug(ctx context.Context, d *entities
 		}
 
 		if prescriptionCount > 0 {
-			return nil, fmt.Errorf("cannot modify drug properties (strength, dispense unit, piece content) because this drug is already used in %d prescription(s). Only safe fields (name, ATC code, dosage form, route, notes, barcode, active status, display percentage) can be edited", prescriptionCount)
+			return nil, fmt.Errorf("cannot modify drug properties (strength, dispense unit, piece content) because this drug is already used in %d prescription(s). Only safe fields (name, drug code, dosage form, route, notes, barcode, active status, display percentage) can be edited", prescriptionCount)
 		}
 	}
 
-	res, err := dbx.ExecContext(ctx, qDrugUpdate,
-		d.ID, d.GenericName, d.BrandName, d.ATCCode,
+	// Handle drug_code shifting
+	oldCode := currentDrug.DrugCode
+	newCode := d.DrugCode
+
+	if oldCode == nil && newCode != nil {
+		// Case 1: Creating a code (previously no code) - follow create logic
+		firstEmptySpot, err := findFirstEmptyDrugCode(ctx, tx, *newCode)
+		if err != nil {
+			return nil, fmt.Errorf("failed to find empty drug code: %w", err)
+		}
+
+		if firstEmptySpot > *newCode {
+			_, err = tx.ExecContext(ctx, `
+				UPDATE drugs
+				SET drug_code = drug_code + 1
+				WHERE drug_code >= $1 AND drug_code < $2
+				AND id != $3
+			`, *newCode, firstEmptySpot, d.ID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to shift drug codes: %w", err)
+			}
+		}
+
+	} else if oldCode != nil && newCode == nil {
+		// Case 2: Deleting a code - decrement all codes after old_code (pull up all till the end)
+		_, err = tx.ExecContext(ctx, `
+			UPDATE drugs
+			SET drug_code = drug_code - 1
+			WHERE drug_code > $1
+			AND id != $2
+		`, *oldCode, d.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to shift drug codes: %w", err)
+		}
+
+	} else if oldCode != nil && newCode != nil && *oldCode != *newCode {
+		if *newCode > *oldCode {
+			// Case 3: Increasing code - decrement codes from new_code backwards until empty spot or old_code
+			// Find first empty spot going backwards from new_code to old_code
+			firstEmpty, err := findFirstEmptyBackwards(ctx, tx, *newCode, *oldCode)
+			if err != nil {
+				return nil, fmt.Errorf("failed to find empty spot backwards: %w", err)
+			}
+
+			// Decrement all codes in range (firstEmpty, newCode] down by 1
+			if firstEmpty < *newCode {
+				_, err = tx.ExecContext(ctx, `
+					UPDATE drugs
+					SET drug_code = drug_code - 1
+					WHERE drug_code > $1 AND drug_code <= $2
+					AND id != $3
+				`, firstEmpty, *newCode, d.ID)
+				if err != nil {
+					return nil, fmt.Errorf("failed to shift drug codes: %w", err)
+				}
+			}
+
+		} else if *newCode < *oldCode {
+			// Case 2: Decreasing code - increment codes from new_code forwards until empty spot or old_code
+			// Find first empty spot going forwards from new_code to old_code
+			firstEmpty, err := findFirstEmptyForwards(ctx, tx, *newCode, *oldCode)
+			if err != nil {
+				return nil, fmt.Errorf("failed to find empty spot forwards: %w", err)
+			}
+
+			// Increment all codes in range [newCode, firstEmpty) up by 1
+			if firstEmpty > *newCode {
+				_, err = tx.ExecContext(ctx, `
+					UPDATE drugs
+					SET drug_code = drug_code + 1
+					WHERE drug_code >= $1 AND drug_code < $2
+					AND id != $3
+				`, *newCode, firstEmpty, d.ID)
+				if err != nil {
+					return nil, fmt.Errorf("failed to shift drug codes: %w", err)
+				}
+			}
+		}
+		// If oldCode == newCode, no shifting needed
+	}
+
+	res, err := tx.ExecContext(ctx, qDrugUpdate,
+		d.ID, d.GenericName, d.BrandName, d.DrugCode,
 		d.DosageFormCode, d.RouteCode,
 		d.StrengthNum, d.StrengthUnitNum, d.StrengthDen, d.StrengthUnitDen,
 		d.DispenseUnit, d.PieceContentAmount, d.PieceContentUnit,
