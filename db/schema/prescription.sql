@@ -64,3 +64,15 @@ CREATE TABLE prescription_lines (
   updated_at         TIMESTAMPTZ,
   updated_by         BIGINT REFERENCES users(id)
 );
+
+CREATE TABLE prescription_batch_items (
+  id                    BIGSERIAL PRIMARY KEY,
+  line_id               BIGINT NOT NULL REFERENCES prescription_lines(id) ON DELETE CASCADE,
+  batch_location_id     BIGINT NOT NULL REFERENCES batch_locations(id),
+  quantity              INTEGER NOT NULL CHECK (quantity > 0), -- in dispense_unit
+
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by            BIGINT REFERENCES users(id),
+  updated_at            TIMESTAMPTZ,
+  updated_by            BIGINT REFERENCES users(id)
+);
