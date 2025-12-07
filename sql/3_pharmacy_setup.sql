@@ -55,7 +55,8 @@ CREATE TABLE drugs (
   id                BIGSERIAL PRIMARY KEY,
   generic_name      TEXT NOT NULL,           -- e.g., Amoxicillin
   brand_name        TEXT,                    -- optional
-  atc_code          TEXT,                    -- optional coding
+  drug_code         INTEGER,
+
   
   dosage_form_code  TEXT NOT NULL REFERENCES dosage_forms(code),
   route_code        TEXT NOT NULL REFERENCES routes(code),
@@ -91,6 +92,8 @@ CREATE TABLE drugs (
     generic_name, brand_name, dosage_form_code, route_code,
     strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit
   ),
+
+  CONSTRAINT uq_drug_code UNIQUE (drug_code) DEFERRABLE INITIALLY DEFERRED,
 
   -- Either solid OR liquid/cream style is valid, OR unknown strength (all strength fields NULL):
   CONSTRAINT ck_drug_style CHECK (
@@ -210,78 +213,78 @@ BEGIN;
 
 -- Paracetamol 500 mg TAB PO (solid → tab piece, no denominator)
 INSERT INTO drugs (
-  generic_name, brand_name, atc_code, dosage_form_code, route_code,
+  generic_name, brand_name, drug_code, dosage_form_code, route_code,
   strength_num, strength_unit_num, strength_den, strength_unit_den,
   dispense_unit, piece_content_amount, piece_content_unit, is_fractional_allowed, barcode, notes
 )
 VALUES
-  ('Paracetamol', 'Panadol', 'N02BE01', 'TAB', 'PO', 500, 'mg', NULL, NULL, 'tab', NULL, NULL, FALSE, NULL, '500 mg tablet')
+  ('Paracetamol', 'Panadol', '1', 'TAB', 'PO', 500, 'mg', NULL, NULL, 'tab', NULL, NULL, FALSE, NULL, '500 mg tablet')
 ON CONFLICT (generic_name, brand_name, dosage_form_code, route_code, strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit)
 DO NOTHING;
 
 -- Amoxicillin 250 mg/5 mL SUSP PO (liquid → bottle piece w/ 100 mL per bottle)
 INSERT INTO drugs (
-  generic_name, brand_name, atc_code, dosage_form_code, route_code,
+  generic_name, brand_name, drug_code, dosage_form_code, route_code,
   strength_num, strength_unit_num, strength_den, strength_unit_den,
   dispense_unit, piece_content_amount, piece_content_unit, is_fractional_allowed, barcode, notes
 )
 VALUES
-  ('Amoxicillin', 'Amoxil', 'J01CA04', 'SUSP', 'PO', 250, 'mg', 5, 'mL', 'bottle', 100, 'mL', FALSE, NULL, '250 mg/5 mL; 100 mL bottle')
+  ('Amoxicillin', 'Amoxil', '2', 'SUSP', 'PO', 250, 'mg', 5, 'mL', 'bottle', 100, 'mL', FALSE, NULL, '250 mg/5 mL; 100 mL bottle')
 ON CONFLICT (generic_name, brand_name, dosage_form_code, route_code, strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit)
 DO NOTHING;
 
 -- Ibuprofen 100 mg/5 mL SYR PO (liquid → continuous mL, fractional allowed)
 INSERT INTO drugs (
-  generic_name, brand_name, atc_code, dosage_form_code, route_code,
+    generic_name, brand_name, drug_code, dosage_form_code, route_code,
   strength_num, strength_unit_num, strength_den, strength_unit_den,
   dispense_unit, piece_content_amount, piece_content_unit, is_fractional_allowed, barcode, notes
 )
 VALUES
-  ('Ibuprofen', 'Nurofen', 'M01AE01', 'SYR', 'PO', 100, 'mg', 5, 'mL', 'mL', NULL, NULL, TRUE, NULL, '100 mg/5 mL syrup')
+  ('Ibuprofen', 'Nurofen', '3', 'SYR', 'PO', 100, 'mg', 5, 'mL', 'mL', NULL, NULL, TRUE, NULL, '100 mg/5 mL syrup')
 ON CONFLICT (generic_name, brand_name, dosage_form_code, route_code, strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit)
 DO NOTHING;
 
 -- Hydrocortisone 1 g/100 g CREAM TOP (cream → continuous g)
 INSERT INTO drugs (
-  generic_name, brand_name, atc_code, dosage_form_code, route_code,
+  generic_name, brand_name, drug_code, dosage_form_code, route_code,
   strength_num, strength_unit_num, strength_den, strength_unit_den,
   dispense_unit, piece_content_amount, piece_content_unit, is_fractional_allowed, barcode, notes
 )
 VALUES
-  ('Hydrocortisone', 'Hytone', 'D07AA02', 'CREAM', 'TOP', 1, 'g', 100, 'g', 'g', NULL, NULL, FALSE, NULL, '1% (1 g/100 g) cream')
+  ('Hydrocortisone', 'Hytone', '4', 'CREAM', 'TOP', 1, 'g', 100, 'g', 'g', NULL, NULL, FALSE, NULL, '1% (1 g/100 g) cream')
 ON CONFLICT (generic_name, brand_name, dosage_form_code, route_code, strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit)
 DO NOTHING;
 
 -- Gentamicin eye drops 3 mg/mL DROP OPH (liquid → bottle 10 mL)
 INSERT INTO drugs (
-  generic_name, brand_name, atc_code, dosage_form_code, route_code,
+  generic_name, brand_name, drug_code, dosage_form_code, route_code,
   strength_num, strength_unit_num, strength_den, strength_unit_den,
   dispense_unit, piece_content_amount, piece_content_unit, is_fractional_allowed, barcode, notes
 )
 VALUES
-  ('Gentamicin', 'Garamycin', 'S01AA11', 'DROP', 'OPH', 3, 'mg', 1, 'mL', 'bottle', 10, 'mL', FALSE, NULL, '0.3% (3 mg/mL) ophthalmic drops; 10 mL')
+  ('Gentamicin', 'Garamycin', '5', 'DROP', 'OPH', 3, 'mg', 1, 'mL', 'bottle', 10, 'mL', FALSE, NULL, '0.3% (3 mg/mL) ophthalmic drops; 10 mL')
 ON CONFLICT (generic_name, brand_name, dosage_form_code, route_code, strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit)
 DO NOTHING;
 
 -- Ciprofloxacin 200 mg/100 mL INJ IV (infusion → continuous mL)
 INSERT INTO drugs (
-  generic_name, brand_name, atc_code, dosage_form_code, route_code,
+  generic_name, brand_name, drug_code, dosage_form_code, route_code,
   strength_num, strength_unit_num, strength_den, strength_unit_den,
   dispense_unit, piece_content_amount, piece_content_unit, is_fractional_allowed, barcode, notes
 )
 VALUES
-  ('Ciprofloxacin', 'Cipro IV', 'J01MA02', 'INJ', 'IV', 200, 'mg', 100, 'mL', 'mL', NULL, NULL, FALSE, NULL, '200 mg/100 mL IV bag')
+  ('Ciprofloxacin', 'Cipro IV', '6', 'INJ', 'IV', 200, 'mg', 100, 'mL', 'mL', NULL, NULL, FALSE, NULL, '200 mg/100 mL IV bag')
 ON CONFLICT (generic_name, brand_name, dosage_form_code, route_code, strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit)
 DO NOTHING;
 
 -- Vitamin D3 1000 IU/tab TAB PO (solid → tab)
 INSERT INTO drugs (
-  generic_name, brand_name, atc_code, dosage_form_code, route_code,
+  generic_name, brand_name, drug_code, dosage_form_code, route_code,
   strength_num, strength_unit_num, strength_den, strength_unit_den,
   dispense_unit, piece_content_amount, piece_content_unit, is_fractional_allowed, barcode, notes
 )
 VALUES
-  ('Cholecalciferol', 'Vit D3 1000IU', 'A11CC05', 'TAB', 'PO', 1000, 'IU', NULL, NULL, 'tab', NULL, NULL, FALSE, NULL, 'Vitamin D3 1000 IU tablet')
+  ('Cholecalciferol', 'Vit D3 1000IU', '7', 'TAB', 'PO', 1000, 'IU', NULL, NULL, 'tab', NULL, NULL, FALSE, NULL, 'Vitamin D3 1000 IU tablet')
 ON CONFLICT (generic_name, brand_name, dosage_form_code, route_code, strength_num, strength_unit_num, strength_den, strength_unit_den, dispense_unit)
 DO NOTHING;
 

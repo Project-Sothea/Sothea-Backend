@@ -11,7 +11,7 @@ type Drug struct {
 	ID          int64   `json:"id"`
 	GenericName string  `json:"genericName"`
 	BrandName   *string `json:"brandName,omitempty"`
-	ATCCode     *string `json:"atcCode,omitempty"`
+	DrugCode    *int64  `json:"drugCode,omitempty"`
 
 	DosageFormCode string `json:"dosageFormCode"` // e.g. "TAB","SYR","CREAM"
 	RouteCode      string `json:"routeCode"`      // e.g. "PO","TOP"

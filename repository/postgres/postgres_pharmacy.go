@@ -78,9 +78,9 @@ func displayLabel(d entities.Drug) string {
 		}
 	}
 
-	// Prepend ATC code with a dot if present
-	if d.ATCCode != nil && *d.ATCCode != "" {
-		return fmt.Sprintf("%s. %s", *d.ATCCode, base)
+	// Prepend Drug code with a dot if present
+	if d.DrugCode != nil {
+		return fmt.Sprintf("%d. %s", *d.DrugCode, base)
 	}
 
 	return base
@@ -125,7 +125,7 @@ func equalStrPtr(a, b *string) bool {
 // -----------------------------------------------------------------------------
 
 const qDrugsList = `
-  SELECT id, generic_name, brand_name, atc_code, dosage_form_code, route_code,
+  SELECT id, generic_name, brand_name, drug_code, dosage_form_code, route_code,
     strength_num, strength_unit_num, strength_den, strength_unit_den,
     dispense_unit, piece_content_amount, piece_content_unit,
     is_fractional_allowed, display_as_percentage, barcode, notes, is_active, created_at, updated_at
@@ -140,7 +140,7 @@ func (r *postgresPharmacyRepository) ListDrugs(ctx context.Context, q *string) (
 	args := []any{}
 	if q != nil && *q != "" {
 		query = `
-		  SELECT id, generic_name, brand_name, atc_code, dosage_form_code, route_code,
+		  SELECT id, generic_name, brand_name, drug_code, dosage_form_code, route_code,
 		    strength_num, strength_unit_num, strength_den, strength_unit_den,
 		    dispense_unit, piece_content_amount, piece_content_unit,
 		    is_fractional_allowed, display_as_percentage, barcode, notes, is_active, created_at, updated_at
@@ -160,7 +160,7 @@ func (r *postgresPharmacyRepository) ListDrugs(ctx context.Context, q *string) (
 	for rows.Next() {
 		var d entities.Drug
 		if err := rows.Scan(
-			&d.ID, &d.GenericName, &d.BrandName, &d.ATCCode,
+			&d.ID, &d.GenericName, &d.BrandName, &d.DrugCode,
 			&d.DosageFormCode, &d.RouteCode,
 			&d.StrengthNum, &d.StrengthUnitNum, &d.StrengthDen, &d.StrengthUnitDen,
 			&d.DispenseUnit, &d.PieceContentAmount, &d.PieceContentUnit,
@@ -182,7 +182,7 @@ func (r *postgresPharmacyRepository) ListDrugs(ctx context.Context, q *string) (
 
 const qDrugCreate = `
   INSERT INTO drugs (
-    generic_name, brand_name, atc_code, dosage_form_code, route_code,
+    generic_name, brand_name, drug_code, dosage_form_code, route_code,
     strength_num, strength_unit_num, strength_den, strength_unit_den,
     dispense_unit, piece_content_amount, piece_content_unit,
     is_fractional_allowed, display_as_percentage, barcode, notes, is_active
@@ -191,10 +191,27 @@ const qDrugCreate = `
   RETURNING id`
 
 func (r *postgresPharmacyRepository) CreateDrug(ctx context.Context, d *entities.Drug) (*entities.DrugView, error) {
-	dbx := DBFromCtx(ctx, r.Conn)
+	tx, ok := TxFromCtx(ctx)
+	if !ok {
+		return nil, errors.New("transaction not found")
+	}
+
+	if d.DrugCode != nil {
+
+		// Increment all rows with code > new_code by 1
+		_, err := tx.ExecContext(ctx, `
+			UPDATE drugs
+			SET drug_code = drug_code + 1
+			WHERE drug_code >= $1
+		`, d.DrugCode)
+		if err != nil {
+			return nil, fmt.Errorf("failed to shift drug codes: %w", err)
+		}
+	}
+
 	var id int64
-	if err := dbx.QueryRowContext(ctx, qDrugCreate,
-		d.GenericName, d.BrandName, d.ATCCode,
+	if err := tx.QueryRowContext(ctx, qDrugCreate,
+		d.GenericName, d.BrandName, d.DrugCode,
 		d.DosageFormCode, d.RouteCode,
 		d.StrengthNum, d.StrengthUnitNum, d.StrengthDen, d.StrengthUnitDen,
 		d.DispenseUnit, d.PieceContentAmount, d.PieceContentUnit,
@@ -202,11 +219,12 @@ func (r *postgresPharmacyRepository) CreateDrug(ctx context.Context, d *entities
 	).Scan(&id); err != nil {
 		return nil, err
 	}
+
 	return r.GetDrug(ctx, id)
 }
 
 const qDrugGet = `
-  SELECT id, generic_name, brand_name, atc_code, dosage_form_code, route_code,
+  SELECT id, generic_name, brand_name, drug_code, dosage_form_code, route_code,
     strength_num, strength_unit_num, strength_den, strength_unit_den,
     dispense_unit, piece_content_amount, piece_content_unit,
     is_fractional_allowed, display_as_percentage, barcode, notes, is_active, created_at, updated_at
@@ -216,7 +234,7 @@ func (r *postgresPharmacyRepository) GetDrug(ctx context.Context, id int64) (*en
 	dbx := DBFromCtx(ctx, r.Conn)
 	var d entities.Drug
 	err := dbx.QueryRowContext(ctx, qDrugGet, id).Scan(
-		&d.ID, &d.GenericName, &d.BrandName, &d.ATCCode,
+		&d.ID, &d.GenericName, &d.BrandName, &d.DrugCode,
 		&d.DosageFormCode, &d.RouteCode,
 		&d.StrengthNum, &d.StrengthUnitNum, &d.StrengthDen, &d.StrengthUnitDen,
 		&d.DispenseUnit, &d.PieceContentAmount, &d.PieceContentUnit,
@@ -240,7 +258,7 @@ func (r *postgresPharmacyRepository) GetDrug(ctx context.Context, id int64) (*en
 
 const qDrugUpdate = `
   UPDATE drugs SET
-    generic_name=$2, brand_name=$3, atc_code=$4,
+    generic_name=$2, brand_name=$3, drug_code=$4,
     dosage_form_code=$5, route_code=$6,
     strength_num=$7, strength_unit_num=$8, strength_den=$9, strength_unit_den=$10,
     dispense_unit=$11, piece_content_amount=$12, piece_content_unit=$13,
@@ -248,7 +266,10 @@ const qDrugUpdate = `
   WHERE id=$1`
 
 func (r *postgresPharmacyRepository) UpdateDrug(ctx context.Context, d *entities.Drug) (*entities.DrugView, error) {
-	dbx := DBFromCtx(ctx, r.Conn)
+	tx, ok := TxFromCtx(ctx)
+	if !ok {
+		return nil, errors.New("transaction not found")
+	}
 
 	// Get current drug to compare fields
 	current, err := r.GetDrug(ctx, d.ID)
@@ -270,7 +291,7 @@ func (r *postgresPharmacyRepository) UpdateDrug(ctx context.Context, d *entities
 	// If risky fields changed, check if drug has prescriptions
 	if riskyFieldChanged {
 		var prescriptionCount int
-		err := dbx.QueryRowContext(ctx, `
+		err := tx.QueryRowContext(ctx, `
 			SELECT COUNT(*) FROM prescription_lines WHERE drug_id=$1
 		`, d.ID).Scan(&prescriptionCount)
 		if err != nil {
@@ -278,12 +299,12 @@ func (r *postgresPharmacyRepository) UpdateDrug(ctx context.Context, d *entities
 		}
 
 		if prescriptionCount > 0 {
-			return nil, fmt.Errorf("cannot modify drug properties (strength, dispense unit, piece content) because this drug is already used in %d prescription(s). Only safe fields (name, ATC code, dosage form, route, notes, barcode, active status, display percentage) can be edited", prescriptionCount)
+			return nil, fmt.Errorf("cannot modify drug properties (strength, dispense unit, piece content) because this drug is already used in %d prescription(s). Only safe fields (name, drug code, dosage form, route, notes, barcode, active status, display percentage) can be edited", prescriptionCount)
 		}
 	}
 
-	res, err := dbx.ExecContext(ctx, qDrugUpdate,
-		d.ID, d.GenericName, d.BrandName, d.ATCCode,
+	res, err := tx.ExecContext(ctx, qDrugUpdate,
+		d.ID, d.GenericName, d.BrandName, d.DrugCode,
 		d.DosageFormCode, d.RouteCode,
 		d.StrengthNum, d.StrengthUnitNum, d.StrengthDen, d.StrengthUnitDen,
 		d.DispenseUnit, d.PieceContentAmount, d.PieceContentUnit,
