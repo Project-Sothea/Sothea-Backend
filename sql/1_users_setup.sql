@@ -17,8 +17,8 @@ CREATE TABLE users (
 -- Insert the users
 INSERT INTO users (username, name)
 VALUES 
-  ('admin', 'admin'),
-  ('user', 'user'),
+  ('admin', 'Admin'),
+  ('user', 'User'),
   ('reg', 'Reg'),
   ('reg_id', 'Reg (ID)'),
   ('va', 'VA'),
