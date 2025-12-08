@@ -6,8 +6,6 @@ import (
 
 	"sothea-backend/controllers/middleware"
 	"sothea-backend/entities"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 type loginUsecase struct {
@@ -32,11 +30,6 @@ func (l *loginUsecase) Login(ctx context.Context, user entities.LoginPayload) (s
 	dbUser, err := l.patientRepo.GetDBUser(ctx, user.Username)
 	if err != nil {
 		return "", err
-	}
-
-	err = bcrypt.CompareHashAndPassword([]byte(dbUser.PasswordHash), []byte(user.Password))
-	if err != nil {
-		return "", entities.ErrLoginFailed
 	}
 
 	token, err := middleware.CreateToken(dbUser.ID, user.Username, l.secretKey)

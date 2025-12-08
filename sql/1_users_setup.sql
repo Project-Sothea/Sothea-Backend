@@ -4,22 +4,38 @@
 DROP TABLE IF EXISTS users;
 
 /*******************
-    Add usernames and passwords
+    Add usernames
  */
 CREATE TABLE users (
   id            BIGSERIAL PRIMARY KEY,
   username      TEXT NOT NULL UNIQUE,
   name          TEXT,
-  password_hash TEXT NOT NULL,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- Insert the users
-INSERT INTO users (username, name, password_hash)
-VALUES ('admin', 'admin', '$2a$10$Y/FMxVZsuiPcVutd0O3kfuWEyWyqZUb4HC5yXF7.xVxNCt9GUfOPe');
-INSERT INTO users (username, name, password_hash)
-VALUES ('user', 'user', '$2a$10$cqFdRzsZVwGF6fI4N.YEYOOEZL7B/93RmEZRkVPVHHqyBMfNwy48i');
+INSERT INTO users (username, name)
+VALUES 
+  ('admin', 'admin'),
+  ('user', 'user'),
+  ('reg', 'Reg'),
+  ('reg_id', 'Reg (ID)'),
+  ('va', 'VA'),
+  ('fall_risk', 'Fall Risk'),
+  ('dental', 'Dental'),
+  ('physiotherapy', 'Physiotherapy'),
+  ('pharmacy_packer', 'Pharmacy packer'),
+  ('pharmacy_dispenser', 'Pharmacy dispenser'),
+  ('dr_ron', 'Dr Ron'),
+  ('dr_joseph', 'Dr Joseph'),
+  ('dr_hh', 'Dr HH'),
+  ('dr_kevan', 'Dr Kevan'),
+  ('dr_sherryl', 'Dr Sherryl'),
+  ('dr_jonathan', 'Dr Jonathan'),
+  ('dr_lauren', 'Dr Lauren'),
+  ('dr_celeste', 'Dr Celeste'),
+  ('dr_barbara', 'Dr Barbara');
 
 --------------------------------------------------------------------------------
 -- GLOBAL AUDIT HELPERS (used by ALL other tables; keep them in this file)

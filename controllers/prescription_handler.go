@@ -9,6 +9,7 @@ import (
 
 	"sothea-backend/controllers/middleware"
 	"sothea-backend/entities"
+	"sothea-backend/repository/postgres"
 	db "sothea-backend/repository/sqlc"
 )
 
@@ -187,6 +188,16 @@ func (h *PrescriptionHandler) AddLine(c *gin.Context) {
 	ctx := c.Request.Context()
 	created, err := h.Usecase.AddLine(ctx, &line)
 	if err != nil {
+		if stockErr, ok := err.(*postgres.InsufficientStockError); ok {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":           stockErr.Error(),
+				"code":            stockErr.Code(),
+				"drug_id":         stockErr.DrugID,
+				"total_required":  stockErr.TotalRequired,
+				"total_available": stockErr.TotalAvailable,
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -224,6 +235,16 @@ func (h *PrescriptionHandler) UpdateLine(c *gin.Context) {
 	ctx := c.Request.Context()
 	updated, err := h.Usecase.UpdateLine(ctx, &line)
 	if err != nil {
+		if stockErr, ok := err.(*postgres.InsufficientStockError); ok {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":           stockErr.Error(),
+				"code":            stockErr.Code(),
+				"drug_id":         stockErr.DrugID,
+				"total_required":  stockErr.TotalRequired,
+				"total_available": stockErr.TotalAvailable,
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -286,6 +307,16 @@ func (h *PrescriptionHandler) SetLineAllocations(c *gin.Context) {
 	ctx := c.Request.Context()
 	out, err := h.Usecase.SetLineAllocations(ctx, lineID, allocs)
 	if err != nil {
+		if stockErr, ok := err.(*postgres.InsufficientStockError); ok {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":           stockErr.Error(),
+				"code":            stockErr.Code(),
+				"drug_id":         stockErr.DrugID,
+				"total_required":  stockErr.TotalRequired,
+				"total_available": stockErr.TotalAvailable,
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
