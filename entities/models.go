@@ -1,7 +1,6 @@
 package entities
 
 import (
-	"context"
 	"time"
 
 	db "sothea-backend/repository/sqlc"
@@ -110,105 +109,4 @@ type SetAllocReq struct {
 
 type LoginPayload struct {
 	Username string `json:"username" binding:"required"`
-}
-
-// ---------------- Interfaces ----------------
-
-type PatientUseCase interface {
-	GetPatientVisit(ctx context.Context, id int32, vid int32) (*Patient, error)
-	CreatePatient(ctx context.Context, patient *db.PatientDetail) (int32, error)
-	UpdatePatient(ctx context.Context, id int32, patient *db.PatientDetail) error
-	DeletePatient(ctx context.Context, id int32) error
-	CreatePatientVisit(ctx context.Context, id int32, admin *db.Admin) (int32, error)
-	DeletePatientVisit(ctx context.Context, id int32, vid int32) error
-	UpdatePatientVisit(ctx context.Context, id int32, vid int32, patient *Patient) error
-	GetPatientMeta(ctx context.Context, id int32) (*PatientMeta, error)
-	GetAllPatientVisitMeta(ctx context.Context, date time.Time) ([]PatientVisitMeta, error)
-}
-
-type PatientRepository interface {
-	GetPatientVisit(ctx context.Context, id int32, vid int32) (*Patient, error)
-	CreatePatient(ctx context.Context, patient *db.PatientDetail) (int32, error)
-	UpdatePatient(ctx context.Context, id int32, patient *db.PatientDetail) error
-	DeletePatient(ctx context.Context, id int32) error
-	CreatePatientVisit(ctx context.Context, id int32, admin *db.Admin) (int32, error)
-	DeletePatientVisit(ctx context.Context, id int32, vid int32) error
-	UpdatePatientVisit(ctx context.Context, id int32, vid int32, patient *Patient) error
-	GetPatientMeta(ctx context.Context, id int32) (*PatientMeta, error)
-	GetAllPatientVisitMeta(ctx context.Context, date time.Time) ([]PatientVisitMeta, error)
-	GetDBUser(ctx context.Context, username string) (*db.User, error)
-}
-
-type PharmacyRepository interface {
-	ListDrugs(ctx context.Context, q *string) ([]DrugView, error)
-	CreateDrug(ctx context.Context, d *db.Drug) (*DrugView, error)
-	GetDrug(ctx context.Context, id int64) (*DrugView, error)
-	UpdateDrug(ctx context.Context, d *db.Drug) (*DrugView, error)
-	DeleteDrug(ctx context.Context, id int64) error
-	ListBatches(ctx context.Context, drugID int64) ([]BatchDetail, error)
-	GetBatch(ctx context.Context, batchID int64) (*BatchDetail, error)
-	CreateBatch(ctx context.Context, b *db.DrugBatch, locations []db.BatchLocation) (*BatchDetail, error)
-	UpdateBatch(ctx context.Context, b *db.DrugBatch, locations []db.BatchLocation) (*BatchDetail, error)
-	DeleteBatch(ctx context.Context, batchID int64) error
-	ListBatchLocations(ctx context.Context, batchID int64) ([]db.BatchLocation, error)
-	CreateBatchLocation(ctx context.Context, loc *db.BatchLocation) (*db.BatchLocation, error)
-	UpdateBatchLocation(ctx context.Context, loc *db.BatchLocation) (*db.BatchLocation, error)
-	DeleteBatchLocation(ctx context.Context, id int64) error
-	GetDrugStock(ctx context.Context, drugID int64) (*DrugStock, error)
-}
-
-type PharmacyUseCase interface {
-	ListDrugs(ctx context.Context, q *string) ([]DrugView, error)
-	GetDrug(ctx context.Context, id int64) (*DrugView, error)
-	GetDrugStock(ctx context.Context, drugID int64) (*DrugStock, error)
-	CreateDrug(ctx context.Context, d *db.Drug) (*DrugView, error)
-	UpdateDrug(ctx context.Context, d *db.Drug) (*DrugView, error)
-	DeleteDrug(ctx context.Context, id int64) error
-	ListBatches(ctx context.Context, drugID int64) ([]BatchDetail, error)
-	GetBatch(ctx context.Context, batchID int64) (*BatchDetail, error)
-	CreateBatch(ctx context.Context, b *db.DrugBatch, locations []db.BatchLocation) (*BatchDetail, error)
-	UpdateBatch(ctx context.Context, b *db.DrugBatch, locations []db.BatchLocation) (*BatchDetail, error)
-	DeleteBatch(ctx context.Context, batchID int64) error
-	ListBatchLocations(ctx context.Context, batchID int64) ([]db.BatchLocation, error)
-	CreateBatchLocation(ctx context.Context, loc *db.BatchLocation) (*db.BatchLocation, error)
-	UpdateBatchLocation(ctx context.Context, loc *db.BatchLocation) (*db.BatchLocation, error)
-	DeleteBatchLocation(ctx context.Context, id int64) error
-}
-
-type PrescriptionRepository interface {
-	CreatePrescription(ctx context.Context, p *Prescription) (*Prescription, error)
-	GetPrescriptionByID(ctx context.Context, id int64) (*Prescription, error)
-	ListPrescriptions(ctx context.Context, patientID *int64, vid *int32) ([]*Prescription, error)
-	UpdatePrescription(ctx context.Context, p *Prescription) (*Prescription, error)
-	DeletePrescription(ctx context.Context, id int64) error
-	GetLine(ctx context.Context, lineID int64) (*PrescriptionLine, error)
-	AddLine(ctx context.Context, line *PrescriptionLine) (*PrescriptionLine, error)
-	UpdateLine(ctx context.Context, line *PrescriptionLine) (*PrescriptionLine, error)
-	RemoveLine(ctx context.Context, lineID int64) error
-	ListLineAllocations(ctx context.Context, lineID int64) ([]db.PrescriptionBatchItem, error)
-	SetLineAllocations(ctx context.Context, lineID int64, allocs []db.PrescriptionBatchItem) ([]db.PrescriptionBatchItem, error)
-	MarkLinePacked(ctx context.Context, lineID int64) (*PrescriptionLine, error)
-	UnpackLine(ctx context.Context, lineID int64) (*PrescriptionLine, error)
-	DispensePrescription(ctx context.Context, prescriptionID int64) (*Prescription, error)
-}
-
-type PrescriptionUseCase interface {
-	CreatePrescription(ctx context.Context, p *Prescription) (*Prescription, error)
-	GetPrescriptionByID(ctx context.Context, id int64) (*Prescription, error)
-	ListPrescriptions(ctx context.Context, patientID *int64, vid *int32) ([]*Prescription, error)
-	UpdatePrescription(ctx context.Context, p *Prescription) (*Prescription, error)
-	DeletePrescription(ctx context.Context, id int64) error
-	AddLine(ctx context.Context, line *PrescriptionLine) (*PrescriptionLine, error)
-	UpdateLine(ctx context.Context, line *PrescriptionLine) (*PrescriptionLine, error)
-	RemoveLine(ctx context.Context, lineID int64) error
-	SuggestFEFOAllocations(ctx context.Context, lineID int64) ([]db.PrescriptionBatchItem, error)
-	ListLineAllocations(ctx context.Context, lineID int64) ([]db.PrescriptionBatchItem, error)
-	SetLineAllocations(ctx context.Context, lineID int64, allocs []db.PrescriptionBatchItem) ([]db.PrescriptionBatchItem, error)
-	MarkLinePacked(ctx context.Context, lineID int64) (*PrescriptionLine, error)
-	UnpackLine(ctx context.Context, lineID int64) (*PrescriptionLine, error)
-	DispensePrescription(ctx context.Context, prescriptionID int64) (*Prescription, error)
-}
-
-type LoginUseCase interface {
-	Login(ctx context.Context, user LoginPayload) (string, error)
 }

@@ -15,6 +15,7 @@ import (
 	"sothea-backend/controllers/middleware"
 	"sothea-backend/entities"
 	db "sothea-backend/repository/sqlc"
+	"sothea-backend/usecases"
 	"sothea-backend/util"
 
 	"github.com/gin-gonic/gin"
@@ -23,13 +24,13 @@ import (
 
 // PatientHandler represent the httphandler for patient
 type PatientHandler struct {
-	Usecase entities.PatientUseCase
+	Usecase *usecases.PatientUsecase
 }
 
 // NewPatientHandler will initialize the patients/ resources endpoint
-func NewPatientHandler(r gin.IRouter, us entities.PatientUseCase, secretKey []byte) {
+func NewPatientHandler(r gin.IRouter, uc *usecases.PatientUsecase, secretKey []byte) {
 	handler := &PatientHandler{
-		Usecase: us,
+		Usecase: uc,
 	}
 
 	// Protected routes
@@ -42,8 +43,8 @@ func NewPatientHandler(r gin.IRouter, us entities.PatientUseCase, secretKey []by
 		authorized.PUT("/patient/:id", handler.UpdatePatient)
 		authorized.DELETE("/patient/:id", handler.DeletePatient)
 		authorized.POST("/patient/:id", handler.CreatePatientVisit)
-		authorized.DELETE("/patient/:id/:vid", handler.DeletePatientVisit)
 		authorized.PATCH("/patient/:id/:vid", handler.UpdatePatientVisit)
+		authorized.DELETE("/patient/:id/:vid", handler.DeletePatientVisit)
 		authorized.GET("/patient-meta/:id", handler.GetPatientMeta)
 		authorized.GET("/all-patient-visit-meta/:date", handler.GetAllPatientVisitMeta)
 	}
@@ -63,10 +64,7 @@ func (p *PatientHandler) GetPatientVisit(c *gin.Context) {
 
 	id := int32(idP)
 	vid := int32(vidP)
-	ctx := c.Request.Context()
-
-	// Get the patient by id
-	patient, err := p.Usecase.GetPatientVisit(ctx, id, vid)
+	patient, err := p.Usecase.GetPatientVisit(c.Request.Context(), id, vid)
 	if err != nil {
 		c.JSON(getStatusCode(err), gin.H{"error": err.Error()})
 		return
@@ -107,7 +105,6 @@ func (p *PatientHandler) GetPatientPhoto(c *gin.Context) {
 }
 
 func (p *PatientHandler) CreatePatient(c *gin.Context) {
-	ctx := c.Request.Context()
 	ct := c.GetHeader("Content-Type")
 	var patientProfile db.PatientDetail
 
@@ -154,7 +151,7 @@ func (p *PatientHandler) CreatePatient(c *gin.Context) {
 		return
 	}
 
-	id, err := p.Usecase.CreatePatient(ctx, &patientProfile)
+	id, err := p.Usecase.CreatePatient(c.Request.Context(), &patientProfile)
 	if err != nil {
 		c.JSON(getStatusCode(err), gin.H{"error": err.Error()})
 		return
@@ -180,8 +177,6 @@ func (p *PatientHandler) CreatePatientVisit(c *gin.Context) {
 	}
 
 	id32 := int32(idP)
-	ctx := c.Request.Context()
-
 	var patientAdmin db.Admin
 	if err := c.ShouldBindJSON(&patientAdmin); err != nil {
 		var validationErrs validator.ValidationErrors
@@ -193,7 +188,7 @@ func (p *PatientHandler) CreatePatientVisit(c *gin.Context) {
 	}
 
 	// Create visit first to obtain vid
-	vid, err := p.Usecase.CreatePatientVisit(ctx, id32, &patientAdmin)
+	vid, err := p.Usecase.CreatePatientVisit(c.Request.Context(), id32, &patientAdmin)
 	if err != nil {
 		c.JSON(getStatusCode(err), gin.H{"error": err.Error()})
 		return
@@ -216,9 +211,8 @@ func (p *PatientHandler) DeletePatientVisit(c *gin.Context) {
 
 	id32 := int32(idP)
 	vid32 := int32(vidP)
-	ctx := c.Request.Context()
 
-	err = p.Usecase.DeletePatientVisit(ctx, id32, vid32)
+	err = p.Usecase.DeletePatientVisit(c.Request.Context(), id32, vid32)
 	if err != nil {
 		c.JSON(getStatusCode(err), gin.H{"error": err.Error()})
 		return
@@ -242,7 +236,6 @@ func (p *PatientHandler) UpdatePatientVisit(c *gin.Context) {
 
 	id32 := int32(idP)
 	vid32 := int32(vidP)
-	ctx := c.Request.Context()
 
 	// JSON PATCH only
 	var patient entities.Patient
@@ -255,7 +248,7 @@ func (p *PatientHandler) UpdatePatientVisit(c *gin.Context) {
 		}
 	}
 
-	if err := p.Usecase.UpdatePatientVisit(ctx, id32, vid32, &patient); err != nil {
+	if err := p.Usecase.UpdatePatientVisit(c.Request.Context(), id32, vid32, &patient); err != nil {
 		c.JSON(getStatusCode(err), gin.H{"error": err.Error()})
 		return
 	}
@@ -271,9 +264,7 @@ func (p *PatientHandler) GetPatientMeta(c *gin.Context) {
 	}
 
 	id32 := int32(idP)
-	ctx := c.Request.Context()
-
-	patientMeta, err := p.Usecase.GetPatientMeta(ctx, id32)
+	patientMeta, err := p.Usecase.GetPatientMeta(c.Request.Context(), id32)
 	if err != nil {
 		c.JSON(getStatusCode(err), gin.H{"error": err.Error()})
 		return
@@ -284,8 +275,6 @@ func (p *PatientHandler) GetPatientMeta(c *gin.Context) {
 
 func (p *PatientHandler) GetAllPatientVisitMeta(c *gin.Context) {
 	dateStr := c.Param("date")
-
-	ctx := c.Request.Context()
 
 	var date time.Time
 	var err error
@@ -299,7 +288,7 @@ func (p *PatientHandler) GetAllPatientVisitMeta(c *gin.Context) {
 		}
 	}
 
-	patientVisitMeta, err := p.Usecase.GetAllPatientVisitMeta(ctx, date)
+	patientVisitMeta, err := p.Usecase.GetAllPatientVisitMeta(c.Request.Context(), date)
 	if err != nil {
 		c.JSON(getStatusCode(err), gin.H{"error": err.Error()})
 		return
@@ -338,20 +327,18 @@ func (p *PatientHandler) UpdatePatient(c *gin.Context) {
 		return
 	}
 	id := int32(idP)
-	ctx := c.Request.Context()
-
 	var patientProfile db.PatientDetail
 	ct := c.GetHeader("Content-Type")
 
 	switch {
 	case strings.HasPrefix(ct, "multipart/form-data"):
-		patientJSON := c.PostForm("patientdetails")
+		patientJSON := c.PostForm("patient_details")
 		if patientJSON == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "patientdetails JSON is required"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "patient_details JSON is required"})
 			return
 		}
 		if err := json.Unmarshal([]byte(patientJSON), &patientProfile); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid patientdetails JSON"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid patient_details JSON"})
 			return
 		}
 		photoBytes, present, err := readUploadedFile(c, "photo")
@@ -381,7 +368,7 @@ func (p *PatientHandler) UpdatePatient(c *gin.Context) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": fieldErr.Error()})
 				return
 			} else if err == io.EOF {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "patientdetails JSON is required"})
+				c.JSON(http.StatusBadRequest, gin.H{"error": "patient_details JSON is required"})
 				return
 			} else {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -389,11 +376,11 @@ func (p *PatientHandler) UpdatePatient(c *gin.Context) {
 			}
 		}
 	default:
-		c.JSON(http.StatusUnsupportedMediaType, gin.H{"error": "use application/json or multipart/form-data with field 'patientdetails'"})
+		c.JSON(http.StatusUnsupportedMediaType, gin.H{"error": "use application/json or multipart/form-data with field 'patient_details'"})
 		return
 	}
 
-	if err := p.Usecase.UpdatePatient(ctx, id, &patientProfile); err != nil {
+	if err := p.Usecase.UpdatePatient(c.Request.Context(), id, &patientProfile); err != nil {
 		c.JSON(getStatusCode(err), gin.H{"error": err.Error()})
 		return
 	}
@@ -409,9 +396,8 @@ func (p *PatientHandler) DeletePatient(c *gin.Context) {
 		return
 	}
 	id := int32(idP)
-	ctx := c.Request.Context()
 
-	if err := p.Usecase.DeletePatient(ctx, id); err != nil {
+	if err := p.Usecase.DeletePatient(c.Request.Context(), id); err != nil {
 		c.JSON(getStatusCode(err), gin.H{"error": err.Error()})
 		return
 	}

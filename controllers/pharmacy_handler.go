@@ -12,18 +12,16 @@ import (
 	"sothea-backend/entities"
 	"sothea-backend/repository/postgres"
 	db "sothea-backend/repository/sqlc"
+	"sothea-backend/usecases"
 )
 
-// -----------------------------------------------------------------------------
-//  Handler struct + constructor
-// -----------------------------------------------------------------------------
-
+// PharmacyHandler wires HTTP routes to the pharmacy usecase.
 type PharmacyHandler struct {
-	Usecase entities.PharmacyUseCase
+	Usecase *usecases.PharmacyUsecase
 }
 
 // Registers /pharmacy/* routes and applies JWT + Tx middlewares.
-func NewPharmacyHandler(r gin.IRouter, uc entities.PharmacyUseCase, secretKey []byte, pool *pgxpool.Pool) {
+func NewPharmacyHandler(r gin.IRouter, uc *usecases.PharmacyUsecase, secretKey []byte, pool *pgxpool.Pool) {
 	h := &PharmacyHandler{Usecase: uc}
 
 	grp := r.Group("/pharmacy")
@@ -56,9 +54,7 @@ func NewPharmacyHandler(r gin.IRouter, uc entities.PharmacyUseCase, secretKey []
 	grp.DELETE("/locations/:locationId", h.DeleteBatchLocation)
 }
 
-// -----------------------------------------------------------------------------
-//  DRUG endpoints
-// -----------------------------------------------------------------------------
+// ---------------- DRUGS -----------------
 
 func (h *PharmacyHandler) ListDrugs(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -80,8 +76,7 @@ func (h *PharmacyHandler) CreateDrug(c *gin.Context) {
 		handleBindErr(c, err)
 		return
 	}
-	ctx := c.Request.Context()
-	drug, err := h.Usecase.CreateDrug(ctx, &d)
+	drug, err := h.Usecase.CreateDrug(c.Request.Context(), &d)
 	if err != nil {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 		return
@@ -95,8 +90,7 @@ func (h *PharmacyHandler) GetDrug(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid drugId"})
 		return
 	}
-	ctx := c.Request.Context()
-	drug, err := h.Usecase.GetDrug(ctx, id)
+	drug, err := h.Usecase.GetDrug(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 		return
@@ -110,8 +104,7 @@ func (h *PharmacyHandler) GetDrugStock(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid drugId"})
 		return
 	}
-	ctx := c.Request.Context()
-	stock, err := h.Usecase.GetDrugStock(ctx, id)
+	stock, err := h.Usecase.GetDrugStock(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 		return
@@ -131,8 +124,7 @@ func (h *PharmacyHandler) UpdateDrug(c *gin.Context) {
 		return
 	}
 	d.ID = id
-	ctx := c.Request.Context()
-	drug, err := h.Usecase.UpdateDrug(ctx, &d)
+	drug, err := h.Usecase.UpdateDrug(c.Request.Context(), &d)
 	if err != nil {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 		return
@@ -146,17 +138,14 @@ func (h *PharmacyHandler) DeleteDrug(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid drugId"})
 		return
 	}
-	ctx := c.Request.Context()
-	if err := h.Usecase.DeleteDrug(ctx, id); err != nil {
+	if err := h.Usecase.DeleteDrug(c.Request.Context(), id); err != nil {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 		return
 	}
 	c.Status(http.StatusNoContent)
 }
 
-// -----------------------------------------------------------------------------
-//  BATCH endpoints (scoped by drugId where creating/listing)
-// -----------------------------------------------------------------------------
+// ---------------- BATCHES -----------------
 
 func (h *PharmacyHandler) ListBatches(c *gin.Context) {
 	drugID, err := strconv.ParseInt(c.Param("drugId"), 10, 64)
@@ -164,8 +153,7 @@ func (h *PharmacyHandler) ListBatches(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid drugId"})
 		return
 	}
-	ctx := c.Request.Context()
-	batches, err := h.Usecase.ListBatches(ctx, drugID)
+	batches, err := h.Usecase.ListBatches(c.Request.Context(), drugID)
 	if err != nil {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 		return
@@ -189,8 +177,7 @@ func (h *PharmacyHandler) CreateBatch(c *gin.Context) {
 	}
 	body.Batch.DrugID = drugID
 
-	ctx := c.Request.Context()
-	detail, err := h.Usecase.CreateBatch(ctx, &body.Batch, body.Locations)
+	detail, err := h.Usecase.CreateBatch(c.Request.Context(), &body.Batch, body.Locations)
 	if err != nil {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 		return
@@ -202,8 +189,6 @@ func (h *PharmacyHandler) CreateBatch(c *gin.Context) {
 // Route: GET /pharmacy/batches
 func (h *PharmacyHandler) ListAllBatches(c *gin.Context) {
 	ctx := c.Request.Context()
-
-	// Get all drugs
 	drugs, err := h.Usecase.ListDrugs(ctx, nil)
 	if err != nil {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
@@ -211,7 +196,6 @@ func (h *PharmacyHandler) ListAllBatches(c *gin.Context) {
 	}
 
 	all := make([]entities.BatchDetail, 0, 128)
-
 	for _, d := range drugs {
 		batches, err := h.Usecase.ListBatches(ctx, d.Drug.ID)
 		if err != nil {
@@ -230,8 +214,7 @@ func (h *PharmacyHandler) GetBatch(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid batchId"})
 		return
 	}
-	ctx := c.Request.Context()
-	detail, err := h.Usecase.GetBatch(ctx, batchID)
+	detail, err := h.Usecase.GetBatch(c.Request.Context(), batchID)
 	if err != nil {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 		return
@@ -255,8 +238,7 @@ func (h *PharmacyHandler) UpdateBatch(c *gin.Context) {
 	}
 	body.Batch.ID = batchID
 
-	ctx := c.Request.Context()
-	detail, err := h.Usecase.UpdateBatch(ctx, &body.Batch, body.Locations)
+	detail, err := h.Usecase.UpdateBatch(c.Request.Context(), &body.Batch, body.Locations)
 	if err != nil {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 		return
@@ -270,17 +252,14 @@ func (h *PharmacyHandler) DeleteBatch(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid batchId"})
 		return
 	}
-	ctx := c.Request.Context()
-	if err := h.Usecase.DeleteBatch(ctx, batchID); err != nil {
+	if err := h.Usecase.DeleteBatch(c.Request.Context(), batchID); err != nil {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 		return
 	}
 	c.Status(http.StatusNoContent)
 }
 
-// -----------------------------------------------------------------------------
-//  LOCATION endpoints
-// -----------------------------------------------------------------------------
+// ------------- LOCATIONS ----------------
 
 func (h *PharmacyHandler) ListBatchLocations(c *gin.Context) {
 	batchID, err := strconv.ParseInt(c.Param("batchId"), 10, 64)
@@ -288,8 +267,7 @@ func (h *PharmacyHandler) ListBatchLocations(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid batchId"})
 		return
 	}
-	ctx := c.Request.Context()
-	locs, err := h.Usecase.ListBatchLocations(ctx, batchID)
+	locs, err := h.Usecase.ListBatchLocations(c.Request.Context(), batchID)
 	if err != nil {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 		return
@@ -310,8 +288,7 @@ func (h *PharmacyHandler) CreateBatchLocation(c *gin.Context) {
 	}
 	loc.BatchID = batchID
 
-	ctx := c.Request.Context()
-	created, err := h.Usecase.CreateBatchLocation(ctx, &loc)
+	created, err := h.Usecase.CreateBatchLocation(c.Request.Context(), &loc)
 	if err != nil {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 		return
@@ -332,8 +309,7 @@ func (h *PharmacyHandler) UpdateBatchLocation(c *gin.Context) {
 	}
 	loc.ID = locationID
 
-	ctx := c.Request.Context()
-	updated, err := h.Usecase.UpdateBatchLocation(ctx, &loc)
+	updated, err := h.Usecase.UpdateBatchLocation(c.Request.Context(), &loc)
 	if err != nil {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 		return
@@ -347,8 +323,7 @@ func (h *PharmacyHandler) DeleteBatchLocation(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid locationId"})
 		return
 	}
-	ctx := c.Request.Context()
-	if err := h.Usecase.DeleteBatchLocation(ctx, locationID); err != nil {
+	if err := h.Usecase.DeleteBatchLocation(c.Request.Context(), locationID); err != nil {
 		c.JSON(mapPhErr(err), gin.H{"error": err.Error()})
 		return
 	}
@@ -371,7 +346,6 @@ func mapPhErr(err error) int {
 	if err == nil {
 		return http.StatusOK
 	}
-	// Specific mapped errors
 	if _, ok := err.(*postgres.DuplicateBatchNumberError); ok {
 		return http.StatusConflict
 	}
