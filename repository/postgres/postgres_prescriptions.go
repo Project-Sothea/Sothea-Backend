@@ -105,6 +105,7 @@ func (r *postgresPrescriptionRepository) GetPrescriptionByID(ctx context.Context
 			DispensedBy: header.DispensedBy,
 			DispensedAt: header.DispensedAt,
 		},
+		DispenserName: header.DispenserName,
 	}
 
 	lineRows, err := q.ListPrescriptionLines(ctx, id)
@@ -131,6 +132,9 @@ func (r *postgresPrescriptionRepository) GetPrescriptionByID(ctx context.Context
 				PackedBy:        row.PackedBy,
 				PackedAt:        row.PackedAt,
 			},
+			PackerName:  row.PackerName,
+			UpdaterName: row.UpdaterName,
+			CreatorName: row.CreatorName,
 		}
 		lines = append(lines, l)
 		lineIDs = append(lineIDs, row.ID)
