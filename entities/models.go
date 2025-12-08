@@ -9,7 +9,7 @@ import (
 
 // Aggregated patient view returned by APIs.
 type Patient struct {
-	PatientDetails      *db.PatientDetail       `json:"patientdetails"`
+	PatientDetails      *db.PatientDetail       `json:"patient_details"`
 	Admin               *db.Admin               `json:"admin"`
 	PastMedicalHistory  *db.PastMedicalHistory  `json:"past_medical_history"`
 	SocialHistory       *db.SocialHistory       `json:"social_history"`
