@@ -86,7 +86,7 @@ type Drug struct {
 	DrugCode            *int32         `json:"drug_code"`
 	DosageFormCode      string         `json:"dosage_form_code"`
 	RouteCode           string         `json:"route_code"`
-	StrengthNum         float64        `json:"strength_num"`
+	StrengthNum         pgtype.Numeric `json:"strength_num"`
 	StrengthUnitNum     *string        `json:"strength_unit_num"`
 	StrengthDen         pgtype.Numeric `json:"strength_den"`
 	StrengthUnitDen     *string        `json:"strength_unit_den"`

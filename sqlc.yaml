@@ -18,8 +18,6 @@ sql:
             go_type: "float64"
           - column: "prescription_lines.duration"
             go_type: "float64"
-          - column: "drugs.strength_num"
-            go_type: "float64"
           - db_type: "date"
             go_type: "time.Time"
           - db_type: "date"
