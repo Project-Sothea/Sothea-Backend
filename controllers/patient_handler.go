@@ -40,6 +40,7 @@ func NewPatientHandler(r gin.IRouter, uc *usecases.PatientUsecase, secretKey []b
 		authorized.GET("/patient/:id/:vid", handler.GetPatientVisit)
 		authorized.GET("/patient/:id/photo", handler.GetPatientPhoto)
 		authorized.POST("/patient", handler.CreatePatient)
+		authorized.POST("/patient-with-visit", handler.CreatePatientWithVisit)
 		authorized.PUT("/patient/:id", handler.UpdatePatient)
 		authorized.DELETE("/patient/:id", handler.DeletePatient)
 		authorized.POST("/patient/:id", handler.CreatePatientVisit)
@@ -167,6 +168,91 @@ func (p *PatientHandler) CreatePatient(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"id": id})
+}
+
+// CreatePatientWithVisit creates patient + first visit atomically and returns both ids.
+func (p *PatientHandler) CreatePatientWithVisit(c *gin.Context) {
+	ct := c.GetHeader("Content-Type")
+
+	type request struct {
+		PatientDetails db.PatientDetail `json:"patient_details"`
+		Admin          db.Admin         `json:"admin"`
+	}
+
+	var patientProfile db.PatientDetail
+	var admin db.Admin
+
+	switch {
+	case strings.HasPrefix(ct, "multipart/form-data"):
+		patientJSON := c.PostForm("patient_details")
+		if patientJSON == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "patient_details JSON is required"})
+			return
+		}
+		adminJSON := c.PostForm("admin")
+		if adminJSON == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "admin JSON is required"})
+			return
+		}
+		if err := json.Unmarshal([]byte(patientJSON), &patientProfile); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid patient_details JSON"})
+			return
+		}
+		if err := json.Unmarshal([]byte(adminJSON), &admin); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid admin JSON"})
+			return
+		}
+		photoBytes, present, err := readUploadedFile(c, "photo")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file"})
+			return
+		}
+		if present {
+			if _, valErr := util.ValidateImageBytes(photoBytes); valErr != nil {
+				if valErr.Error() == "file too large" {
+					c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": valErr.Error()})
+				} else {
+					c.JSON(http.StatusBadRequest, gin.H{"error": valErr.Error()})
+				}
+				return
+			}
+			c.Set("uploadedPhoto", photoBytes)
+		}
+	case strings.HasPrefix(ct, "application/json"):
+		var req request
+		if err := c.ShouldBindJSON(&req); err != nil {
+			var validationErrs validator.ValidationErrors
+			if errors.As(err, &validationErrs) {
+				fieldErr := validationErrs[0]
+				c.JSON(http.StatusBadRequest, gin.H{"error": fieldErr.Error()})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		patientProfile = req.PatientDetails
+		admin = req.Admin
+	default:
+		c.JSON(http.StatusUnsupportedMediaType, gin.H{"error": "use application/json or multipart/form-data with fields 'patient_details' and 'admin'"})
+		return
+	}
+
+	id, vid, err := p.Usecase.CreatePatientWithVisit(c.Request.Context(), &patientProfile, &admin)
+	if err != nil {
+		c.JSON(getStatusCode(err), gin.H{"error": err.Error()})
+		return
+	}
+
+	if val, exists := c.Get("uploadedPhoto"); exists {
+		if data, ok := val.([]byte); ok {
+			if err := util.SavePatientPhoto(id, data); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to store photo"})
+				return
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"id": id, "vid": vid})
 }
 
 func (p *PatientHandler) CreatePatientVisit(c *gin.Context) {

@@ -2,14 +2,11 @@ package usecases
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"sothea-backend/controllers/middleware"
 	"sothea-backend/entities"
 	"sothea-backend/repository/postgres"
-
-	"github.com/jackc/pgx/v5"
 )
 
 type LoginUsecase struct {

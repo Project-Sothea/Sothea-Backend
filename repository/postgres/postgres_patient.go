@@ -165,6 +165,47 @@ func (p *PostgresPatientRepository) CreatePatient(ctx context.Context, patient *
 	return patientID, nil
 }
 
+// CreatePatientWithVisit inserts a patient and first visit in a single transaction.
+func (p *PostgresPatientRepository) CreatePatientWithVisit(ctx context.Context, patient *db.PatientDetail, admin *db.Admin) (int32, int32, error) {
+	if patient == nil {
+		return -1, -1, entities.ErrMissingPatientData
+	}
+	if admin == nil {
+		return -1, -1, entities.ErrMissingAdminCategory
+	}
+
+	tx, err := p.Conn.Begin(ctx)
+	if err != nil {
+		return -1, -1, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	q := p.queries.WithTx(tx)
+
+	patientParams, err := toInsertPatientParams(patient)
+	if err != nil {
+		return -1, -1, err
+	}
+	patientID, err := q.InsertPatient(ctx, patientParams)
+	if err != nil {
+		return -1, -1, err
+	}
+
+	adminParams, err := toInsertPatientVisitParams(patientID, admin)
+	if err != nil {
+		return -1, -1, err
+	}
+	row, err := q.InsertPatientVisit(ctx, adminParams)
+	if err != nil {
+		return -1, -1, err
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return -1, -1, err
+	}
+	return patientID, row.Vid, nil
+}
+
 // UpdatePatient updates demographic data for a patient.
 func (p *PostgresPatientRepository) UpdatePatient(ctx context.Context, id int32, patient *db.PatientDetail) error {
 	if patient == nil {

@@ -36,6 +36,13 @@ func (p *PatientUsecase) CreatePatient(ctx context.Context, patient *db.PatientD
 	return p.patientRepo.CreatePatient(ctx, patient)
 }
 
+func (p *PatientUsecase) CreatePatientWithVisit(ctx context.Context, patient *db.PatientDetail, admin *db.Admin) (int32, int32, error) {
+	ctx, cancel := context.WithTimeout(ctx, p.contextTimeout)
+	defer cancel()
+
+	return p.patientRepo.CreatePatientWithVisit(ctx, patient, admin)
+}
+
 func (p *PatientUsecase) UpdatePatient(ctx context.Context, id int32, patient *db.PatientDetail) error {
 	ctx, cancel := context.WithTimeout(ctx, p.contextTimeout)
 	defer cancel()
