@@ -8,25 +8,18 @@ import (
 	"time"
 
 	"sothea-backend/entities"
+	"sothea-backend/repository/postgres"
 	db "sothea-backend/repository/sqlc"
 )
 
-// -----------------------------------------------------------------------------
-// Struct + Constructor
-// -----------------------------------------------------------------------------
-
-type prescriptionUsecase struct {
-	repo           entities.PrescriptionRepository
-	pharmacy       entities.PharmacyRepository
+type PrescriptionUsecase struct {
+	repo           *postgres.PostgresPrescriptionRepository
+	pharmacy       *postgres.PostgresPharmacyRepository
 	contextTimeout time.Duration
 }
 
-func NewPrescriptionUsecase(
-	r entities.PrescriptionRepository,
-	p entities.PharmacyRepository,
-	timeout time.Duration,
-) entities.PrescriptionUseCase {
-	return &prescriptionUsecase{
+func NewPrescriptionUsecase(r *postgres.PostgresPrescriptionRepository, p *postgres.PostgresPharmacyRepository, timeout time.Duration) *PrescriptionUsecase {
+	return &PrescriptionUsecase{
 		repo:           r,
 		pharmacy:       p,
 		contextTimeout: timeout,
@@ -37,31 +30,31 @@ func NewPrescriptionUsecase(
 // Basic CRUD
 // -----------------------------------------------------------------------------
 
-func (u *prescriptionUsecase) CreatePrescription(ctx context.Context, p *entities.Prescription) (*entities.Prescription, error) {
+func (u *PrescriptionUsecase) CreatePrescription(ctx context.Context, p *entities.Prescription) (*entities.Prescription, error) {
 	ctx, cancel := context.WithTimeout(ctx, u.contextTimeout)
 	defer cancel()
 	return u.repo.CreatePrescription(ctx, p)
 }
 
-func (u *prescriptionUsecase) GetPrescriptionByID(ctx context.Context, id int64) (*entities.Prescription, error) {
+func (u *PrescriptionUsecase) GetPrescriptionByID(ctx context.Context, id int64) (*entities.Prescription, error) {
 	ctx, cancel := context.WithTimeout(ctx, u.contextTimeout)
 	defer cancel()
 	return u.repo.GetPrescriptionByID(ctx, id)
 }
 
-func (u *prescriptionUsecase) ListPrescriptions(ctx context.Context, patientID *int64, vid *int32) ([]*entities.Prescription, error) {
+func (u *PrescriptionUsecase) ListPrescriptions(ctx context.Context, patientID *int64, vid *int32) ([]*entities.Prescription, error) {
 	ctx, cancel := context.WithTimeout(ctx, u.contextTimeout)
 	defer cancel()
 	return u.repo.ListPrescriptions(ctx, patientID, vid)
 }
 
-func (u *prescriptionUsecase) UpdatePrescription(ctx context.Context, p *entities.Prescription) (*entities.Prescription, error) {
+func (u *PrescriptionUsecase) UpdatePrescription(ctx context.Context, p *entities.Prescription) (*entities.Prescription, error) {
 	ctx, cancel := context.WithTimeout(ctx, u.contextTimeout)
 	defer cancel()
 	return u.repo.UpdatePrescription(ctx, p)
 }
 
-func (u *prescriptionUsecase) DeletePrescription(ctx context.Context, id int64) error {
+func (u *PrescriptionUsecase) DeletePrescription(ctx context.Context, id int64) error {
 	ctx, cancel := context.WithTimeout(ctx, u.contextTimeout)
 	defer cancel()
 	return u.repo.DeletePrescription(ctx, id)
@@ -71,7 +64,7 @@ func (u *prescriptionUsecase) DeletePrescription(ctx context.Context, id int64) 
 // Lines (one line = one presentation)
 // -----------------------------------------------------------------------------
 
-func (u *prescriptionUsecase) AddLine(ctx context.Context, line *entities.PrescriptionLine) (*entities.PrescriptionLine, error) {
+func (u *PrescriptionUsecase) AddLine(ctx context.Context, line *entities.PrescriptionLine) (*entities.PrescriptionLine, error) {
 	ctx, cancel := context.WithTimeout(ctx, u.contextTimeout)
 	defer cancel()
 
@@ -89,7 +82,7 @@ func (u *prescriptionUsecase) AddLine(ctx context.Context, line *entities.Prescr
 	return u.repo.AddLine(ctx, line)
 }
 
-func (u *prescriptionUsecase) UpdateLine(ctx context.Context, line *entities.PrescriptionLine) (*entities.PrescriptionLine, error) {
+func (u *PrescriptionUsecase) UpdateLine(ctx context.Context, line *entities.PrescriptionLine) (*entities.PrescriptionLine, error) {
 	ctx, cancel := context.WithTimeout(ctx, u.contextTimeout)
 	defer cancel()
 
@@ -107,7 +100,7 @@ func (u *prescriptionUsecase) UpdateLine(ctx context.Context, line *entities.Pre
 	return u.repo.UpdateLine(ctx, line)
 }
 
-func (u *prescriptionUsecase) RemoveLine(ctx context.Context, lineID int64) error {
+func (u *PrescriptionUsecase) RemoveLine(ctx context.Context, lineID int64) error {
 	ctx, cancel := context.WithTimeout(ctx, u.contextTimeout)
 	defer cancel()
 	return u.repo.RemoveLine(ctx, lineID)
@@ -117,7 +110,7 @@ func (u *prescriptionUsecase) RemoveLine(ctx context.Context, lineID int64) erro
 // Packing allocations
 // -----------------------------------------------------------------------------
 
-func (u *prescriptionUsecase) SetLineAllocations(ctx context.Context, lineID int64, allocs []db.PrescriptionBatchItem) ([]db.PrescriptionBatchItem, error) {
+func (u *PrescriptionUsecase) SetLineAllocations(ctx context.Context, lineID int64, allocs []db.PrescriptionBatchItem) ([]db.PrescriptionBatchItem, error) {
 	ctx, cancel := context.WithTimeout(ctx, u.contextTimeout)
 	defer cancel()
 
@@ -140,7 +133,7 @@ func (u *prescriptionUsecase) SetLineAllocations(ctx context.Context, lineID int
 	return out, nil
 }
 
-func (u *prescriptionUsecase) ListLineAllocations(ctx context.Context, lineID int64) ([]db.PrescriptionBatchItem, error) {
+func (u *PrescriptionUsecase) ListLineAllocations(ctx context.Context, lineID int64) ([]db.PrescriptionBatchItem, error) {
 	ctx, cancel := context.WithTimeout(ctx, u.contextTimeout)
 	defer cancel()
 
@@ -148,7 +141,7 @@ func (u *prescriptionUsecase) ListLineAllocations(ctx context.Context, lineID in
 	return u.repo.ListLineAllocations(ctx, lineID)
 }
 
-func (u *prescriptionUsecase) MarkLinePacked(ctx context.Context, lineID int64) (*entities.PrescriptionLine, error) {
+func (u *PrescriptionUsecase) MarkLinePacked(ctx context.Context, lineID int64) (*entities.PrescriptionLine, error) {
 	ctx, cancel := context.WithTimeout(ctx, u.contextTimeout)
 	defer cancel()
 
@@ -156,7 +149,7 @@ func (u *prescriptionUsecase) MarkLinePacked(ctx context.Context, lineID int64) 
 	return u.repo.MarkLinePacked(ctx, lineID)
 }
 
-func (u *prescriptionUsecase) UnpackLine(ctx context.Context, lineID int64) (*entities.PrescriptionLine, error) {
+func (u *PrescriptionUsecase) UnpackLine(ctx context.Context, lineID int64) (*entities.PrescriptionLine, error) {
 	ctx, cancel := context.WithTimeout(ctx, u.contextTimeout)
 	defer cancel()
 	return u.repo.UnpackLine(ctx, lineID)
@@ -166,7 +159,7 @@ func (u *prescriptionUsecase) UnpackLine(ctx context.Context, lineID int64) (*en
 // FEFO helper (optional convenience for the packing UI)
 // -----------------------------------------------------------------------------
 
-func (u *prescriptionUsecase) SuggestFEFOAllocations(ctx context.Context, lineID int64) ([]db.PrescriptionBatchItem, error) {
+func (u *PrescriptionUsecase) SuggestFEFOAllocations(ctx context.Context, lineID int64) ([]db.PrescriptionBatchItem, error) {
 	ctx, cancel := context.WithTimeout(ctx, u.contextTimeout)
 	defer cancel()
 
@@ -248,7 +241,7 @@ func (u *prescriptionUsecase) SuggestFEFOAllocations(ctx context.Context, lineID
 // Dispense (header-level): finalize Rx
 // -----------------------------------------------------------------------------
 
-func (u *prescriptionUsecase) DispensePrescription(ctx context.Context, prescriptionID int64) (*entities.Prescription, error) {
+func (u *PrescriptionUsecase) DispensePrescription(ctx context.Context, prescriptionID int64) (*entities.Prescription, error) {
 	ctx, cancel := context.WithTimeout(ctx, u.contextTimeout)
 	defer cancel()
 	// Repo performs one txn to validate all lines are packed and then stamps dispensed fields.

@@ -5,6 +5,7 @@ import (
 
 	"sothea-backend/controllers/middleware"
 	"sothea-backend/entities"
+	"sothea-backend/usecases"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
@@ -12,12 +13,12 @@ import (
 
 // LoginHandler represent the httphandler for patient
 type LoginHandler struct {
-	Usecase   entities.LoginUseCase
+	Usecase   *usecases.LoginUsecase
 	secretKey []byte
 }
 
 // NewLoginHandler will initialize the resources endpoint
-func NewLoginHandler(r gin.IRouter, us entities.LoginUseCase, secretKey []byte) {
+func NewLoginHandler(r gin.IRouter, us *usecases.LoginUsecase, secretKey []byte) {
 	handler := &LoginHandler{
 		Usecase: us,
 	}

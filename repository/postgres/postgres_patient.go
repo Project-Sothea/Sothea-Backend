@@ -12,21 +12,21 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type postgresPatientRepository struct {
+type PostgresPatientRepository struct {
 	Conn    *pgxpool.Pool
 	queries *db.Queries
 }
 
 // NewPostgresPatientRepository will create an object that represent the patient.Repository interface
-func NewPostgresPatientRepository(conn *pgxpool.Pool) entities.PatientRepository {
-	return &postgresPatientRepository{
+func NewPostgresPatientRepository(conn *pgxpool.Pool) *PostgresPatientRepository {
+	return &PostgresPatientRepository{
 		Conn:    conn,
 		queries: db.New(conn),
 	}
 }
 
 // GetPatientVisit returns a Patient struct representing a single visit based on ID and visit ID. Patient and Admin are guaranteed when found.
-func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int32, vid int32) (*entities.Patient, error) {
+func (p *PostgresPatientRepository) GetPatientVisit(ctx context.Context, id int32, vid int32) (*entities.Patient, error) {
 	tx, err := p.Conn.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func (p *postgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 }
 
 // CreatePatient inserts a new patient record and returns the patient id.
-func (p *postgresPatientRepository) CreatePatient(ctx context.Context, patient *db.PatientDetail) (int32, error) {
+func (p *PostgresPatientRepository) CreatePatient(ctx context.Context, patient *db.PatientDetail) (int32, error) {
 	if patient == nil {
 		return -1, entities.ErrMissingPatientData
 	}
@@ -165,8 +165,49 @@ func (p *postgresPatientRepository) CreatePatient(ctx context.Context, patient *
 	return patientID, nil
 }
 
+// CreatePatientWithVisit inserts a patient and first visit in a single transaction.
+func (p *PostgresPatientRepository) CreatePatientWithVisit(ctx context.Context, patient *db.PatientDetail, admin *db.Admin) (int32, int32, error) {
+	if patient == nil {
+		return -1, -1, entities.ErrMissingPatientData
+	}
+	if admin == nil {
+		return -1, -1, entities.ErrMissingAdminCategory
+	}
+
+	tx, err := p.Conn.Begin(ctx)
+	if err != nil {
+		return -1, -1, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	q := p.queries.WithTx(tx)
+
+	patientParams, err := toInsertPatientParams(patient)
+	if err != nil {
+		return -1, -1, err
+	}
+	patientID, err := q.InsertPatient(ctx, patientParams)
+	if err != nil {
+		return -1, -1, err
+	}
+
+	adminParams, err := toInsertPatientVisitParams(patientID, admin)
+	if err != nil {
+		return -1, -1, err
+	}
+	row, err := q.InsertPatientVisit(ctx, adminParams)
+	if err != nil {
+		return -1, -1, err
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return -1, -1, err
+	}
+	return patientID, row.Vid, nil
+}
+
 // UpdatePatient updates demographic data for a patient.
-func (p *postgresPatientRepository) UpdatePatient(ctx context.Context, id int32, patient *db.PatientDetail) error {
+func (p *PostgresPatientRepository) UpdatePatient(ctx context.Context, id int32, patient *db.PatientDetail) error {
 	if patient == nil {
 		return entities.ErrMissingPatientData
 	}
@@ -195,7 +236,7 @@ func (p *postgresPatientRepository) UpdatePatient(ctx context.Context, id int32,
 }
 
 // DeletePatient deletes a patient and all associated visits/data.
-func (p *postgresPatientRepository) DeletePatient(ctx context.Context, id int32) error {
+func (p *PostgresPatientRepository) DeletePatient(ctx context.Context, id int32) error {
 	tx, err := p.Conn.Begin(ctx)
 	if err != nil {
 		return err
@@ -220,7 +261,7 @@ func (p *postgresPatientRepository) DeletePatient(ctx context.Context, id int32)
 }
 
 // CreatePatientVisit inserts a new Admin category for an existing patient and returns the new vid if successful.
-func (p *postgresPatientRepository) CreatePatientVisit(ctx context.Context, id int32, admin *db.Admin) (int32, error) {
+func (p *PostgresPatientRepository) CreatePatientVisit(ctx context.Context, id int32, admin *db.Admin) (int32, error) {
 	if admin == nil {
 		return -1, entities.ErrMissingAdminCategory
 	}
@@ -257,7 +298,7 @@ func (p *postgresPatientRepository) CreatePatientVisit(ctx context.Context, id i
 }
 
 // DeletePatientVisit removes a visit and cascades through related tables.
-func (p *postgresPatientRepository) DeletePatientVisit(ctx context.Context, id int32, vid int32) error {
+func (p *PostgresPatientRepository) DeletePatientVisit(ctx context.Context, id int32, vid int32) error {
 	tx, err := p.Conn.Begin(ctx)
 	if err != nil {
 		return err
@@ -278,7 +319,7 @@ func (p *postgresPatientRepository) DeletePatientVisit(ctx context.Context, id i
 }
 
 // UpdatePatientVisit updates a visit for an existing patient, filling out or overriding any of its fields.
-func (p *postgresPatientRepository) UpdatePatientVisit(ctx context.Context, id int32, vid int32, patient *entities.Patient) error {
+func (p *PostgresPatientRepository) UpdatePatientVisit(ctx context.Context, id int32, vid int32, patient *entities.Patient) error {
 	tx, err := p.Conn.Begin(ctx)
 	if err != nil {
 		return err
@@ -395,7 +436,7 @@ func (p *postgresPatientRepository) UpdatePatientVisit(ctx context.Context, id i
 	return nil
 }
 
-func (p *postgresPatientRepository) GetPatientMeta(ctx context.Context, id int32) (*entities.PatientMeta, error) {
+func (p *PostgresPatientRepository) GetPatientMeta(ctx context.Context, id int32) (*entities.PatientMeta, error) {
 	q := p.queries
 
 	exists, err := checkPatientExists(ctx, q, id)
@@ -441,7 +482,7 @@ func (p *postgresPatientRepository) GetPatientMeta(ctx context.Context, id int32
 	return &patientMeta, nil
 }
 
-func (p *postgresPatientRepository) GetAllPatientVisitMeta(ctx context.Context, date time.Time) ([]entities.PatientVisitMeta, error) {
+func (p *PostgresPatientRepository) GetAllPatientVisitMeta(ctx context.Context, date time.Time) ([]entities.PatientVisitMeta, error) {
 	q := p.queries
 	if date.IsZero() {
 		rows, err := q.GetPatientVisitMetaLatest(ctx)
@@ -466,7 +507,7 @@ func (p *postgresPatientRepository) GetAllPatientVisitMeta(ctx context.Context, 
 	return result, nil
 }
 
-func (p *postgresPatientRepository) GetDBUser(ctx context.Context, username string) (*db.User, error) {
+func (p *PostgresPatientRepository) GetDBUser(ctx context.Context, username string) (*db.User, error) {
 	row, err := p.queries.GetUserByUsername(ctx, username)
 	if err != nil {
 		return nil, err

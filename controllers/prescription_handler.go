@@ -11,17 +11,15 @@ import (
 	"sothea-backend/entities"
 	"sothea-backend/repository/postgres"
 	db "sothea-backend/repository/sqlc"
+	"sothea-backend/usecases"
 )
 
-// -----------------------------------------------------------------------------
-//  Handler struct + constructor
-// -----------------------------------------------------------------------------
-
+// PrescriptionHandler wires HTTP routes to the prescription usecase.
 type PrescriptionHandler struct {
-	Usecase entities.PrescriptionUseCase
+	Usecase *usecases.PrescriptionUsecase
 }
 
-func NewPrescriptionHandler(r gin.IRouter, uc entities.PrescriptionUseCase, secretKey []byte, pool *pgxpool.Pool) {
+func NewPrescriptionHandler(r gin.IRouter, uc *usecases.PrescriptionUsecase, secretKey []byte, pool *pgxpool.Pool) {
 	h := &PrescriptionHandler{Usecase: uc}
 
 	grp := r.Group("/prescriptions")
@@ -78,8 +76,7 @@ func (h *PrescriptionHandler) ListPrescriptions(c *gin.Context) {
 		vidPtr = &tmp
 	}
 
-	ctx := c.Request.Context()
-	prescriptions, err := h.Usecase.ListPrescriptions(ctx, patientIDPtr, vidPtr)
+	prescriptions, err := h.Usecase.ListPrescriptions(c.Request.Context(), patientIDPtr, vidPtr)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -93,8 +90,7 @@ func (h *PrescriptionHandler) CreatePrescription(c *gin.Context) {
 		handleBindErr(c, err)
 		return
 	}
-	ctx := c.Request.Context()
-	prescription, err := h.Usecase.CreatePrescription(ctx, &p)
+	prescription, err := h.Usecase.CreatePrescription(c.Request.Context(), &p)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -108,8 +104,7 @@ func (h *PrescriptionHandler) GetPrescription(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	ctx := c.Request.Context()
-	prescription, err := h.Usecase.GetPrescriptionByID(ctx, id)
+	prescription, err := h.Usecase.GetPrescriptionByID(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -130,8 +125,7 @@ func (h *PrescriptionHandler) UpdatePrescription(c *gin.Context) {
 	}
 	p.ID = id
 
-	ctx := c.Request.Context()
-	prescription, err := h.Usecase.UpdatePrescription(ctx, &p)
+	prescription, err := h.Usecase.UpdatePrescription(c.Request.Context(), &p)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -145,8 +139,7 @@ func (h *PrescriptionHandler) DeletePrescription(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	ctx := c.Request.Context()
-	if err := h.Usecase.DeletePrescription(ctx, id); err != nil {
+	if err := h.Usecase.DeletePrescription(c.Request.Context(), id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -185,8 +178,7 @@ func (h *PrescriptionHandler) AddLine(c *gin.Context) {
 		},
 	}
 
-	ctx := c.Request.Context()
-	created, err := h.Usecase.AddLine(ctx, &line)
+	created, err := h.Usecase.AddLine(c.Request.Context(), &line)
 	if err != nil {
 		if stockErr, ok := err.(*postgres.InsufficientStockError); ok {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -232,8 +224,7 @@ func (h *PrescriptionHandler) UpdateLine(c *gin.Context) {
 		},
 	}
 
-	ctx := c.Request.Context()
-	updated, err := h.Usecase.UpdateLine(ctx, &line)
+	updated, err := h.Usecase.UpdateLine(c.Request.Context(), &line)
 	if err != nil {
 		if stockErr, ok := err.(*postgres.InsufficientStockError); ok {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -257,8 +248,7 @@ func (h *PrescriptionHandler) RemoveLine(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid line id"})
 		return
 	}
-	ctx := c.Request.Context()
-	if err := h.Usecase.RemoveLine(ctx, lineID); err != nil {
+	if err := h.Usecase.RemoveLine(c.Request.Context(), lineID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -275,8 +265,7 @@ func (h *PrescriptionHandler) ListLineAllocations(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid line id"})
 		return
 	}
-	ctx := c.Request.Context()
-	allocs, err := h.Usecase.ListLineAllocations(ctx, lineID)
+	allocs, err := h.Usecase.ListLineAllocations(c.Request.Context(), lineID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -304,8 +293,7 @@ func (h *PrescriptionHandler) SetLineAllocations(c *gin.Context) {
 		})
 	}
 
-	ctx := c.Request.Context()
-	out, err := h.Usecase.SetLineAllocations(ctx, lineID, allocs)
+	out, err := h.Usecase.SetLineAllocations(c.Request.Context(), lineID, allocs)
 	if err != nil {
 		if stockErr, ok := err.(*postgres.InsufficientStockError); ok {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -333,8 +321,7 @@ func (h *PrescriptionHandler) MarkLinePacked(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid line id"})
 		return
 	}
-	ctx := c.Request.Context()
-	line, err := h.Usecase.MarkLinePacked(ctx, lineID)
+	line, err := h.Usecase.MarkLinePacked(c.Request.Context(), lineID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -348,8 +335,7 @@ func (h *PrescriptionHandler) UnpackLine(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid line id"})
 		return
 	}
-	ctx := c.Request.Context()
-	line, err := h.Usecase.UnpackLine(ctx, lineID)
+	line, err := h.Usecase.UnpackLine(c.Request.Context(), lineID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -367,9 +353,7 @@ func (h *PrescriptionHandler) DispensePrescription(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-
-	ctx := c.Request.Context()
-	p, err := h.Usecase.DispensePrescription(ctx, id)
+	p, err := h.Usecase.DispensePrescription(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

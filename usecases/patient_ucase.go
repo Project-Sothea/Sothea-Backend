@@ -5,79 +5,87 @@ import (
 	"time"
 
 	"sothea-backend/entities"
+	"sothea-backend/repository/postgres"
 	db "sothea-backend/repository/sqlc"
 )
 
-type patientUsecase struct {
-	patientRepo    entities.PatientRepository
+type PatientUsecase struct {
+	patientRepo    *postgres.PostgresPatientRepository
 	contextTimeout time.Duration
 }
 
-// NewPatientUseCase
-func NewPatientUsecase(p entities.PatientRepository, timeout time.Duration) entities.PatientUseCase {
-	return &patientUsecase{
+// NewPatientUsecase constructs the patient usecase with timeout.
+func NewPatientUsecase(p *postgres.PostgresPatientRepository, timeout time.Duration) *PatientUsecase {
+	return &PatientUsecase{
 		patientRepo:    p,
 		contextTimeout: timeout,
 	}
 }
 
-func (p *patientUsecase) GetPatientVisit(ctx context.Context, id int32, vid int32) (*entities.Patient, error) {
+func (p *PatientUsecase) GetPatientVisit(ctx context.Context, id int32, vid int32) (*entities.Patient, error) {
 	ctx, cancel := context.WithTimeout(ctx, p.contextTimeout)
 	defer cancel()
 
 	return p.patientRepo.GetPatientVisit(ctx, id, vid)
 }
 
-func (p *patientUsecase) CreatePatient(ctx context.Context, patient *db.PatientDetail) (int32, error) {
+func (p *PatientUsecase) CreatePatient(ctx context.Context, patient *db.PatientDetail) (int32, error) {
 	ctx, cancel := context.WithTimeout(ctx, p.contextTimeout)
 	defer cancel()
 
 	return p.patientRepo.CreatePatient(ctx, patient)
 }
 
-func (p *patientUsecase) UpdatePatient(ctx context.Context, id int32, patient *db.PatientDetail) error {
+func (p *PatientUsecase) CreatePatientWithVisit(ctx context.Context, patient *db.PatientDetail, admin *db.Admin) (int32, int32, error) {
+	ctx, cancel := context.WithTimeout(ctx, p.contextTimeout)
+	defer cancel()
+
+	return p.patientRepo.CreatePatientWithVisit(ctx, patient, admin)
+}
+
+func (p *PatientUsecase) UpdatePatient(ctx context.Context, id int32, patient *db.PatientDetail) error {
 	ctx, cancel := context.WithTimeout(ctx, p.contextTimeout)
 	defer cancel()
 
 	return p.patientRepo.UpdatePatient(ctx, id, patient)
 }
 
-func (p *patientUsecase) DeletePatient(ctx context.Context, id int32) error {
+func (p *PatientUsecase) DeletePatient(ctx context.Context, id int32) error {
 	ctx, cancel := context.WithTimeout(ctx, p.contextTimeout)
 	defer cancel()
 
 	return p.patientRepo.DeletePatient(ctx, id)
 }
 
-func (p *patientUsecase) CreatePatientVisit(ctx context.Context, id int32, admin *db.Admin) (int32, error) {
+func (p *PatientUsecase) CreatePatientVisit(ctx context.Context, id int32, admin *db.Admin) (int32, error) {
 	ctx, cancel := context.WithTimeout(ctx, p.contextTimeout)
 	defer cancel()
 
 	return p.patientRepo.CreatePatientVisit(ctx, id, admin)
 }
 
-func (p *patientUsecase) DeletePatientVisit(ctx context.Context, id int32, vid int32) error {
+func (p *PatientUsecase) DeletePatientVisit(ctx context.Context, id int32, vid int32) error {
 	ctx, cancel := context.WithTimeout(ctx, p.contextTimeout)
 	defer cancel()
 
 	return p.patientRepo.DeletePatientVisit(ctx, id, vid)
 }
 
-func (p *patientUsecase) UpdatePatientVisit(ctx context.Context, id int32, vid int32, patient *entities.Patient) error {
+func (p *PatientUsecase) UpdatePatientVisit(ctx context.Context, id int32, vid int32, patient *entities.Patient) error {
 	ctx, cancel := context.WithTimeout(ctx, p.contextTimeout)
 	defer cancel()
 
 	return p.patientRepo.UpdatePatientVisit(ctx, id, vid, patient)
 }
 
-func (p *patientUsecase) GetPatientMeta(ctx context.Context, id int32) (*entities.PatientMeta, error) {
+func (p *PatientUsecase) GetPatientMeta(ctx context.Context, id int32) (*entities.PatientMeta, error) {
 	ctx, cancel := context.WithTimeout(ctx, p.contextTimeout)
 	defer cancel()
 
 	return p.patientRepo.GetPatientMeta(ctx, id)
 }
 
-func (p *patientUsecase) GetAllPatientVisitMeta(ctx context.Context, date time.Time) ([]entities.PatientVisitMeta, error) {
+func (p *PatientUsecase) GetAllPatientVisitMeta(ctx context.Context, date time.Time) ([]entities.PatientVisitMeta, error) {
 	ctx, cancel := context.WithTimeout(ctx, p.contextTimeout)
 	defer cancel()
 

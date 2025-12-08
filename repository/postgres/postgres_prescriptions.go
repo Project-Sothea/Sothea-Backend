@@ -16,19 +16,19 @@ import (
 // REPO
 // ----------------------------------------------------------------------------
 
-type postgresPrescriptionRepository struct {
+type PostgresPrescriptionRepository struct {
 	Conn    *pgxpool.Pool
 	queries *db.Queries
 }
 
-func NewPostgresPrescriptionRepository(conn *pgxpool.Pool) entities.PrescriptionRepository {
-	return &postgresPrescriptionRepository{
+func NewPostgresPrescriptionRepository(conn *pgxpool.Pool) *PostgresPrescriptionRepository {
+	return &PostgresPrescriptionRepository{
 		Conn:    conn,
 		queries: db.New(conn),
 	}
 }
 
-func (r *postgresPrescriptionRepository) q(ctx context.Context) *db.Queries {
+func (r *PostgresPrescriptionRepository) q(ctx context.Context) *db.Queries {
 	if tx, ok := TxFromCtx(ctx); ok && tx != nil {
 		return r.queries.WithTx(tx)
 	}
@@ -47,7 +47,7 @@ func withTx(ctx context.Context, pool *pgxpool.Pool) (pgx.Tx, bool, error) {
 // PRESCRIPTIONS (header)
 // ----------------------------------------------------------------------------
 
-func (r *postgresPrescriptionRepository) CreatePrescription(ctx context.Context, p *entities.Prescription) (*entities.Prescription, error) {
+func (r *PostgresPrescriptionRepository) CreatePrescription(ctx context.Context, p *entities.Prescription) (*entities.Prescription, error) {
 	tx, own, err := withTx(ctx, r.Conn)
 	if err != nil {
 		return nil, err
@@ -82,7 +82,7 @@ func (r *postgresPrescriptionRepository) CreatePrescription(ctx context.Context,
 	return r.GetPrescriptionByID(ctx, p.ID)
 }
 
-func (r *postgresPrescriptionRepository) GetPrescriptionByID(ctx context.Context, id int64) (*entities.Prescription, error) {
+func (r *PostgresPrescriptionRepository) GetPrescriptionByID(ctx context.Context, id int64) (*entities.Prescription, error) {
 	q := r.q(ctx)
 	header, err := q.GetPrescriptionHeader(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -168,7 +168,7 @@ func (r *postgresPrescriptionRepository) GetPrescriptionByID(ctx context.Context
 	return &p, nil
 }
 
-func (r *postgresPrescriptionRepository) ListPrescriptions(ctx context.Context, patientID *int64, vid *int32) ([]*entities.Prescription, error) {
+func (r *PostgresPrescriptionRepository) ListPrescriptions(ctx context.Context, patientID *int64, vid *int32) ([]*entities.Prescription, error) {
 	q := r.q(ctx)
 	switch {
 	case patientID != nil && vid != nil:
@@ -204,7 +204,7 @@ func (r *postgresPrescriptionRepository) ListPrescriptions(ctx context.Context, 
 	}
 }
 
-func (r *postgresPrescriptionRepository) UpdatePrescription(ctx context.Context, p *entities.Prescription) (*entities.Prescription, error) {
+func (r *PostgresPrescriptionRepository) UpdatePrescription(ctx context.Context, p *entities.Prescription) (*entities.Prescription, error) {
 	tx, own, err := withTx(ctx, r.Conn)
 	if err != nil {
 		return nil, err
@@ -249,7 +249,7 @@ func (r *postgresPrescriptionRepository) UpdatePrescription(ctx context.Context,
 	return r.GetPrescriptionByID(ctx, p.ID)
 }
 
-func (r *postgresPrescriptionRepository) DeletePrescription(ctx context.Context, id int64) error {
+func (r *PostgresPrescriptionRepository) DeletePrescription(ctx context.Context, id int64) error {
 	tx, own, err := withTx(ctx, r.Conn)
 	if err != nil {
 		return err
@@ -293,7 +293,7 @@ func (r *postgresPrescriptionRepository) DeletePrescription(ctx context.Context,
 // LINES (one presentation per line)
 // ----------------------------------------------------------------------------
 
-func (r *postgresPrescriptionRepository) AddLine(ctx context.Context, line *entities.PrescriptionLine) (*entities.PrescriptionLine, error) {
+func (r *PostgresPrescriptionRepository) AddLine(ctx context.Context, line *entities.PrescriptionLine) (*entities.PrescriptionLine, error) {
 	tx, own, err := withTx(ctx, r.Conn)
 	if err != nil {
 		return nil, err
@@ -341,7 +341,7 @@ func (r *postgresPrescriptionRepository) AddLine(ctx context.Context, line *enti
 	return r.GetLine(ctx, line.ID)
 }
 
-func (r *postgresPrescriptionRepository) UpdateLine(ctx context.Context, line *entities.PrescriptionLine) (*entities.PrescriptionLine, error) {
+func (r *PostgresPrescriptionRepository) UpdateLine(ctx context.Context, line *entities.PrescriptionLine) (*entities.PrescriptionLine, error) {
 	tx, own, err := withTx(ctx, r.Conn)
 	if err != nil {
 		return nil, err
@@ -416,7 +416,7 @@ func (r *postgresPrescriptionRepository) UpdateLine(ctx context.Context, line *e
 	return r.GetLine(ctx, line.ID)
 }
 
-func (r *postgresPrescriptionRepository) RemoveLine(ctx context.Context, lineID int64) error {
+func (r *PostgresPrescriptionRepository) RemoveLine(ctx context.Context, lineID int64) error {
 	tx, own, err := withTx(ctx, r.Conn)
 	if err != nil {
 		return err
@@ -460,7 +460,7 @@ func (r *postgresPrescriptionRepository) RemoveLine(ctx context.Context, lineID 
 // Allocations (packing plan) - replace all
 // ----------------------------------------------------------------------------
 
-func (r *postgresPrescriptionRepository) ListLineAllocations(ctx context.Context, lineID int64) ([]db.PrescriptionBatchItem, error) {
+func (r *PostgresPrescriptionRepository) ListLineAllocations(ctx context.Context, lineID int64) ([]db.PrescriptionBatchItem, error) {
 	rows, err := r.q(ctx).ListAllocationsByLine(ctx, lineID)
 	if err != nil {
 		return nil, err
@@ -479,7 +479,7 @@ func (r *postgresPrescriptionRepository) ListLineAllocations(ctx context.Context
 	return out, nil
 }
 
-func (r *postgresPrescriptionRepository) SetLineAllocations(ctx context.Context, lineID int64, allocs []db.PrescriptionBatchItem) ([]db.PrescriptionBatchItem, error) {
+func (r *PostgresPrescriptionRepository) SetLineAllocations(ctx context.Context, lineID int64, allocs []db.PrescriptionBatchItem) ([]db.PrescriptionBatchItem, error) {
 	tx, own, err := withTx(ctx, r.Conn)
 	if err != nil {
 		return nil, err
@@ -536,7 +536,7 @@ func (r *postgresPrescriptionRepository) SetLineAllocations(ctx context.Context,
 // Pack / Unpack flags (no stock mutation here)
 // ----------------------------------------------------------------------------
 
-func (r *postgresPrescriptionRepository) MarkLinePacked(ctx context.Context, lineID int64) (*entities.PrescriptionLine, error) {
+func (r *PostgresPrescriptionRepository) MarkLinePacked(ctx context.Context, lineID int64) (*entities.PrescriptionLine, error) {
 	tx, own, err := withTx(ctx, r.Conn)
 	if err != nil {
 		return nil, err
@@ -573,7 +573,7 @@ func (r *postgresPrescriptionRepository) MarkLinePacked(ctx context.Context, lin
 	return r.GetLine(ctx, lineID)
 }
 
-func (r *postgresPrescriptionRepository) UnpackLine(ctx context.Context, lineID int64) (*entities.PrescriptionLine, error) {
+func (r *PostgresPrescriptionRepository) UnpackLine(ctx context.Context, lineID int64) (*entities.PrescriptionLine, error) {
 	tx, own, err := withTx(ctx, r.Conn)
 	if err != nil {
 		return nil, err
@@ -614,7 +614,7 @@ func (r *postgresPrescriptionRepository) UnpackLine(ctx context.Context, lineID 
 // Stock is already reserved by triggers on prescription_batch_items.
 // ----------------------------------------------------------------------------
 
-func (r *postgresPrescriptionRepository) DispensePrescription(ctx context.Context, prescriptionID int64) (*entities.Prescription, error) {
+func (r *PostgresPrescriptionRepository) DispensePrescription(ctx context.Context, prescriptionID int64) (*entities.Prescription, error) {
 	tx, own, err := withTx(ctx, r.Conn)
 	if err != nil {
 		return nil, err
@@ -681,7 +681,7 @@ func (r *postgresPrescriptionRepository) DispensePrescription(ctx context.Contex
 // Utility used by FEFO/helper
 // ----------------------------------------------------------------------------
 
-func (r *postgresPrescriptionRepository) GetLine(ctx context.Context, lineID int64) (*entities.PrescriptionLine, error) {
+func (r *PostgresPrescriptionRepository) GetLine(ctx context.Context, lineID int64) (*entities.PrescriptionLine, error) {
 	q := r.q(ctx)
 	row, err := q.GetLineWithDispenseUnit(ctx, lineID)
 	if errors.Is(err, pgx.ErrNoRows) {

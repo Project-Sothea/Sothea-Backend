@@ -17,20 +17,20 @@ import (
 //  STRUCT + CONSTRUCTOR
 // -----------------------------------------------------------------------------
 
-type postgresPharmacyRepository struct {
+type PostgresPharmacyRepository struct {
 	Conn    *pgxpool.Pool
 	queries *db.Queries
 }
 
-func (r *postgresPharmacyRepository) q(ctx context.Context) *db.Queries {
+func (r *PostgresPharmacyRepository) q(ctx context.Context) *db.Queries {
 	if tx, ok := TxFromCtx(ctx); ok && tx != nil {
 		return r.queries.WithTx(tx)
 	}
 	return r.queries
 }
 
-func NewPostgresPharmacyRepository(conn *pgxpool.Pool) entities.PharmacyRepository {
-	return &postgresPharmacyRepository{
+func NewPostgresPharmacyRepository(conn *pgxpool.Pool) *PostgresPharmacyRepository {
+	return &PostgresPharmacyRepository{
 		Conn:    conn,
 		queries: db.New(conn),
 	}
@@ -143,7 +143,7 @@ func equalPtrString(a, b *string) bool {
 //  DRUGS
 // -----------------------------------------------------------------------------
 
-func (r *postgresPharmacyRepository) ListDrugs(ctx context.Context, q *string) ([]entities.DrugView, error) {
+func (r *PostgresPharmacyRepository) ListDrugs(ctx context.Context, q *string) ([]entities.DrugView, error) {
 	qx := r.q(ctx)
 
 	var rows []db.Drug
@@ -219,7 +219,7 @@ func (r *postgresPharmacyRepository) ListDrugs(ctx context.Context, q *string) (
 	return out, nil
 }
 
-func (r *postgresPharmacyRepository) CreateDrug(ctx context.Context, d *db.Drug) (*entities.DrugView, error) {
+func (r *PostgresPharmacyRepository) CreateDrug(ctx context.Context, d *db.Drug) (*entities.DrugView, error) {
 	tx, ok := TxFromCtx(ctx)
 	if !ok {
 		return nil, errors.New("transaction not found")
@@ -251,7 +251,7 @@ func (r *postgresPharmacyRepository) CreateDrug(ctx context.Context, d *db.Drug)
 	return r.GetDrug(ctx, row)
 }
 
-func (r *postgresPharmacyRepository) GetDrug(ctx context.Context, id int64) (*entities.DrugView, error) {
+func (r *PostgresPharmacyRepository) GetDrug(ctx context.Context, id int64) (*entities.DrugView, error) {
 	row, err := r.q(ctx).GetDrug(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errors.New("drug not found")
@@ -268,7 +268,7 @@ func (r *postgresPharmacyRepository) GetDrug(ctx context.Context, id int64) (*en
 	}, nil
 }
 
-func (r *postgresPharmacyRepository) UpdateDrug(ctx context.Context, d *db.Drug) (*entities.DrugView, error) {
+func (r *PostgresPharmacyRepository) UpdateDrug(ctx context.Context, d *db.Drug) (*entities.DrugView, error) {
 	tx, ok := TxFromCtx(ctx)
 	if !ok {
 		return nil, errors.New("transaction not found")
@@ -385,7 +385,7 @@ func (r *postgresPharmacyRepository) UpdateDrug(ctx context.Context, d *db.Drug)
 	return r.GetDrug(ctx, d.ID)
 }
 
-func (r *postgresPharmacyRepository) DeleteDrug(ctx context.Context, id int64) error {
+func (r *PostgresPharmacyRepository) DeleteDrug(ctx context.Context, id int64) error {
 	q := r.q(ctx)
 
 	// Ensure exists
@@ -412,7 +412,7 @@ func (r *postgresPharmacyRepository) DeleteDrug(ctx context.Context, id int64) e
 //  BATCHES & LOCATIONS (quantities in DispenseUnit)
 // -----------------------------------------------------------------------------
 
-func (r *postgresPharmacyRepository) ListBatches(ctx context.Context, drugID int64) ([]entities.BatchDetail, error) {
+func (r *PostgresPharmacyRepository) ListBatches(ctx context.Context, drugID int64) ([]entities.BatchDetail, error) {
 	q := r.q(ctx)
 
 	batchRows, err := q.ListBatchesByDrug(ctx, drugID)
@@ -451,7 +451,7 @@ func (r *postgresPharmacyRepository) ListBatches(ctx context.Context, drugID int
 	return out, nil
 }
 
-func (r *postgresPharmacyRepository) GetBatch(ctx context.Context, batchID int64) (*entities.BatchDetail, error) {
+func (r *PostgresPharmacyRepository) GetBatch(ctx context.Context, batchID int64) (*entities.BatchDetail, error) {
 	q := r.q(ctx)
 	bRow, err := q.GetBatch(ctx, batchID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -478,7 +478,7 @@ func (r *postgresPharmacyRepository) GetBatch(ctx context.Context, batchID int64
 	}, nil
 }
 
-func (r *postgresPharmacyRepository) CreateBatch(ctx context.Context, b *db.DrugBatch, locations []db.BatchLocation) (*entities.BatchDetail, error) {
+func (r *PostgresPharmacyRepository) CreateBatch(ctx context.Context, b *db.DrugBatch, locations []db.BatchLocation) (*entities.BatchDetail, error) {
 	tx, ok := TxFromCtx(ctx)
 	own := false
 	var err error
@@ -532,7 +532,7 @@ func (r *postgresPharmacyRepository) CreateBatch(ctx context.Context, b *db.Drug
 	return r.GetBatch(ctx, id)
 }
 
-func (r *postgresPharmacyRepository) UpdateBatch(ctx context.Context, b *db.DrugBatch, locations []db.BatchLocation) (*entities.BatchDetail, error) {
+func (r *PostgresPharmacyRepository) UpdateBatch(ctx context.Context, b *db.DrugBatch, locations []db.BatchLocation) (*entities.BatchDetail, error) {
 	tx, ok := TxFromCtx(ctx)
 	own := false
 	var err error
@@ -638,7 +638,7 @@ func (r *postgresPharmacyRepository) UpdateBatch(ctx context.Context, b *db.Drug
 	return r.GetBatch(ctx, b.ID)
 }
 
-func (r *postgresPharmacyRepository) DeleteBatch(ctx context.Context, batchID int64) error {
+func (r *PostgresPharmacyRepository) DeleteBatch(ctx context.Context, batchID int64) error {
 	q := r.q(ctx)
 
 	if _, err := q.GetBatch(ctx, batchID); errors.Is(err, pgx.ErrNoRows) {
@@ -664,7 +664,7 @@ func (r *postgresPharmacyRepository) DeleteBatch(ctx context.Context, batchID in
 //  LOCATIONS
 // -----------------------------------------------------------------------------
 
-func (r *postgresPharmacyRepository) ListBatchLocations(ctx context.Context, batchID int64) ([]db.BatchLocation, error) {
+func (r *PostgresPharmacyRepository) ListBatchLocations(ctx context.Context, batchID int64) ([]db.BatchLocation, error) {
 	rows, err := r.q(ctx).ListBatchLocationsByBatch(ctx, batchID)
 	if err != nil {
 		return nil, err
@@ -676,7 +676,7 @@ func (r *postgresPharmacyRepository) ListBatchLocations(ctx context.Context, bat
 	return out, nil
 }
 
-func (r *postgresPharmacyRepository) CreateBatchLocation(ctx context.Context, loc *db.BatchLocation) (*db.BatchLocation, error) {
+func (r *PostgresPharmacyRepository) CreateBatchLocation(ctx context.Context, loc *db.BatchLocation) (*db.BatchLocation, error) {
 	locRow, err := r.q(ctx).InsertBatchLocation(ctx, db.InsertBatchLocationParams{
 		BatchID:  loc.BatchID,
 		Location: loc.Location,
@@ -691,7 +691,7 @@ func (r *postgresPharmacyRepository) CreateBatchLocation(ctx context.Context, lo
 	return r.GetBatchLocation(ctx, loc.ID)
 }
 
-func (r *postgresPharmacyRepository) GetBatchLocation(ctx context.Context, id int64) (*db.BatchLocation, error) {
+func (r *PostgresPharmacyRepository) GetBatchLocation(ctx context.Context, id int64) (*db.BatchLocation, error) {
 	row, err := r.q(ctx).GetBatchLocation(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errors.New("batch location not found")
@@ -703,7 +703,7 @@ func (r *postgresPharmacyRepository) GetBatchLocation(ctx context.Context, id in
 	return &loc, nil
 }
 
-func (r *postgresPharmacyRepository) UpdateBatchLocation(ctx context.Context, loc *db.BatchLocation) (*db.BatchLocation, error) {
+func (r *PostgresPharmacyRepository) UpdateBatchLocation(ctx context.Context, loc *db.BatchLocation) (*db.BatchLocation, error) {
 	if err := r.q(ctx).UpdateBatchLocation(ctx, db.UpdateBatchLocationParams{
 		ID:       loc.ID,
 		Location: loc.Location,
@@ -717,7 +717,7 @@ func (r *postgresPharmacyRepository) UpdateBatchLocation(ctx context.Context, lo
 	return r.GetBatchLocation(ctx, loc.ID)
 }
 
-func (r *postgresPharmacyRepository) DeleteBatchLocation(ctx context.Context, id int64) error {
+func (r *PostgresPharmacyRepository) DeleteBatchLocation(ctx context.Context, id int64) error {
 	q := r.q(ctx)
 	referenceCount, err := q.CountPrescriptionAllocationsForLocation(ctx, id)
 	if err != nil {
@@ -733,7 +733,7 @@ func (r *postgresPharmacyRepository) DeleteBatchLocation(ctx context.Context, id
 //  STOCK VIEW (FEFO summary for a presentation)
 // -----------------------------------------------------------------------------
 
-func (r *postgresPharmacyRepository) GetDrugStock(ctx context.Context, drugID int64) (*entities.DrugStock, error) {
+func (r *PostgresPharmacyRepository) GetDrugStock(ctx context.Context, drugID int64) (*entities.DrugStock, error) {
 	// 1) Drug view (for labels)
 	dv, err := r.GetDrug(ctx, drugID)
 	if err != nil {
