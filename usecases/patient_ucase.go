@@ -4,7 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/jieqiboh/sothea_backend/entities"
+	"sothea-backend/entities"
+	db "sothea-backend/repository/sqlc"
 )
 
 type patientUsecase struct {
@@ -27,14 +28,28 @@ func (p *patientUsecase) GetPatientVisit(ctx context.Context, id int32, vid int3
 	return p.patientRepo.GetPatientVisit(ctx, id, vid)
 }
 
-func (p *patientUsecase) CreatePatient(ctx context.Context, admin *entities.Admin) (int32, error) {
+func (p *patientUsecase) CreatePatient(ctx context.Context, patient *db.PatientDetail) (int32, error) {
 	ctx, cancel := context.WithTimeout(ctx, p.contextTimeout)
 	defer cancel()
 
-	return p.patientRepo.CreatePatient(ctx, admin)
+	return p.patientRepo.CreatePatient(ctx, patient)
 }
 
-func (p *patientUsecase) CreatePatientVisit(ctx context.Context, id int32, admin *entities.Admin) (int32, error) {
+func (p *patientUsecase) UpdatePatient(ctx context.Context, id int32, patient *db.PatientDetail) error {
+	ctx, cancel := context.WithTimeout(ctx, p.contextTimeout)
+	defer cancel()
+
+	return p.patientRepo.UpdatePatient(ctx, id, patient)
+}
+
+func (p *patientUsecase) DeletePatient(ctx context.Context, id int32) error {
+	ctx, cancel := context.WithTimeout(ctx, p.contextTimeout)
+	defer cancel()
+
+	return p.patientRepo.DeletePatient(ctx, id)
+}
+
+func (p *patientUsecase) CreatePatientVisit(ctx context.Context, id int32, admin *db.Admin) (int32, error) {
 	ctx, cancel := context.WithTimeout(ctx, p.contextTimeout)
 	defer cancel()
 
@@ -67,11 +82,4 @@ func (p *patientUsecase) GetAllPatientVisitMeta(ctx context.Context, date time.T
 	defer cancel()
 
 	return p.patientRepo.GetAllPatientVisitMeta(ctx, date)
-}
-
-func (p *patientUsecase) ExportDatabaseToCSV(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, p.contextTimeout)
-	defer cancel()
-
-	return p.patientRepo.ExportDatabaseToCSV(ctx)
 }

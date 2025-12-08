@@ -3,10 +3,11 @@ package controllers
 import (
 	"net/http"
 
+	"sothea-backend/controllers/middleware"
+	"sothea-backend/entities"
+
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
-	"github.com/jieqiboh/sothea_backend/controllers/middleware"
-	"github.com/jieqiboh/sothea_backend/entities"
 )
 
 // LoginHandler represent the httphandler for patient
@@ -26,7 +27,7 @@ func NewLoginHandler(r gin.IRouter, us entities.LoginUseCase, secretKey []byte) 
 
 func (l *LoginHandler) Login(c *gin.Context) {
 	// username and password are in the json body
-	var u entities.User
+	var u entities.LoginPayload
 	if err := c.ShouldBindJSON(&u); err != nil {
 		// Use type assertion to check if err is of type validator.ValidationErrors
 		if _, ok := err.(validator.ValidationErrors); ok {

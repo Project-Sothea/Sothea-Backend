@@ -2,12 +2,14 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
 	"errors"
-	"fmt"
 	"time"
 
-	"github.com/jieqiboh/sothea_backend/entities"
+	"sothea-backend/entities"
+	db "sothea-backend/repository/sqlc"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ----------------------------------------------------------------------------
@@ -15,18 +17,29 @@ import (
 // ----------------------------------------------------------------------------
 
 type postgresPrescriptionRepository struct {
-	Conn *sql.DB
+	Conn    *pgxpool.Pool
+	queries *db.Queries
 }
 
-func NewPostgresPrescriptionRepository(conn *sql.DB) entities.PrescriptionRepository {
-	return &postgresPrescriptionRepository{Conn: conn}
+func NewPostgresPrescriptionRepository(conn *pgxpool.Pool) entities.PrescriptionRepository {
+	return &postgresPrescriptionRepository{
+		Conn:    conn,
+		queries: db.New(conn),
+	}
 }
 
-func withTx(ctx context.Context, db *sql.DB) (*sql.Tx, bool, error) {
+func (r *postgresPrescriptionRepository) q(ctx context.Context) *db.Queries {
+	if tx, ok := TxFromCtx(ctx); ok && tx != nil {
+		return r.queries.WithTx(tx)
+	}
+	return r.queries
+}
+
+func withTx(ctx context.Context, pool *pgxpool.Pool) (pgx.Tx, bool, error) {
 	if tx, ok := TxFromCtx(ctx); ok {
 		return tx, false, nil
 	}
-	tx, err := db.BeginTx(ctx, nil)
+	tx, err := pool.Begin(ctx)
 	return tx, true, err
 }
 
@@ -41,22 +54,28 @@ func (r *postgresPrescriptionRepository) CreatePrescription(ctx context.Context,
 	}
 	defer func() {
 		if own {
-			_ = tx.Rollback()
+			_ = tx.Rollback(ctx)
 		}
 	}()
 
-	err = tx.QueryRowContext(ctx, `
-		INSERT INTO prescriptions (patient_id, vid, notes)
-		VALUES ($1,$2,$3)
-		RETURNING id, created_at, updated_at
-	`, p.PatientID, p.VID, p.Notes).
-		Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt)
+	q := r.queries.WithTx(tx)
+	if p == nil {
+		return nil, errors.New("prescription payload required")
+	}
+	row, err := q.InsertPrescription(ctx, db.InsertPrescriptionParams{
+		PatientID: p.PatientID,
+		Vid:       p.Vid,
+		Notes:     p.Notes,
+	})
 	if err != nil {
 		return nil, err
 	}
+	p.ID = row.ID
+	p.CreatedAt = row.CreatedAt
+	p.UpdatedAt = row.UpdatedAt
 
 	if own {
-		if err := tx.Commit(); err != nil {
+		if err := tx.Commit(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -64,150 +83,80 @@ func (r *postgresPrescriptionRepository) CreatePrescription(ctx context.Context,
 }
 
 func (r *postgresPrescriptionRepository) GetPrescriptionByID(ctx context.Context, id int64) (*entities.Prescription, error) {
-	dbx := DBFromCtx(ctx, r.Conn)
-	var p entities.Prescription
-	var creatorName, dispenserName sql.NullString
-
-	// Header
-	if err := dbx.QueryRowContext(ctx, `
-		SELECT p.id, p.patient_id, p.vid, p.notes,
-				p.created_by, p.created_at, p.updated_at,
-				p.is_dispensed, p.dispensed_by, p.dispensed_at,
-				uc.name AS creator_name,
-				ud.name AS dispenser_name
-			FROM prescriptions p
-			LEFT JOIN users uc ON uc.id = p.created_by
-			LEFT JOIN users ud ON ud.id = p.dispensed_by
-		WHERE p.id = $1
-	`, id).Scan(
-		&p.ID, &p.PatientID, &p.VID, &p.Notes,
-		&p.CreatedBy, &p.CreatedAt, &p.UpdatedAt,
-		&p.IsDispensed, &p.DispensedBy, &p.DispensedAt,
-		&creatorName, &dispenserName,
-	); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, errors.New("prescription not found")
-		}
-		return nil, err
+	q := r.q(ctx)
+	header, err := q.GetPrescriptionHeader(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, errors.New("prescription not found")
 	}
-
-	if creatorName.Valid {
-		p.CreatorName = &creatorName.String
-	}
-	if dispenserName.Valid {
-		p.DispenserName = &dispenserName.String
-	}
-
-	// Lines (new schedule fields)
-	rows, err := dbx.QueryContext(ctx, `
-	SELECT
-		pl.id, pl.prescription_id, pl.drug_id, pl.remarks, pl.prn,
-		pl.dose_amount, pl.dose_unit,
-		pl.frequency_code,
-		pl.duration, pl.duration_unit,
-		pl.total_to_dispense, pl.is_packed, pl.packed_by, pl.packed_at,
-		u1.name AS packer_name,
-		u2.name AS updater_name,
-		d.generic_name AS drug_name,
-		d.route_code AS route_code,
-		d.dispense_unit AS dispense_unit,
-		CASE
-		WHEN d.strength_num IS NULL AND d.strength_unit_num IS NULL THEN
-			-- Unknown strength: show dosage form and dispense unit
-			d.dosage_form_code
-		WHEN d.strength_den IS NULL THEN
-			-- Solid with known strength
-			d.strength_num::text || ' ' || d.strength_unit_num || '/' || d.dispense_unit
-		ELSE
-			-- Liquid/cream with known concentration
-			d.strength_num::text || ' ' || d.strength_unit_num || '/' ||
-			d.strength_den::text || ' ' || d.strength_unit_den
-		END AS display_strength
-	FROM prescription_lines pl
-	LEFT JOIN drugs d ON d.id = pl.drug_id
-	LEFT JOIN users u1 ON u1.id = pl.packed_by
-	LEFT JOIN users u2 ON u2.id = pl.updated_by
-	WHERE pl.prescription_id = $1
-	ORDER BY pl.id
-	`, id)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	lines := []entities.PrescriptionLine{}
-	for rows.Next() {
-		var l entities.PrescriptionLine
-		var packerName sql.NullString
-		var updaterName sql.NullString
-		var frequencyCode sql.NullString
-		if err := rows.Scan(
-			&l.ID, &l.PrescriptionID, &l.DrugID, &l.Remarks, &l.Prn,
-			&l.DoseAmount, &l.DoseUnit,
-			&frequencyCode,
-			&l.Duration, &l.DurationUnit,
-			&l.TotalToDispense, &l.IsPacked, &l.PackedBy, &l.PackedAt,
-			&packerName, &updaterName,
-			&l.DrugName, &l.DisplayRoute, &l.DispenseUnit, &l.DisplayStrength,
-		); err != nil {
-			return nil, err
-		}
-		if frequencyCode.Valid {
-			l.FrequencyCode = frequencyCode.String
-		}
-		if packerName.Valid {
-			l.PackerName = &packerName.String
-		}
-		if updaterName.Valid {
-			l.UpdaterName = &updaterName.String
-		}
-		lines = append(lines, l)
+	p := entities.Prescription{
+		Prescription: db.Prescription{
+			ID:          header.ID,
+			PatientID:   header.PatientID,
+			Vid:         header.Vid,
+			Notes:       header.Notes,
+			CreatedBy:   header.CreatedBy,
+			CreatedAt:   header.CreatedAt,
+			UpdatedAt:   header.UpdatedAt,
+			IsDispensed: header.IsDispensed,
+			DispensedBy: header.DispensedBy,
+			DispensedAt: header.DispensedAt,
+		},
 	}
-	if err := rows.Err(); err != nil {
+
+	lineRows, err := q.ListPrescriptionLines(ctx, id)
+	if err != nil {
 		return nil, err
 	}
-
-	// Allocations per line
-	if len(lines) > 0 {
-		lineIDs := make([]any, 0, len(lines))
-		index := map[int64]*entities.PrescriptionLine{}
-		for i := range lines {
-			lineIDs = append(lineIDs, lines[i].ID)
-			index[lines[i].ID] = &lines[i]
+	lines := make([]entities.PrescriptionLine, 0, len(lineRows))
+	lineIDs := make([]int64, 0, len(lineRows))
+	for _, row := range lineRows {
+		l := entities.PrescriptionLine{
+			PrescriptionLine: db.PrescriptionLine{
+				ID:              row.ID,
+				PrescriptionID:  row.PrescriptionID,
+				DrugID:          row.DrugID,
+				Remarks:         row.Remarks,
+				Prn:             row.Prn,
+				DoseAmount:      row.DoseAmount,
+				DoseUnit:        row.DoseUnit,
+				FrequencyCode:   row.FrequencyCode,
+				Duration:        row.Duration,
+				DurationUnit:    row.DurationUnit,
+				TotalToDispense: row.TotalToDispense,
+				IsPacked:        row.IsPacked,
+				PackedBy:        row.PackedBy,
+				PackedAt:        row.PackedAt,
+			},
 		}
+		lines = append(lines, l)
+		lineIDs = append(lineIDs, row.ID)
+	}
 
-		// Build IN list ($1,$2,...)
-		in := "("
-		for i := range lineIDs {
-			if i > 0 {
-				in += ","
-			}
-			in += fmt.Sprintf("$%d", i+1)
-		}
-		in += ")"
-
-		allocRows, err := dbx.QueryContext(ctx, `
-			SELECT id, line_id, batch_location_id, quantity, created_at, updated_at
-			FROM prescription_batch_items
-			WHERE line_id IN `+in+`
-			ORDER BY line_id, id
-		`, lineIDs...)
+	if len(lineIDs) > 0 {
+		allocRows, err := q.ListAllocationsByLineIDs(ctx, lineIDs)
 		if err != nil {
 			return nil, err
 		}
-		defer allocRows.Close()
-
-		for allocRows.Next() {
-			var a entities.LineAllocation
-			if err := allocRows.Scan(&a.ID, &a.LineID, &a.BatchLocationID, &a.Quantity, &a.CreatedAt, &a.UpdatedAt); err != nil {
-				return nil, err
+		index := make(map[int64]*entities.PrescriptionLine, len(lines))
+		for i := range lines {
+			index[lines[i].ID] = &lines[i]
+		}
+		for _, ar := range allocRows {
+			a := db.PrescriptionBatchItem{
+				ID:              ar.ID,
+				LineID:          ar.LineID,
+				BatchLocationID: ar.BatchLocationID,
+				Quantity:        ar.Quantity,
+				CreatedAt:       ar.CreatedAt,
+				UpdatedAt:       ar.UpdatedAt,
 			}
 			if ln := index[a.LineID]; ln != nil {
 				ln.Allocations = append(ln.Allocations, a)
 			}
-		}
-		if err := allocRows.Err(); err != nil {
-			return nil, err
 		}
 	}
 
@@ -216,46 +165,39 @@ func (r *postgresPrescriptionRepository) GetPrescriptionByID(ctx context.Context
 }
 
 func (r *postgresPrescriptionRepository) ListPrescriptions(ctx context.Context, patientID *int64, vid *int32) ([]*entities.Prescription, error) {
-	dbx := DBFromCtx(ctx, r.Conn)
-
-	base := `
-	  SELECT id, patient_id, vid, notes,
-	         created_by, created_at, updated_at,
-	         is_dispensed, dispensed_by, dispensed_at
-	  FROM prescriptions`
-	var (
-		rows *sql.Rows
-		err  error
-	)
+	q := r.q(ctx)
 	switch {
 	case patientID != nil && vid != nil:
-		rows, err = dbx.QueryContext(ctx, base+` WHERE patient_id=$1 AND vid=$2 ORDER BY created_at DESC`, *patientID, *vid)
-	case patientID != nil:
-		rows, err = dbx.QueryContext(ctx, base+` WHERE patient_id=$1 ORDER BY created_at DESC`, *patientID)
-	default:
-		rows, err = dbx.QueryContext(ctx, base+` ORDER BY created_at DESC`)
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	out := make([]*entities.Prescription, 0)
-	for rows.Next() {
-		p := new(entities.Prescription)
-		if err := rows.Scan(
-			&p.ID, &p.PatientID, &p.VID, &p.Notes,
-			&p.CreatedBy, &p.CreatedAt, &p.UpdatedAt,
-			&p.IsDispensed, &p.DispensedBy, &p.DispensedAt,
-		); err != nil {
+		rows, err := q.ListPrescriptionsByPatientVisit(ctx, db.ListPrescriptionsByPatientVisitParams{PatientID: int32(*patientID), Vid: *vid})
+		if err != nil {
 			return nil, err
 		}
-		out = append(out, p)
+		out := make([]*entities.Prescription, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, toPrescriptionListEntity(row.ID, int64(row.PatientID), row.Vid, row.Notes, row.CreatedBy, row.CreatedAt, row.UpdatedAt, row.IsDispensed, row.DispensedBy, row.DispensedAt))
+		}
+		return out, nil
+	case patientID != nil:
+		rows, err := q.ListPrescriptionsByPatient(ctx, int32(*patientID))
+		if err != nil {
+			return nil, err
+		}
+		out := make([]*entities.Prescription, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, toPrescriptionListEntity(row.ID, int64(row.PatientID), row.Vid, row.Notes, row.CreatedBy, row.CreatedAt, row.UpdatedAt, row.IsDispensed, row.DispensedBy, row.DispensedAt))
+		}
+		return out, nil
+	default:
+		rows, err := q.ListPrescriptionsAll(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]*entities.Prescription, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, toPrescriptionListEntity(row.ID, int64(row.PatientID), row.Vid, row.Notes, row.CreatedBy, row.CreatedAt, row.UpdatedAt, row.IsDispensed, row.DispensedBy, row.DispensedAt))
+		}
+		return out, nil
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (r *postgresPrescriptionRepository) UpdatePrescription(ctx context.Context, p *entities.Prescription) (*entities.Prescription, error) {
@@ -265,39 +207,38 @@ func (r *postgresPrescriptionRepository) UpdatePrescription(ctx context.Context,
 	}
 	defer func() {
 		if own {
-			_ = tx.Rollback()
+			_ = tx.Rollback(ctx)
 		}
 	}()
 
-	var isDispensed bool
-	if err := tx.QueryRowContext(ctx, `SELECT is_dispensed FROM prescriptions WHERE id=$1`, p.ID).Scan(&isDispensed); err != nil {
+	q := r.queries.WithTx(tx)
+	isDispensed, err := q.GetPrescriptionDispensed(ctx, p.ID)
+	if err != nil {
 		return nil, err
 	}
 
 	if isDispensed {
 		// For dispensed prescriptions, only allow updating notes
-		_, err = tx.ExecContext(ctx, `
-			UPDATE prescriptions
-			SET notes=$2, updated_at=now()
-			WHERE id=$1
-		`, p.ID, p.Notes)
-		if err != nil {
+		if err := q.UpdatePrescriptionNotes(ctx, db.UpdatePrescriptionNotesParams{
+			ID:    p.ID,
+			Notes: p.Notes,
+		}); err != nil {
 			return nil, err
 		}
 	} else {
 		// For non-dispensed prescriptions, allow updating all fields
-		_, err = tx.ExecContext(ctx, `
-			UPDATE prescriptions
-			SET patient_id=$2, vid=$3, notes=$4, updated_at=now()
-			WHERE id=$1
-		`, p.ID, p.PatientID, p.VID, p.Notes)
-		if err != nil {
+		if err := q.UpdatePrescriptionFull(ctx, db.UpdatePrescriptionFullParams{
+			ID:        p.ID,
+			PatientID: p.PatientID,
+			Vid:       p.Vid,
+			Notes:     p.Notes,
+		}); err != nil {
 			return nil, err
 		}
 	}
 
 	if own {
-		if err := tx.Commit(); err != nil {
+		if err := tx.Commit(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -311,12 +252,13 @@ func (r *postgresPrescriptionRepository) DeletePrescription(ctx context.Context,
 	}
 	defer func() {
 		if own {
-			_ = tx.Rollback()
+			_ = tx.Rollback(ctx)
 		}
 	}()
 
-	var isDispensed bool
-	if err := tx.QueryRowContext(ctx, `SELECT is_dispensed FROM prescriptions WHERE id=$1`, id).Scan(&isDispensed); err != nil {
+	q := r.queries.WithTx(tx)
+	isDispensed, err := q.GetPrescriptionDispensed(ctx, id)
+	if err != nil {
 		return err
 	}
 	if isDispensed {
@@ -325,24 +267,18 @@ func (r *postgresPrescriptionRepository) DeletePrescription(ctx context.Context,
 
 	// Delete children then parent.
 	// NOTE: stock reservations are released by DB triggers on DELETE of prescription_batch_items.
-	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM prescription_batch_items WHERE line_id IN (SELECT id FROM prescription_lines WHERE prescription_id=$1)
-	`, id); err != nil {
+	if err := q.DeleteAllocationsByPrescription(ctx, id); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM prescription_lines WHERE prescription_id=$1`, id); err != nil {
+	if err := q.DeleteLinesByPrescription(ctx, id); err != nil {
 		return err
 	}
-	res, err := tx.ExecContext(ctx, `DELETE FROM prescriptions WHERE id=$1`, id)
-	if err != nil {
+	if err := q.DeletePrescription(ctx, id); err != nil {
 		return err
-	}
-	if aff, _ := res.RowsAffected(); aff == 0 {
-		return errors.New("prescription not found")
 	}
 
 	if own {
-		if err := tx.Commit(); err != nil {
+		if err := tx.Commit(ctx); err != nil {
 			return err
 		}
 	}
@@ -360,44 +296,41 @@ func (r *postgresPrescriptionRepository) AddLine(ctx context.Context, line *enti
 	}
 	defer func() {
 		if own {
-			_ = tx.Rollback()
+			_ = tx.Rollback(ctx)
 		}
 	}()
 
-	// Cannot add to dispensed Rx
+	q := r.queries.WithTx(tx)
+
 	var isDispensed bool
-	if err := tx.QueryRowContext(ctx, `SELECT is_dispensed FROM prescriptions WHERE id=$1`, line.PrescriptionID).Scan(&isDispensed); err != nil {
+	if isDispensed, err = q.GetPrescriptionDispensed(ctx, line.PrescriptionID); err != nil {
 		return nil, err
 	}
 	if isDispensed {
 		return nil, errors.New("cannot add line to a dispensed prescription")
 	}
 
-	err = tx.QueryRowContext(ctx, `
-	  INSERT INTO prescription_lines (
-	    prescription_id, drug_id, remarks, prn,
-	    dose_amount, dose_unit,
-	    frequency_code,
-		duration, duration_unit
-	  )
-	  VALUES (
-	  	$1,$2,$3,$4,
-		$5,$6,
-		$7,
-		$8,$9)
-	  RETURNING id, total_to_dispense, is_packed
-	`, line.PrescriptionID, line.DrugID, line.Remarks, line.Prn,
-		line.DoseAmount, line.DoseUnit,
-		line.FrequencyCode,
-		line.Duration, line.DurationUnit).
-		Scan(&line.ID, &line.TotalToDispense, &line.IsPacked)
+	row, err := q.InsertLine(ctx, db.InsertLineParams{
+		PrescriptionID: line.PrescriptionID,
+		DrugID:         line.DrugID,
+		Remarks:        line.Remarks,
+		Prn:            line.Prn,
+		DoseAmount:     line.DoseAmount,
+		DoseUnit:       line.DoseUnit,
+		FrequencyCode:  line.FrequencyCode,
+		Duration:       line.Duration,
+		DurationUnit:   line.DurationUnit,
+	})
 	if err != nil {
 		return nil, mapPrescriptionSQLError(err)
 	}
+	line.ID = row.ID
+	line.TotalToDispense = row.TotalToDispense
+	line.IsPacked = row.IsPacked
 
 	// Return enriched line
 	if own {
-		if err := tx.Commit(); err != nil {
+		if err := tx.Commit(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -411,77 +344,68 @@ func (r *postgresPrescriptionRepository) UpdateLine(ctx context.Context, line *e
 	}
 	defer func() {
 		if own {
-			_ = tx.Rollback()
+			_ = tx.Rollback(ctx)
 		}
 	}()
 
-	// Forbid updates on dispensed Rx
-	var pid int64
-	if err := tx.QueryRowContext(ctx, `SELECT prescription_id FROM prescription_lines WHERE id=$1`, line.ID).Scan(&pid); err != nil {
+	q := r.queries.WithTx(tx)
+
+	pid, err := q.GetPrescriptionIDForLine(ctx, line.ID)
+	if err != nil {
 		return nil, err
 	}
-	var isDispensed bool
-	if err := tx.QueryRowContext(ctx, `SELECT is_dispensed FROM prescriptions WHERE id=$1`, pid).Scan(&isDispensed); err != nil {
+	isDispensed, err := q.GetPrescriptionDispensed(ctx, pid)
+	if err != nil {
 		return nil, err
 	}
 	if isDispensed {
 		return nil, errors.New("cannot modify a line on a dispensed prescription")
 	}
 
-	// Load current values to detect what changed (lock the row for the rest of the tx)
-	var cur entities.PrescriptionLine
-	var curFreqCode sql.NullString
-	if err := tx.QueryRowContext(ctx, `
-		SELECT drug_id,
-		dose_amount, dose_unit,
-		frequency_code,
-		duration, duration_unit,
-		remarks, prn
-		FROM prescription_lines
-		WHERE id=$1 FOR UPDATE
-	`, line.ID).Scan(
-		&cur.DrugID,
-		&cur.DoseAmount, &cur.DoseUnit,
-		&curFreqCode,
-		&cur.Duration, &cur.DurationUnit,
-		&cur.Remarks, &cur.Prn,
-	); err != nil {
+	curRow, err := q.GetLineGuardForUpdate(ctx, line.ID)
+	if err != nil {
 		return nil, err
 	}
-	if curFreqCode.Valid {
-		cur.FrequencyCode = curFreqCode.String
+	cur := entities.PrescriptionLine{
+		PrescriptionLine: db.PrescriptionLine{
+			DrugID:        curRow.DrugID,
+			DoseAmount:    curRow.DoseAmount,
+			DoseUnit:      curRow.DoseUnit,
+			FrequencyCode: curRow.FrequencyCode,
+			Duration:      curRow.Duration,
+			DurationUnit:  curRow.DurationUnit,
+			Remarks:       curRow.Remarks,
+			Prn:           curRow.Prn,
+		},
 	}
 
 	presChanged := cur.DrugID != line.DrugID
 
 	// 1) Only clear allocations if the presentation changed
 	if presChanged {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM prescription_batch_items WHERE line_id=$1`, line.ID); err != nil {
+		if err := q.DeleteAllocationsByLine(ctx, line.ID); err != nil {
 			return nil, err
 		}
 	}
 
-	err = tx.QueryRowContext(ctx, `
-	  UPDATE prescription_lines SET
-	    drug_id=$2, remarks=$3, prn=$4,
-	    dose_amount=$5, dose_unit=$6,
-	    frequency_code=$7,
-		duration=$8, duration_unit=$9,
-	    is_packed=FALSE, packed_by=NULL, packed_at=NULL,
-	    updated_at=NOW()
-	  WHERE id=$1
-	  RETURNING total_to_dispense
-	`, line.ID, line.DrugID, line.Remarks, line.Prn,
-		line.DoseAmount, line.DoseUnit,
-		line.FrequencyCode,
-		line.Duration, line.DurationUnit).
-		Scan(&line.TotalToDispense)
+	td, err := q.UpdateLine(ctx, db.UpdateLineParams{
+		ID:            line.ID,
+		DrugID:        line.DrugID,
+		Remarks:       line.Remarks,
+		Prn:           line.Prn,
+		DoseAmount:    line.DoseAmount,
+		DoseUnit:      line.DoseUnit,
+		FrequencyCode: line.FrequencyCode,
+		Duration:      line.Duration,
+		DurationUnit:  line.DurationUnit,
+	})
 	if err != nil {
 		return nil, mapPrescriptionSQLError(err)
 	}
+	line.TotalToDispense = td
 
 	if own {
-		if err := tx.Commit(); err != nil {
+		if err := tx.Commit(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -495,16 +419,17 @@ func (r *postgresPrescriptionRepository) RemoveLine(ctx context.Context, lineID 
 	}
 	defer func() {
 		if own {
-			_ = tx.Rollback()
+			_ = tx.Rollback(ctx)
 		}
 	}()
 
-	var pid int64
-	if err := tx.QueryRowContext(ctx, `SELECT prescription_id FROM prescription_lines WHERE id=$1`, lineID).Scan(&pid); err != nil {
+	q := r.queries.WithTx(tx)
+	pid, err := q.GetPrescriptionIDForLine(ctx, lineID)
+	if err != nil {
 		return err
 	}
-	var isDispensed bool
-	if err := tx.QueryRowContext(ctx, `SELECT is_dispensed FROM prescriptions WHERE id=$1`, pid).Scan(&isDispensed); err != nil {
+	isDispensed, err := q.GetPrescriptionDispensed(ctx, pid)
+	if err != nil {
 		return err
 	}
 	if isDispensed {
@@ -512,19 +437,15 @@ func (r *postgresPrescriptionRepository) RemoveLine(ctx context.Context, lineID 
 	}
 
 	// Triggers on DELETE of prescription_batch_items will release reserved stock.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM prescription_batch_items WHERE line_id=$1`, lineID); err != nil {
+	if err := q.DeleteAllocationsByLine(ctx, lineID); err != nil {
 		return err
 	}
-	res, err := tx.ExecContext(ctx, `DELETE FROM prescription_lines WHERE id=$1`, lineID)
-	if err != nil {
+	if err := q.DeleteLine(ctx, lineID); err != nil {
 		return err
-	}
-	if aff, _ := res.RowsAffected(); aff == 0 {
-		return errors.New("line not found")
 	}
 
 	if own {
-		if err := tx.Commit(); err != nil {
+		if err := tx.Commit(ctx); err != nil {
 			return err
 		}
 	}
@@ -535,47 +456,43 @@ func (r *postgresPrescriptionRepository) RemoveLine(ctx context.Context, lineID 
 // Allocations (packing plan) - replace all
 // ----------------------------------------------------------------------------
 
-func (r *postgresPrescriptionRepository) ListLineAllocations(ctx context.Context, lineID int64) ([]entities.LineAllocation, error) {
-	dbx := DBFromCtx(ctx, r.Conn)
-	rows, err := dbx.QueryContext(ctx, `
-	  SELECT id, line_id, batch_location_id, quantity, created_at, updated_at
-	  FROM prescription_batch_items
-	  WHERE line_id=$1 ORDER BY id
-	`, lineID)
+func (r *postgresPrescriptionRepository) ListLineAllocations(ctx context.Context, lineID int64) ([]db.PrescriptionBatchItem, error) {
+	rows, err := r.q(ctx).ListAllocationsByLine(ctx, lineID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	out := make([]entities.LineAllocation, 0)
-	for rows.Next() {
-		var a entities.LineAllocation
-		if err := rows.Scan(&a.ID, &a.LineID, &a.BatchLocationID, &a.Quantity, &a.CreatedAt, &a.UpdatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, a)
+	out := make([]db.PrescriptionBatchItem, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, db.PrescriptionBatchItem{
+			ID:              row.ID,
+			LineID:          row.LineID,
+			BatchLocationID: row.BatchLocationID,
+			Quantity:        row.Quantity,
+			CreatedAt:       row.CreatedAt,
+			UpdatedAt:       row.UpdatedAt,
+		})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
-func (r *postgresPrescriptionRepository) SetLineAllocations(ctx context.Context, lineID int64, allocs []entities.LineAllocation) ([]entities.LineAllocation, error) {
+func (r *postgresPrescriptionRepository) SetLineAllocations(ctx context.Context, lineID int64, allocs []db.PrescriptionBatchItem) ([]db.PrescriptionBatchItem, error) {
 	tx, own, err := withTx(ctx, r.Conn)
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
 		if own {
-			_ = tx.Rollback()
+			_ = tx.Rollback(ctx)
 		}
 	}()
 
-	// Forbid if dispensed
-	var pid int64
-	if err := tx.QueryRowContext(ctx, `SELECT prescription_id FROM prescription_lines WHERE id=$1`, lineID).Scan(&pid); err != nil {
+	q := r.queries.WithTx(tx)
+	pid, err := q.GetPrescriptionIDForLine(ctx, lineID)
+	if err != nil {
 		return nil, err
 	}
-	var isDispensed bool
-	if err := tx.QueryRowContext(ctx, `SELECT is_dispensed FROM prescriptions WHERE id=$1`, pid).Scan(&isDispensed); err != nil {
+	isDispensed, err := q.GetPrescriptionDispensed(ctx, pid)
+	if err != nil {
 		return nil, err
 	}
 	if isDispensed {
@@ -583,33 +500,28 @@ func (r *postgresPrescriptionRepository) SetLineAllocations(ctx context.Context,
 	}
 
 	// Replace all; triggers will adjust reservations per-row (delete→return stock, insert→reserve stock)
-	if _, err := tx.ExecContext(ctx, `DELETE FROM prescription_batch_items WHERE line_id=$1`, lineID); err != nil {
+	if err := q.DeleteAllocationsByLine(ctx, lineID); err != nil {
 		return nil, err
 	}
 	if len(allocs) > 0 {
-		stmt, err := tx.PrepareContext(ctx, `
-		  INSERT INTO prescription_batch_items (line_id, batch_location_id, quantity)
-		  VALUES ($1,$2,$3) RETURNING id, created_at, updated_at`)
-		if err != nil {
-			return nil, err
-		}
-		defer stmt.Close()
-
 		for i := range allocs {
-			var id int64
-			var ca, ua time.Time
-			if err := stmt.QueryRowContext(ctx, lineID, allocs[i].BatchLocationID, allocs[i].Quantity).Scan(&id, &ca, &ua); err != nil {
+			row, err := q.InsertAllocation(ctx, db.InsertAllocationParams{
+				LineID:          lineID,
+				BatchLocationID: allocs[i].BatchLocationID,
+				Quantity:        allocs[i].Quantity,
+			})
+			if err != nil {
 				return nil, err
 			}
-			allocs[i].ID = id
+			allocs[i].ID = row.ID
 			allocs[i].LineID = lineID
-			allocs[i].CreatedAt = ca
-			allocs[i].UpdatedAt = ua
+			allocs[i].CreatedAt = row.CreatedAt
+			allocs[i].UpdatedAt = row.UpdatedAt
 		}
 	}
 
 	if own {
-		if err := tx.Commit(); err != nil {
+		if err := tx.Commit(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -627,17 +539,17 @@ func (r *postgresPrescriptionRepository) MarkLinePacked(ctx context.Context, lin
 	}
 	defer func() {
 		if own {
-			_ = tx.Rollback()
+			_ = tx.Rollback(ctx)
 		}
 	}()
 
-	// Forbid on dispensed
-	var pid int64
-	if err := tx.QueryRowContext(ctx, `SELECT prescription_id FROM prescription_lines WHERE id=$1`, lineID).Scan(&pid); err != nil {
+	q := r.queries.WithTx(tx)
+	pid, err := q.GetPrescriptionIDForLine(ctx, lineID)
+	if err != nil {
 		return nil, err
 	}
-	var isDispensed bool
-	if err := tx.QueryRowContext(ctx, `SELECT is_dispensed FROM prescriptions WHERE id=$1`, pid).Scan(&isDispensed); err != nil {
+	isDispensed, err := q.GetPrescriptionDispensed(ctx, pid)
+	if err != nil {
 		return nil, err
 	}
 	if isDispensed {
@@ -645,18 +557,12 @@ func (r *postgresPrescriptionRepository) MarkLinePacked(ctx context.Context, lin
 	}
 
 	// Stamp packed fields
-	if _, err := tx.ExecContext(ctx, `
-	  UPDATE prescription_lines
-	  SET is_packed=TRUE,
-	  packed_by = current_setting('sothea.user_id')::bigint,
-	  packed_at=NOW()
-	  WHERE id=$1
-	`, lineID); err != nil {
+	if err := q.MarkLinePacked(ctx, lineID); err != nil {
 		return nil, err
 	}
 
 	if own {
-		if err := tx.Commit(); err != nil {
+		if err := tx.Commit(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -670,33 +576,29 @@ func (r *postgresPrescriptionRepository) UnpackLine(ctx context.Context, lineID 
 	}
 	defer func() {
 		if own {
-			_ = tx.Rollback()
+			_ = tx.Rollback(ctx)
 		}
 	}()
 
-	// Forbid on dispensed
-	var pid int64
-	if err := tx.QueryRowContext(ctx, `SELECT prescription_id FROM prescription_lines WHERE id=$1`, lineID).Scan(&pid); err != nil {
+	q := r.queries.WithTx(tx)
+	pid, err := q.GetPrescriptionIDForLine(ctx, lineID)
+	if err != nil {
 		return nil, err
 	}
-	var isDispensed bool
-	if err := tx.QueryRowContext(ctx, `SELECT is_dispensed FROM prescriptions WHERE id=$1`, pid).Scan(&isDispensed); err != nil {
+	isDispensed, err := q.GetPrescriptionDispensed(ctx, pid)
+	if err != nil {
 		return nil, err
 	}
 	if isDispensed {
 		return nil, errors.New("cannot unpack a line on a dispensed prescription")
 	}
 
-	if _, err := tx.ExecContext(ctx, `
-	  UPDATE prescription_lines
-	  SET is_packed=FALSE, packed_by=NULL, packed_at=NULL, updated_at=NOW()
-	  WHERE id=$1
-	`, lineID); err != nil {
+	if err := q.UnpackLine(ctx, lineID); err != nil {
 		return nil, err
 	}
 
 	if own {
-		if err := tx.Commit(); err != nil {
+		if err := tx.Commit(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -715,13 +617,13 @@ func (r *postgresPrescriptionRepository) DispensePrescription(ctx context.Contex
 	}
 	defer func() {
 		if own {
-			_ = tx.Rollback()
+			_ = tx.Rollback(ctx)
 		}
 	}()
 
-	// Guard: not already dispensed
-	var isDispensed bool
-	if err := tx.QueryRowContext(ctx, `SELECT is_dispensed FROM prescriptions WHERE id=$1 FOR UPDATE`, prescriptionID).Scan(&isDispensed); err != nil {
+	q := r.queries.WithTx(tx)
+	isDispensed, err := q.GetPrescriptionDispensed(ctx, prescriptionID)
+	if err != nil {
 		return nil, err
 	}
 	if isDispensed {
@@ -729,14 +631,15 @@ func (r *postgresPrescriptionRepository) DispensePrescription(ctx context.Contex
 	}
 
 	// Must have lines and all must be packed
-	var totalLines, packedLines int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM prescription_lines WHERE prescription_id=$1`, prescriptionID).Scan(&totalLines); err != nil {
+	totalLines, err := q.CountLinesForPrescription(ctx, prescriptionID)
+	if err != nil {
 		return nil, err
 	}
 	if totalLines == 0 {
 		return nil, errors.New("no lines to dispense")
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM prescription_lines WHERE prescription_id=$1 AND is_packed=TRUE`, prescriptionID).Scan(&packedLines); err != nil {
+	packedLines, err := q.CountPackedLinesForPrescription(ctx, prescriptionID)
+	if err != nil {
 		return nil, err
 	}
 	if totalLines != packedLines {
@@ -758,20 +661,12 @@ func (r *postgresPrescriptionRepository) DispensePrescription(ctx context.Contex
 		}
 	*/
 
-	// Stamp dispensed (no stock mutation here)
-	if _, err := tx.ExecContext(ctx, `
-	  UPDATE prescriptions
-	  SET is_dispensed=TRUE,
-	  dispensed_by = current_setting('sothea.user_id')::bigint,
-	  dispensed_at=NOW(),
-	  updated_at=NOW()
-	  WHERE id=$1
-	`, prescriptionID); err != nil {
+	if err := q.DispensePrescription(ctx, prescriptionID); err != nil {
 		return nil, err
 	}
 
 	if own {
-		if err := tx.Commit(); err != nil {
+		if err := tx.Commit(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -783,54 +678,69 @@ func (r *postgresPrescriptionRepository) DispensePrescription(ctx context.Contex
 // ----------------------------------------------------------------------------
 
 func (r *postgresPrescriptionRepository) GetLine(ctx context.Context, lineID int64) (*entities.PrescriptionLine, error) {
-	dbx := DBFromCtx(ctx, r.Conn)
-	var l entities.PrescriptionLine
-	var frequencyCode sql.NullString
-	if err := dbx.QueryRowContext(ctx, `
-	  SELECT
-	    pl.id, pl.prescription_id, pl.drug_id, pl.remarks, pl.prn,
-	    pl.dose_amount, pl.dose_unit,
-	    pl.frequency_code,
-	    pl.duration, pl.duration_unit,
-	    pl.total_to_dispense, pl.is_packed, pl.packed_by, pl.packed_at,
-	    (SELECT dispense_unit FROM drugs WHERE id=pl.drug_id) AS du
-	  FROM prescription_lines pl
-	  WHERE pl.id=$1
-	`, lineID).Scan(
-		&l.ID, &l.PrescriptionID, &l.DrugID, &l.Remarks, &l.Prn,
-		&l.DoseAmount, &l.DoseUnit,
-		&frequencyCode,
-		&l.Duration, &l.DurationUnit,
-		&l.TotalToDispense, &l.IsPacked, &l.PackedBy, &l.PackedAt, &l.DispenseUnit,
-	); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, errors.New("line not found")
-		}
-		return nil, err
+	q := r.q(ctx)
+	row, err := q.GetLineWithDispenseUnit(ctx, lineID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, errors.New("line not found")
 	}
-	if frequencyCode.Valid {
-		l.FrequencyCode = frequencyCode.String
-	}
-
-	// Allocations
-	rows, err := dbx.QueryContext(ctx, `
-	  SELECT id, line_id, batch_location_id, quantity, created_at, updated_at
-	  FROM prescription_batch_items WHERE line_id=$1 ORDER BY id
-	`, lineID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var a entities.LineAllocation
-		if err := rows.Scan(&a.ID, &a.LineID, &a.BatchLocationID, &a.Quantity, &a.CreatedAt, &a.UpdatedAt); err != nil {
-			return nil, err
-		}
-		l.Allocations = append(l.Allocations, a)
+	l := entities.PrescriptionLine{
+		PrescriptionLine: db.PrescriptionLine{
+			ID:              row.ID,
+			PrescriptionID:  row.PrescriptionID,
+			DrugID:          row.DrugID,
+			Remarks:         row.Remarks,
+			Prn:             row.Prn,
+			DoseAmount:      row.DoseAmount,
+			DoseUnit:        row.DoseUnit,
+			FrequencyCode:   row.FrequencyCode,
+			Duration:        row.Duration,
+			DurationUnit:    row.DurationUnit,
+			TotalToDispense: row.TotalToDispense,
+			IsPacked:        row.IsPacked,
+			PackedBy:        row.PackedBy,
+			PackedAt:        row.PackedAt,
+		},
+		DispenseUnit: row.Du,
 	}
-	if err := rows.Err(); err != nil {
+
+	allocRows, err := q.ListAllocationsByLine(ctx, lineID)
+	if err != nil {
 		return nil, err
 	}
+	for _, ar := range allocRows {
+		l.Allocations = append(l.Allocations, db.PrescriptionBatchItem{
+			ID:              ar.ID,
+			LineID:          ar.LineID,
+			BatchLocationID: ar.BatchLocationID,
+			Quantity:        ar.Quantity,
+			CreatedAt:       ar.CreatedAt,
+			UpdatedAt:       ar.UpdatedAt,
+		})
+	}
 	return &l, nil
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+func toPrescriptionListEntity(id int64, patientID int64, vid int32, notes *string, createdBy *int64, createdAt time.Time, updatedAt *time.Time, isDispensed bool, dispensedBy *int64, dispensedAt *time.Time) *entities.Prescription {
+	return &entities.Prescription{
+		Prescription: db.Prescription{
+			ID:          id,
+			PatientID:   int32(patientID),
+			Vid:         vid,
+			Notes:       notes,
+			CreatedBy:   createdBy,
+			CreatedAt:   createdAt,
+			UpdatedAt:   updatedAt,
+			IsDispensed: isDispensed,
+			DispensedBy: dispensedBy,
+			DispensedAt: dispensedAt,
+		},
+	}
 }

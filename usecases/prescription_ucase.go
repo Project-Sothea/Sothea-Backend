@@ -7,7 +7,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/jieqiboh/sothea_backend/entities"
+	"sothea-backend/entities"
+	db "sothea-backend/repository/sqlc"
 )
 
 // -----------------------------------------------------------------------------
@@ -116,7 +117,7 @@ func (u *prescriptionUsecase) RemoveLine(ctx context.Context, lineID int64) erro
 // Packing allocations
 // -----------------------------------------------------------------------------
 
-func (u *prescriptionUsecase) SetLineAllocations(ctx context.Context, lineID int64, allocs []entities.LineAllocation) ([]entities.LineAllocation, error) {
+func (u *prescriptionUsecase) SetLineAllocations(ctx context.Context, lineID int64, allocs []db.PrescriptionBatchItem) ([]db.PrescriptionBatchItem, error) {
 	ctx, cancel := context.WithTimeout(ctx, u.contextTimeout)
 	defer cancel()
 
@@ -139,7 +140,7 @@ func (u *prescriptionUsecase) SetLineAllocations(ctx context.Context, lineID int
 	return out, nil
 }
 
-func (u *prescriptionUsecase) ListLineAllocations(ctx context.Context, lineID int64) ([]entities.LineAllocation, error) {
+func (u *prescriptionUsecase) ListLineAllocations(ctx context.Context, lineID int64) ([]db.PrescriptionBatchItem, error) {
 	ctx, cancel := context.WithTimeout(ctx, u.contextTimeout)
 	defer cancel()
 
@@ -165,7 +166,7 @@ func (u *prescriptionUsecase) UnpackLine(ctx context.Context, lineID int64) (*en
 // FEFO helper (optional convenience for the packing UI)
 // -----------------------------------------------------------------------------
 
-func (u *prescriptionUsecase) SuggestFEFOAllocations(ctx context.Context, lineID int64) ([]entities.LineAllocation, error) {
+func (u *prescriptionUsecase) SuggestFEFOAllocations(ctx context.Context, lineID int64) ([]db.PrescriptionBatchItem, error) {
 	ctx, cancel := context.WithTimeout(ctx, u.contextTimeout)
 	defer cancel()
 
@@ -181,7 +182,7 @@ func (u *prescriptionUsecase) SuggestFEFOAllocations(ctx context.Context, lineID
 		return nil, err
 	}
 
-	need := line.TotalToDispense
+	need := int(line.TotalToDispense)
 	if need <= 0 {
 		return nil, errors.New("line has zero totalToDispense")
 	}
@@ -195,7 +196,7 @@ func (u *prescriptionUsecase) SuggestFEFOAllocations(ctx context.Context, lineID
 	var pool []poolItem
 	for _, b := range stock.Batches {
 		for _, loc := range b.BatchLocations {
-			pool = append(pool, poolItem{BatchLocationID: loc.ID, Qty: loc.Quantity, Expiry: b.ExpiryDate})
+			pool = append(pool, poolItem{BatchLocationID: loc.ID, Qty: int(loc.Quantity), Expiry: b.DrugBatch.ExpiryDate})
 		}
 	}
 	sort.SliceStable(pool, func(i, j int) bool {
@@ -215,7 +216,7 @@ func (u *prescriptionUsecase) SuggestFEFOAllocations(ctx context.Context, lineID
 		}
 	})
 
-	out := []entities.LineAllocation{}
+	var out []db.PrescriptionBatchItem
 	for need > 0 && len(pool) > 0 {
 		head := &pool[0]
 		if head.Qty == 0 {
@@ -226,10 +227,10 @@ func (u *prescriptionUsecase) SuggestFEFOAllocations(ctx context.Context, lineID
 		if take > need {
 			take = need
 		}
-		out = append(out, entities.LineAllocation{
+		out = append(out, db.PrescriptionBatchItem{
 			LineID:          lineID,
 			BatchLocationID: head.BatchLocationID,
-			Quantity:        take,
+			Quantity:        int32(take),
 		})
 		need -= take
 		pool[0].Qty -= take
@@ -238,7 +239,7 @@ func (u *prescriptionUsecase) SuggestFEFOAllocations(ctx context.Context, lineID
 		}
 	}
 	if need > 0 {
-		return out, fmt.Errorf("insufficient stock: short of %d %s", need, line.DispenseUnit)
+		return out, fmt.Errorf("insufficient stock: short of %d %s", need, stock.Drug.Drug.DispenseUnit)
 	}
 	return out, nil
 }

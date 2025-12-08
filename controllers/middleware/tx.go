@@ -3,30 +3,30 @@ package middleware
 
 import (
 	"context"
-	"database/sql"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type ctxKey struct{}
 
 var txKey ctxKey
 
-func WithTx(db *sql.DB) gin.HandlerFunc {
+func WithTx(db *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		tx, err := db.BeginTx(c.Request.Context(), nil)
+		tx, err := db.Begin(c.Request.Context())
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to start tx"})
 			return
 		}
-		defer tx.Rollback() // no-op if committed
+		defer func() { _ = tx.Rollback(c.Request.Context()) }() // no-op if committed
 
 		// set user for triggers (scoped to THIS tx/session)
 		if v, ok := c.Get("userID"); ok {
 			if userID, ok := v.(int64); ok {
-				if _, err := tx.ExecContext(
+				if _, err := tx.Exec(
 					c.Request.Context(),
 					`SELECT set_config('sothea.user_id', $1, true)`,
 					strconv.FormatInt(userID, 10),
@@ -46,17 +46,15 @@ func WithTx(db *sql.DB) gin.HandlerFunc {
 		if c.IsAborted() || c.Writer.Status() >= 400 {
 			return // deferred rollback
 		}
-		_ = tx.Commit()
+		_ = tx.Commit(c.Request.Context())
 	}
 }
 
 // Getter (used by repos)
-func GetTx(ctx context.Context) (*sql.Tx, bool) {
-	tx, ok := ctx.Value(txKey).(*sql.Tx)
+func GetTx(ctx context.Context) (interface{ Rollback(context.Context) error }, bool) {
+	// We store pgx.Tx but keep return type abstract to avoid import cycles; callers cast to pgx.Tx.
+	tx, ok := ctx.Value(txKey).(interface{ Rollback(context.Context) error })
 	return tx, ok
 }
 
 // used for tests
-func CtxWithTx(ctx context.Context, tx *sql.Tx) context.Context {
-	return context.WithValue(ctx, txKey, tx)
-}
