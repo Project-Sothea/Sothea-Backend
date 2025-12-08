@@ -244,7 +244,7 @@ CREATE TABLE IF NOT EXISTS doctors_consultation
     updated_by          BIGINT REFERENCES users(id),
 
     PRIMARY KEY (id, vid),                                               -- Composite primary key
-    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
+    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
 
 CREATE TABLE IF NOT EXISTS physiotherapy
@@ -263,7 +263,7 @@ CREATE TABLE IF NOT EXISTS physiotherapy
     updated_by          BIGINT REFERENCES users(id),
 
     PRIMARY KEY (id, vid),                                               -- Composite primary key
-    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) -- Foreign key referencing the composite key in admin
+    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
 
 /*******************
