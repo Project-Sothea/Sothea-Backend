@@ -10,6 +10,7 @@ import (
 
 	"sothea-backend/controllers/middleware"
 	"sothea-backend/entities"
+	"sothea-backend/repository/postgres"
 	db "sothea-backend/repository/sqlc"
 )
 
@@ -369,6 +370,10 @@ func handleBindErr(c *gin.Context, err error) {
 func mapPhErr(err error) int {
 	if err == nil {
 		return http.StatusOK
+	}
+	// Specific mapped errors
+	if _, ok := err.(*postgres.DuplicateBatchNumberError); ok {
+		return http.StatusConflict
 	}
 	switch err {
 	case entities.ErrInternalServerError:

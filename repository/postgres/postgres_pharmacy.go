@@ -501,7 +501,7 @@ func (r *postgresPharmacyRepository) CreateBatch(ctx context.Context, b *db.Drug
 	}
 	id, err := q.InsertBatch(ctx, params)
 	if err != nil {
-		return nil, err
+		return nil, mapPharmacySQLError(err)
 	}
 
 	if len(locations) > 0 {
@@ -555,7 +555,7 @@ func (r *postgresPharmacyRepository) UpdateBatch(ctx context.Context, b *db.Drug
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, errors.New("batch not found")
 		}
-		return nil, err
+		return nil, mapPharmacySQLError(err)
 	}
 
 	currentLocRows, err := q.ListBatchLocationsByBatch(ctx, b.ID)
