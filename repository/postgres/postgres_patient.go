@@ -472,9 +472,8 @@ func (p *postgresPatientRepository) GetDBUser(ctx context.Context, username stri
 		return nil, err
 	}
 	return &db.User{
-		ID:           row.ID,
-		Username:     row.Username,
-		PasswordHash: row.PasswordHash,
+		ID:       row.ID,
+		Username: row.Username,
 	}, nil
 }
 

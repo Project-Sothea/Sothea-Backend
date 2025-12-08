@@ -77,11 +77,15 @@ type DrugStock struct {
 
 type Prescription struct {
 	db.Prescription
-	Lines []PrescriptionLine `json:"lines"`
+	DispenserName *string            `json:"dispenser_name"`
+	Lines         []PrescriptionLine `json:"lines"`
 }
 
 type PrescriptionLine struct {
 	db.PrescriptionLine
+	PackerName   *string                    `json:"packer_name"`
+	UpdaterName  *string                    `json:"updater_name"`
+	CreatorName  *string                    `json:"creator_name"`
 	Allocations  []db.PrescriptionBatchItem `json:"allocations"`
 	DispenseUnit string                     `json:"dispense_unit,omitempty"`
 }
@@ -106,7 +110,6 @@ type SetAllocReq struct {
 
 type LoginPayload struct {
 	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
 }
 
 // ---------------- Interfaces ----------------

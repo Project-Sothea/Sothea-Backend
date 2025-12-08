@@ -7,12 +7,14 @@ RETURNING id, created_at, updated_at;
 
 -- name: GetPrescriptionHeader :one
 SELECT p.id, p.patient_id, p.vid, p.notes,
-       p.created_by, p.created_at, p.updated_at,
+       p.created_by, p.created_at, p.updated_at, p.updated_by,
        p.is_dispensed, p.dispensed_by, p.dispensed_at,
        uc.name AS creator_name,
+       uu.name AS updater_name,
        ud.name AS dispenser_name
 FROM prescriptions p
 LEFT JOIN users uc ON uc.id = p.created_by
+LEFT JOIN users uu ON uu.id = p.updated_by
 LEFT JOIN users ud ON ud.id = p.dispensed_by
 WHERE p.id = $1;
 
@@ -23,8 +25,9 @@ SELECT
   pl.frequency_code,
   pl.duration, pl.duration_unit,
   pl.total_to_dispense, pl.is_packed, pl.packed_by, pl.packed_at,
-  u1.name AS packer_name,
-  u2.name AS updater_name,
+  u_packer.name AS packer_name,
+  u_updater.name AS updater_name,
+  u_creator.name AS creator_name,
   d.generic_name AS drug_name,
   d.route_code AS route_code,
   d.dispense_unit AS dispense_unit,
@@ -36,8 +39,9 @@ SELECT
   END AS display_strength
 FROM prescription_lines pl
 LEFT JOIN drugs d ON d.id = pl.drug_id
-LEFT JOIN users u1 ON u1.id = pl.packed_by
-LEFT JOIN users u2 ON u2.id = pl.updated_by
+LEFT JOIN users u_packer ON u_packer.id = pl.packed_by
+LEFT JOIN users u_updater ON u_updater.id = pl.updated_by
+LEFT JOIN users u_creator ON u_creator.id = pl.created_by
 WHERE pl.prescription_id = $1
 ORDER BY pl.id;
 

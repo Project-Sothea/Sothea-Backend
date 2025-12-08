@@ -26,12 +26,12 @@ func NewLoginHandler(r gin.IRouter, us entities.LoginUseCase, secretKey []byte) 
 }
 
 func (l *LoginHandler) Login(c *gin.Context) {
-	// username and password are in the json body
+	// username is in the json body
 	var u entities.LoginPayload
 	if err := c.ShouldBindJSON(&u); err != nil {
 		// Use type assertion to check if err is of type validator.ValidationErrors
 		if _, ok := err.(validator.ValidationErrors); ok {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Username or password must be a non-empty string!"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Username must be a non-empty string!"})
 			return // exit on first error
 		} else {
 			// Handle other types of errors (e.g., JSON binding errors)

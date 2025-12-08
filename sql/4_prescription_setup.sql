@@ -196,13 +196,13 @@ BEGIN
    WHERE b.drug_id = p_drug_id;
 
   IF available < need_extra THEN
-    RAISE EXCEPTION 'insufficient stock: total needed %, available %', p_required, available + need_extra
+    RAISE EXCEPTION 'insufficient stock: total needed %, available %', p_required, available
       USING ERRCODE   = '23514',                 -- check_violation
             CONSTRAINT = 'ck_insufficient_stock',
             DETAIL     = json_build_object(
                             'drug_id', p_drug_id,
                             'total_required', p_required,
-                            'total_available', available + allocated 
+                            'total_available', available
                           )::text;
   END IF;
 END;

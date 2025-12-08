@@ -1,11 +1,10 @@
 /*******************
-    Add usernames and passwords
+    Add usernames
  */
 CREATE TABLE users (
   id            BIGSERIAL PRIMARY KEY,
   username      TEXT NOT NULL UNIQUE,
   name          TEXT,
-  password_hash TEXT NOT NULL,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
