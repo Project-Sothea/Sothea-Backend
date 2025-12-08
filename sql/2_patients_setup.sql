@@ -25,12 +25,7 @@ CREATE TABLE IF NOT EXISTS patient_details
   gender         VARCHAR(1) NOT NULL,
   village        TEXT       NOT NULL,
   contact_no     TEXT       NOT NULL,
-  drug_allergies TEXT,
-
-  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-  created_by          BIGINT REFERENCES users(id),
-  updated_at          TIMESTAMPTZ,
-  updated_by          BIGINT REFERENCES users(id)
+  drug_allergies TEXT
 );
 
 CREATE TABLE IF NOT EXISTS admin
@@ -42,11 +37,6 @@ CREATE TABLE IF NOT EXISTS admin
   pregnant              BOOLEAN NOT NULL,
   last_menstrual_period DATE,
   sent_to_id            BOOLEAN NOT NULL,
-
-  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-  created_by          BIGINT REFERENCES users(id),
-  updated_at          TIMESTAMPTZ,
-  updated_by          BIGINT REFERENCES users(id),
 
   PRIMARY KEY (id, vid)         -- Composite primary key
 );
@@ -72,11 +62,6 @@ CREATE TABLE IF NOT EXISTS past_medical_history
     specified_stds               TEXT,
     others                       TEXT,
 
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_by          BIGINT REFERENCES users(id),
-    updated_at          TIMESTAMPTZ,
-    updated_by          BIGINT REFERENCES users(id),
-  
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
@@ -91,11 +76,6 @@ CREATE TABLE IF NOT EXISTS social_history
     cigarettes_per_day      INTEGER,
     alcohol_history         BOOLEAN NOT NULL,
     how_regular             VARCHAR(1),
-
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_by          BIGINT REFERENCES users(id),
-    updated_at          TIMESTAMPTZ,
-    updated_by          BIGINT REFERENCES users(id),
 
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
@@ -119,11 +99,6 @@ CREATE TABLE IF NOT EXISTS vital_statistics
     rand_blood_glucose_mmol_l  NUMERIC(5, 1),
     icope_high_bp             BOOLEAN,
 
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_by          BIGINT REFERENCES users(id),
-    updated_at          TIMESTAMPTZ,
-    updated_by          BIGINT REFERENCES users(id),
-
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
@@ -142,11 +117,6 @@ CREATE TABLE IF NOT EXISTS height_and_weight
     icope_lost_weight_past_months BOOLEAN,
     icope_no_desire_to_eat BOOLEAN,
 
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_by          BIGINT REFERENCES users(id),
-    updated_at          TIMESTAMPTZ,
-    updated_by          BIGINT REFERENCES users(id),
-
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
@@ -163,11 +133,6 @@ CREATE TABLE IF NOT EXISTS visual_acuity
     referred_for_glasses BOOLEAN NOT NULL,
     icope_eye_problem BOOLEAN,
     icope_treated_for_diabetes_or_bp BOOLEAN,
-
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_by          BIGINT REFERENCES users(id),
-    updated_at          TIMESTAMPTZ,
-    updated_by          BIGINT REFERENCES users(id),
 
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
@@ -187,11 +152,6 @@ CREATE TABLE IF NOT EXISTS dental
     icope_pain_in_mouth  BOOLEAN,
     dental_notes         TEXT,
 
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_by          BIGINT REFERENCES users(id),
-    updated_at          TIMESTAMPTZ,
-    updated_by          BIGINT REFERENCES users(id),
-
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
@@ -209,11 +169,6 @@ CREATE TABLE IF NOT EXISTS fall_risk
     icope_complete_chair_stands BOOLEAN,
     icope_chair_stands_time BOOLEAN,
 
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_by          BIGINT REFERENCES users(id),
-    updated_at          TIMESTAMPTZ,
-    updated_by          BIGINT REFERENCES users(id),
-                          
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
@@ -238,11 +193,6 @@ CREATE TABLE IF NOT EXISTS doctors_consultation
     referral_loc       TEXT,
     remarks            TEXT,
 
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_by          BIGINT REFERENCES users(id),
-    updated_at          TIMESTAMPTZ,
-    updated_by          BIGINT REFERENCES users(id),
-
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
@@ -257,106 +207,9 @@ CREATE TABLE IF NOT EXISTS physiotherapy
     intervention               TEXT,                                     -- Intervention (Open Ended)
     evaluation                 TEXT,                                     -- Evaluation (Open Ended)
 
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_by          BIGINT REFERENCES users(id),
-    updated_at          TIMESTAMPTZ,
-    updated_by          BIGINT REFERENCES users(id),
-
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
-
-/*******************
-    Create audit triggers for all tables
-********************/
-
-CREATE TRIGGER trg_patient_details_audit
-BEFORE INSERT OR UPDATE ON patient_details
-FOR EACH ROW EXECUTE FUNCTION set_audit_fields();
-
-CREATE TRIGGER trg_patient_details_log
-AFTER INSERT OR UPDATE OR DELETE ON patient_details
-FOR EACH ROW EXECUTE FUNCTION audit_row();
-
-CREATE TRIGGER trg_admin_audit
-BEFORE INSERT OR UPDATE ON admin
-FOR EACH ROW EXECUTE FUNCTION set_audit_fields();
-
-CREATE TRIGGER trg_admin_log
-AFTER INSERT OR UPDATE OR DELETE ON admin
-FOR EACH ROW EXECUTE FUNCTION audit_row();
-
-CREATE TRIGGER trg_past_medical_history_audit
-BEFORE INSERT OR UPDATE ON past_medical_history
-FOR EACH ROW EXECUTE FUNCTION set_audit_fields();
-
-CREATE TRIGGER trg_past_medical_history_log
-AFTER INSERT OR UPDATE OR DELETE ON past_medical_history
-FOR EACH ROW EXECUTE FUNCTION audit_row();
-
-CREATE TRIGGER trg_social_history_audit
-BEFORE INSERT OR UPDATE ON social_history
-FOR EACH ROW EXECUTE FUNCTION set_audit_fields();
-
-CREATE TRIGGER trg_social_history_log
-AFTER INSERT OR UPDATE OR DELETE ON social_history
-FOR EACH ROW EXECUTE FUNCTION audit_row();
-
-CREATE TRIGGER trg_vital_statistics_audit
-BEFORE INSERT OR UPDATE ON vital_statistics
-FOR EACH ROW EXECUTE FUNCTION set_audit_fields();
-
-CREATE TRIGGER trg_vital_statistics_log
-AFTER INSERT OR UPDATE OR DELETE ON vital_statistics
-FOR EACH ROW EXECUTE FUNCTION audit_row();
-
-CREATE TRIGGER trg_height_and_weight_audit
-BEFORE INSERT OR UPDATE ON height_and_weight
-FOR EACH ROW EXECUTE FUNCTION set_audit_fields();
-
-CREATE TRIGGER trg_height_and_weight_log
-AFTER INSERT OR UPDATE OR DELETE ON height_and_weight
-FOR EACH ROW EXECUTE FUNCTION audit_row();
-
-CREATE TRIGGER trg_visual_acuity_audit
-BEFORE INSERT OR UPDATE ON visual_acuity
-FOR EACH ROW EXECUTE FUNCTION set_audit_fields();
-
-CREATE TRIGGER trg_visual_acuity_log
-AFTER INSERT OR UPDATE OR DELETE ON visual_acuity
-FOR EACH ROW EXECUTE FUNCTION audit_row();
-
-CREATE TRIGGER trg_dental_audit
-BEFORE INSERT OR UPDATE ON dental
-FOR EACH ROW EXECUTE FUNCTION set_audit_fields();
-
-CREATE TRIGGER trg_dental_log
-AFTER INSERT OR UPDATE OR DELETE ON dental
-FOR EACH ROW EXECUTE FUNCTION audit_row();
-
-CREATE TRIGGER trg_fall_risk_audit
-BEFORE INSERT OR UPDATE ON fall_risk
-FOR EACH ROW EXECUTE FUNCTION set_audit_fields();
-
-CREATE TRIGGER trg_fall_risk_log
-AFTER INSERT OR UPDATE OR DELETE ON fall_risk
-FOR EACH ROW EXECUTE FUNCTION audit_row();
-
-CREATE TRIGGER trg_doctors_consultation_audit
-BEFORE INSERT OR UPDATE ON doctors_consultation
-FOR EACH ROW EXECUTE FUNCTION set_audit_fields();
-
-CREATE TRIGGER trg_doctors_consultation_log
-AFTER INSERT OR UPDATE OR DELETE ON doctors_consultation
-FOR EACH ROW EXECUTE FUNCTION audit_row();
-
-CREATE TRIGGER trg_physiotherapy_audit
-BEFORE INSERT OR UPDATE ON physiotherapy
-FOR EACH ROW EXECUTE FUNCTION set_audit_fields();
-
-CREATE TRIGGER trg_physiotherapy_log
-AFTER INSERT OR UPDATE OR DELETE ON physiotherapy
-FOR EACH ROW EXECUTE FUNCTION audit_row();
 
 -- Auto-increment VID per patient
 CREATE OR REPLACE FUNCTION set_entry_id() RETURNS TRIGGER AS
