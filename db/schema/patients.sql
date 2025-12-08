@@ -8,12 +8,8 @@ CREATE TABLE patient_details
   gender         VARCHAR(1) NOT NULL,
   village        TEXT       NOT NULL,
   contact_no     TEXT       NOT NULL,
-  drug_allergies TEXT,
+  drug_allergies TEXT
 
-  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-  created_by          BIGINT REFERENCES users(id),
-  updated_at          TIMESTAMPTZ,
-  updated_by          BIGINT REFERENCES users(id)
 );
 
 CREATE TABLE admin
@@ -25,11 +21,6 @@ CREATE TABLE admin
   pregnant              BOOLEAN NOT NULL,
   last_menstrual_period DATE,
   sent_to_id            BOOLEAN NOT NULL,
-
-  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-  created_by          BIGINT REFERENCES users(id),
-  updated_at          TIMESTAMPTZ,
-  updated_by          BIGINT REFERENCES users(id),
 
   PRIMARY KEY (id, vid) -- Composite primary key
 );
@@ -55,11 +46,6 @@ CREATE TABLE past_medical_history
     specified_stds               TEXT,
     others                       TEXT,
 
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_by          BIGINT REFERENCES users(id),
-    updated_at          TIMESTAMPTZ,
-    updated_by          BIGINT REFERENCES users(id),
-
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
@@ -74,11 +60,6 @@ CREATE TABLE social_history
     cigarettes_per_day      INTEGER,
     alcohol_history         BOOLEAN NOT NULL,
     how_regular             VARCHAR(1),
-
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_by          BIGINT REFERENCES users(id),
-    updated_at          TIMESTAMPTZ,
-    updated_by          BIGINT REFERENCES users(id),
 
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
@@ -102,11 +83,6 @@ CREATE TABLE vital_statistics
     rand_blood_glucose_mmol_l  NUMERIC(5, 1),
     icope_high_bp             BOOLEAN,
 
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_by          BIGINT REFERENCES users(id),
-    updated_at          TIMESTAMPTZ,
-    updated_by          BIGINT REFERENCES users(id),
-
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
@@ -125,11 +101,6 @@ CREATE TABLE height_and_weight
     icope_lost_weight_past_months BOOLEAN,
     icope_no_desire_to_eat BOOLEAN,
 
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_by          BIGINT REFERENCES users(id),
-    updated_at          TIMESTAMPTZ,
-    updated_by          BIGINT REFERENCES users(id),
-
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
@@ -146,11 +117,6 @@ CREATE TABLE visual_acuity
     referred_for_glasses BOOLEAN NOT NULL,
     icope_eye_problem BOOLEAN,
     icope_treated_for_diabetes_or_bp BOOLEAN,
-
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_by          BIGINT REFERENCES users(id),
-    updated_at          TIMESTAMPTZ,
-    updated_by          BIGINT REFERENCES users(id),
 
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
@@ -170,11 +136,6 @@ CREATE TABLE dental
     icope_pain_in_mouth  BOOLEAN,
     dental_notes         TEXT,
 
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_by          BIGINT REFERENCES users(id),
-    updated_at          TIMESTAMPTZ,
-    updated_by          BIGINT REFERENCES users(id),
-
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
@@ -192,11 +153,6 @@ CREATE TABLE fall_risk
     icope_complete_chair_stands BOOLEAN,
     icope_chair_stands_time BOOLEAN,
 
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_by          BIGINT REFERENCES users(id),
-    updated_at          TIMESTAMPTZ,
-    updated_by          BIGINT REFERENCES users(id),
-                          
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
@@ -221,11 +177,6 @@ CREATE TABLE doctors_consultation
     referral_loc       TEXT,
     remarks            TEXT,
 
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_by          BIGINT REFERENCES users(id),
-    updated_at          TIMESTAMPTZ,
-    updated_by          BIGINT REFERENCES users(id),
-
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
 );
@@ -239,11 +190,6 @@ CREATE TABLE physiotherapy
     objective_assessment       TEXT,                                     -- Objective Assessment (Open Ended)
     intervention               TEXT,                                     -- Intervention (Open Ended)
     evaluation                 TEXT,                                     -- Evaluation (Open Ended)
-
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_by          BIGINT REFERENCES users(id),
-    updated_at          TIMESTAMPTZ,
-    updated_by          BIGINT REFERENCES users(id),
 
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
