@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -40,7 +41,10 @@ func main() {
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
-	router.Static("/app", "./dist")
+
+	const distDir = "./dist"
+	router.StaticFile("/", filepath.Join(distDir, "index.html"))
+	router.Static("/assets", "./dist/assets")
 
 	api := router.Group("/api")
 
