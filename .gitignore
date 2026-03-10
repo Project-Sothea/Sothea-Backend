@@ -4,6 +4,8 @@ logfile.txt
 **/.env
 **/.idea
 /data
+/uploads
+/dist
 tmp/*
 
 # Executables

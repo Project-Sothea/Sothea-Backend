@@ -1,42 +1,53 @@
 package controllers
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/go-playground/validator/v10"
-	"github.com/jieqiboh/sothea_backend/controllers/middleware"
-	"github.com/jieqiboh/sothea_backend/entities"
-	"github.com/jieqiboh/sothea_backend/util"
+	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"sothea-backend/controllers/middleware"
+	"sothea-backend/entities"
+	db "sothea-backend/repository/sqlc"
+	"sothea-backend/usecases"
+	"sothea-backend/util"
+
+	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 )
 
 // PatientHandler represent the httphandler for patient
 type PatientHandler struct {
-	Usecase entities.PatientUseCase
+	Usecase *usecases.PatientUsecase
 }
 
 // NewPatientHandler will initialize the patients/ resources endpoint
-func NewPatientHandler(e *gin.Engine, us entities.PatientUseCase, secretKey []byte) {
+func NewPatientHandler(r gin.IRouter, uc *usecases.PatientUsecase, secretKey []byte) {
 	handler := &PatientHandler{
-		Usecase: us,
+		Usecase: uc,
 	}
 
 	// Protected routes
-	authorized := e.Group("/")
+	authorized := r.Group("/")
 	authorized.Use(middleware.AuthRequired(secretKey))
 	{
 		authorized.GET("/patient/:id/:vid", handler.GetPatientVisit)
+		authorized.GET("/patient/:id/photo", handler.GetPatientPhoto)
 		authorized.POST("/patient", handler.CreatePatient)
+		authorized.POST("/patient-with-visit", handler.CreatePatientWithVisit)
+		authorized.PUT("/patient/:id", handler.UpdatePatient)
+		authorized.DELETE("/patient/:id", handler.DeletePatient)
 		authorized.POST("/patient/:id", handler.CreatePatientVisit)
-		authorized.DELETE("/patient/:id/:vid", handler.DeletePatientVisit)
 		authorized.PATCH("/patient/:id/:vid", handler.UpdatePatientVisit)
+		authorized.DELETE("/patient/:id/:vid", handler.DeletePatientVisit)
 		authorized.GET("/patient-meta/:id", handler.GetPatientMeta)
 		authorized.GET("/all-patient-visit-meta/:date", handler.GetAllPatientVisitMeta)
-		authorized.GET("/export-db", handler.ExportDatabaseToCSV)
 	}
 }
 
@@ -54,10 +65,7 @@ func (p *PatientHandler) GetPatientVisit(c *gin.Context) {
 
 	id := int32(idP)
 	vid := int32(vidP)
-	ctx := c.Request.Context()
-
-	// Get the patient by id
-	patient, err := p.Usecase.GetPatientVisit(ctx, id, vid)
+	patient, err := p.Usecase.GetPatientVisit(c.Request.Context(), id, vid)
 	if err != nil {
 		c.JSON(getStatusCode(err), gin.H{"error": err.Error()})
 		return
@@ -66,35 +74,185 @@ func (p *PatientHandler) GetPatientVisit(c *gin.Context) {
 	c.JSON(http.StatusOK, patient)
 }
 
-func (p *PatientHandler) CreatePatient(c *gin.Context) {
-	var patientAdmin entities.Admin
+// GetPatientPhoto serves the raw image bytes for a patient's photo
+func (p *PatientHandler) GetPatientPhoto(c *gin.Context) {
+	idP, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
-	if err := c.ShouldBindJSON(&patientAdmin); err != nil {
-		// Use type assertion to check if err is of type validator.ValidationErrors
-		if validationErrs, ok := err.(validator.ValidationErrors); ok {
-			// Get the first Validation Error
-			fieldErr := validationErrs[0]
-			c.JSON(http.StatusBadRequest, gin.H{"error": fieldErr.Error()})
-			return // exit on first error
-		} else if err.Error() == "EOF" {
-			// Handle Empty Request Body Errors
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Request Body is empty!"})
+	id := int32(idP)
+
+	// Read from filesystem
+	photoPath := util.PatientPhotoPath(id)
+	data, err := os.ReadFile(photoPath)
+	if os.IsNotExist(err) {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read photo"})
+		return
+	}
+
+	// Detect content type using first up to 512 bytes
+	probeLen := len(data)
+	if probeLen > 512 {
+		probeLen = 512
+	}
+	mime := http.DetectContentType(data[:probeLen])
+	c.Data(http.StatusOK, mime, data)
+}
+
+func (p *PatientHandler) CreatePatient(c *gin.Context) {
+	ct := c.GetHeader("Content-Type")
+	var patientProfile db.PatientDetail
+
+	switch {
+	case strings.HasPrefix(ct, "multipart/form-data"):
+		patientJSON := c.PostForm("patient_details")
+		if patientJSON == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "patient_details JSON is required"})
 			return
-		} else {
-			// Handle other types of errors (e.g., JSON binding errors)
+		}
+		if err := json.Unmarshal([]byte(patientJSON), &patientProfile); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid patient_details JSON"})
+			return
+		}
+		photoBytes, present, err := readUploadedFile(c, "photo")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file"})
+			return
+		}
+		if present {
+			if _, valErr := util.ValidateImageBytes(photoBytes); valErr != nil {
+				if valErr.Error() == "file too large" {
+					c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": valErr.Error()})
+				} else {
+					c.JSON(http.StatusBadRequest, gin.H{"error": valErr.Error()})
+				}
+				return
+			}
+			c.Set("uploadedPhoto", photoBytes)
+		}
+	case strings.HasPrefix(ct, "application/json"):
+		if err := c.ShouldBindJSON(&patientProfile); err != nil {
+			var validationErrs validator.ValidationErrors
+			if errors.As(err, &validationErrs) {
+				fieldErr := validationErrs[0]
+				c.JSON(http.StatusBadRequest, gin.H{"error": fieldErr.Error()})
+				return
+			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+	default:
+		c.JSON(http.StatusUnsupportedMediaType, gin.H{"error": "use application/json or multipart/form-data with field 'patient'"})
+		return
 	}
 
-	ctx := c.Request.Context()
-	id, err := p.Usecase.CreatePatient(ctx, &patientAdmin)
+	id, err := p.Usecase.CreatePatient(c.Request.Context(), &patientProfile)
 	if err != nil {
 		c.JSON(getStatusCode(err), gin.H{"error": err.Error()})
 		return
 	}
 
+	if val, exists := c.Get("uploadedPhoto"); exists {
+		if data, ok := val.([]byte); ok {
+			if err := util.SavePatientPhoto(id, data); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to store photo"})
+				return
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{"id": id})
+}
+
+// CreatePatientWithVisit creates patient + first visit atomically and returns both ids.
+func (p *PatientHandler) CreatePatientWithVisit(c *gin.Context) {
+	ct := c.GetHeader("Content-Type")
+
+	type request struct {
+		PatientDetails db.PatientDetail `json:"patient_details"`
+		Admin          db.Admin         `json:"admin"`
+	}
+
+	var patientProfile db.PatientDetail
+	var admin db.Admin
+
+	switch {
+	case strings.HasPrefix(ct, "multipart/form-data"):
+		patientJSON := c.PostForm("patient_details")
+		if patientJSON == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "patient_details JSON is required"})
+			return
+		}
+		adminJSON := c.PostForm("admin")
+		if adminJSON == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "admin JSON is required"})
+			return
+		}
+		if err := json.Unmarshal([]byte(patientJSON), &patientProfile); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid patient_details JSON"})
+			return
+		}
+		if err := json.Unmarshal([]byte(adminJSON), &admin); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid admin JSON"})
+			return
+		}
+		photoBytes, present, err := readUploadedFile(c, "photo")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file"})
+			return
+		}
+		if present {
+			if _, valErr := util.ValidateImageBytes(photoBytes); valErr != nil {
+				if valErr.Error() == "file too large" {
+					c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": valErr.Error()})
+				} else {
+					c.JSON(http.StatusBadRequest, gin.H{"error": valErr.Error()})
+				}
+				return
+			}
+			c.Set("uploadedPhoto", photoBytes)
+		}
+	case strings.HasPrefix(ct, "application/json"):
+		var req request
+		if err := c.ShouldBindJSON(&req); err != nil {
+			var validationErrs validator.ValidationErrors
+			if errors.As(err, &validationErrs) {
+				fieldErr := validationErrs[0]
+				c.JSON(http.StatusBadRequest, gin.H{"error": fieldErr.Error()})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		patientProfile = req.PatientDetails
+		admin = req.Admin
+	default:
+		c.JSON(http.StatusUnsupportedMediaType, gin.H{"error": "use application/json or multipart/form-data with fields 'patient_details' and 'admin'"})
+		return
+	}
+
+	id, vid, err := p.Usecase.CreatePatientWithVisit(c.Request.Context(), &patientProfile, &admin)
+	if err != nil {
+		c.JSON(getStatusCode(err), gin.H{"error": err.Error()})
+		return
+	}
+
+	if val, exists := c.Get("uploadedPhoto"); exists {
+		if data, ok := val.([]byte); ok {
+			if err := util.SavePatientPhoto(id, data); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to store photo"})
+				return
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"id": id, "vid": vid})
 }
 
 func (p *PatientHandler) CreatePatientVisit(c *gin.Context) {
@@ -105,28 +263,18 @@ func (p *PatientHandler) CreatePatientVisit(c *gin.Context) {
 	}
 
 	id32 := int32(idP)
-	ctx := c.Request.Context()
-
-	var patientAdmin entities.Admin
+	var patientAdmin db.Admin
 	if err := c.ShouldBindJSON(&patientAdmin); err != nil {
-		// Use type assertion to check if err is of type validator.ValidationErrors
-		if validationErrs, ok := err.(validator.ValidationErrors); ok {
-			// Get the first Validation Error
+		var validationErrs validator.ValidationErrors
+		if errors.As(err, &validationErrs) {
 			fieldErr := validationErrs[0]
 			c.JSON(http.StatusBadRequest, gin.H{"error": fieldErr.Error()})
-			return // exit on first error
-		} else if err.Error() == "EOF" {
-			// Handle Empty Request Body Errors
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Request Body is empty!"})
-			return
-		} else {
-			// Handle other types of errors (e.g., JSON binding errors)
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 	}
 
-	vid, err := p.Usecase.CreatePatientVisit(ctx, id32, &patientAdmin)
+	// Create visit first to obtain vid
+	vid, err := p.Usecase.CreatePatientVisit(c.Request.Context(), id32, &patientAdmin)
 	if err != nil {
 		c.JSON(getStatusCode(err), gin.H{"error": err.Error()})
 		return
@@ -149,9 +297,8 @@ func (p *PatientHandler) DeletePatientVisit(c *gin.Context) {
 
 	id32 := int32(idP)
 	vid32 := int32(vidP)
-	ctx := c.Request.Context()
 
-	err = p.Usecase.DeletePatientVisit(ctx, id32, vid32)
+	err = p.Usecase.DeletePatientVisit(c.Request.Context(), id32, vid32)
 	if err != nil {
 		c.JSON(getStatusCode(err), gin.H{"error": err.Error()})
 		return
@@ -175,29 +322,19 @@ func (p *PatientHandler) UpdatePatientVisit(c *gin.Context) {
 
 	id32 := int32(idP)
 	vid32 := int32(vidP)
-	ctx := c.Request.Context()
 
+	// JSON PATCH only
 	var patient entities.Patient
 	if err := c.ShouldBindJSON(&patient); err != nil {
-		// Use type assertion to check if err is of type validator.ValidationErrors
-		if validationErrs, ok := err.(validator.ValidationErrors); ok {
-			// Get the first Validation Error
+		var validationErrs validator.ValidationErrors
+		if errors.As(err, &validationErrs) {
 			fieldErr := validationErrs[0]
 			c.JSON(http.StatusBadRequest, gin.H{"error": fieldErr.Error()})
-			return // exit on first error
-		} else if err.Error() == "EOF" {
-			// Handle Empty Request Body Errors
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Request Body is empty!"})
-			return
-		} else {
-			// Handle other types of errors (e.g., JSON binding errors)
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 	}
 
-	err = p.Usecase.UpdatePatientVisit(ctx, id32, vid32, &patient)
-	if err != nil {
+	if err := p.Usecase.UpdatePatientVisit(c.Request.Context(), id32, vid32, &patient); err != nil {
 		c.JSON(getStatusCode(err), gin.H{"error": err.Error()})
 		return
 	}
@@ -213,9 +350,7 @@ func (p *PatientHandler) GetPatientMeta(c *gin.Context) {
 	}
 
 	id32 := int32(idP)
-	ctx := c.Request.Context()
-
-	patientMeta, err := p.Usecase.GetPatientMeta(ctx, id32)
+	patientMeta, err := p.Usecase.GetPatientMeta(c.Request.Context(), id32)
 	if err != nil {
 		c.JSON(getStatusCode(err), gin.H{"error": err.Error()})
 		return
@@ -226,8 +361,6 @@ func (p *PatientHandler) GetPatientMeta(c *gin.Context) {
 
 func (p *PatientHandler) GetAllPatientVisitMeta(c *gin.Context) {
 	dateStr := c.Param("date")
-
-	ctx := c.Request.Context()
 
 	var date time.Time
 	var err error
@@ -241,7 +374,7 @@ func (p *PatientHandler) GetAllPatientVisitMeta(c *gin.Context) {
 		}
 	}
 
-	patientVisitMeta, err := p.Usecase.GetAllPatientVisitMeta(ctx, date)
+	patientVisitMeta, err := p.Usecase.GetAllPatientVisitMeta(c.Request.Context(), date)
 	if err != nil {
 		c.JSON(getStatusCode(err), gin.H{"error": err.Error()})
 		return
@@ -250,72 +383,133 @@ func (p *PatientHandler) GetAllPatientVisitMeta(c *gin.Context) {
 	c.JSON(http.StatusOK, patientVisitMeta)
 }
 
-func (p *PatientHandler) ExportDatabaseToCSV(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	// Get the "includePhoto" query parameter and convert it to a boolean
-	includePhotoParam := c.Query("includePhoto")
-	includePhoto, err := strconv.ParseBool(includePhotoParam)
-	if err != nil {
-		// If the conversion fails, return an error response
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid includePhoto parameter"})
-		return
-	}
-
-	filePath := util.MustGitPath("repository/tmp/output.csv")
-	err = p.Usecase.ExportDatabaseToCSV(ctx, includePhoto)
-	if err != nil {
-		log.Printf("Failed to export data to CSV: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to export data"})
-		return
-	}
-
-	c.Writer.Header().Set("Content-Type", "text/csv")
-	// Set the content disposition header to force download
-	c.Writer.Header().Set("Content-Disposition", "attachment")
-
-	// Write the contents of the CSV file to the response
-	c.FileAttachment(filePath, "output.csv")
-}
-
 func getStatusCode(err error) int {
 	if err == nil {
 		return http.StatusOK
 	}
-	switch err {
-	case entities.ErrInternalServerError:
+	switch {
+	case errors.Is(err, entities.ErrInternalServerError):
 		return http.StatusInternalServerError
-	case entities.ErrPatientNotFound:
+	case errors.Is(err, entities.ErrPatientNotFound):
 		return http.StatusNotFound
-	case entities.ErrPatientVisitNotFound:
+	case errors.Is(err, entities.ErrPatientVisitNotFound):
 		return http.StatusNotFound
-	case entities.ErrMissingAdminCategory:
+	case errors.Is(err, entities.ErrMissingPatientData):
 		return http.StatusBadRequest
-	case entities.ErrAuthenticationFailed:
+	case errors.Is(err, entities.ErrMissingAdminCategory):
+		return http.StatusBadRequest
+	case errors.Is(err, entities.ErrAuthenticationFailed):
 		return http.StatusUnauthorized
 	default:
 		return http.StatusInternalServerError
 	}
 }
 
-type fieldError struct {
-	err validator.FieldError
+// UpdatePatient updates demographics for a patient (no visit fields here)
+func (p *PatientHandler) UpdatePatient(c *gin.Context) {
+	idP, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	id := int32(idP)
+	var patientProfile db.PatientDetail
+	ct := c.GetHeader("Content-Type")
+
+	switch {
+	case strings.HasPrefix(ct, "multipart/form-data"):
+		patientJSON := c.PostForm("patient_details")
+		if patientJSON == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "patient_details JSON is required"})
+			return
+		}
+		if err := json.Unmarshal([]byte(patientJSON), &patientProfile); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid patient_details JSON"})
+			return
+		}
+		photoBytes, present, err := readUploadedFile(c, "photo")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file"})
+			return
+		}
+		if present {
+			if _, valErr := util.ValidateImageBytes(photoBytes); valErr != nil {
+				if valErr.Error() == "file too large" {
+					c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": valErr.Error()})
+				} else {
+					c.JSON(http.StatusBadRequest, gin.H{"error": valErr.Error()})
+				}
+				return
+			}
+			if err := util.SavePatientPhoto(id, photoBytes); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to store photo"})
+				return
+			}
+		}
+	case strings.HasPrefix(ct, "application/json"):
+		if err := c.ShouldBindJSON(&patientProfile); err != nil {
+			var validationErrs validator.ValidationErrors
+			if errors.As(err, &validationErrs) {
+				fieldErr := validationErrs[0]
+				c.JSON(http.StatusBadRequest, gin.H{"error": fieldErr.Error()})
+				return
+			} else if err == io.EOF {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "patient_details JSON is required"})
+				return
+			} else {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
+	default:
+		c.JSON(http.StatusUnsupportedMediaType, gin.H{"error": "use application/json or multipart/form-data with field 'patient_details'"})
+		return
+	}
+
+	if err := p.Usecase.UpdatePatient(c.Request.Context(), id, &patientProfile); err != nil {
+		c.JSON(getStatusCode(err), gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Status(http.StatusOK)
 }
 
-func (q fieldError) String() string {
-	var sb strings.Builder
+// DeletePatient removes a patient and all associated visits/data
+func (p *PatientHandler) DeletePatient(c *gin.Context) {
+	idP, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	id := int32(idP)
 
-	sb.WriteString("validation failed on field '" + q.err.Field() + "'")
-	sb.WriteString(", condition: " + q.err.ActualTag())
-
-	// Print condition parameters, e.g. oneof=red blue -> { red blue }
-	if q.err.Param() != "" {
-		sb.WriteString(" { " + q.err.Param() + " }")
+	if err := p.Usecase.DeletePatient(c.Request.Context(), id); err != nil {
+		c.JSON(getStatusCode(err), gin.H{"error": err.Error()})
+		return
 	}
 
-	if q.err.Value() != nil && q.err.Value() != "" {
-		sb.WriteString(fmt.Sprintf(", actual: %v", q.err.Value()))
+	if err := util.DeletePatientPhotoIfExists(id); err != nil {
+		log.Printf("warning: failed to delete photo for patient %d: %v", id, err)
 	}
 
-	return sb.String()
+	c.Status(http.StatusOK)
+}
+
+// readUploadedFile reads a single file field from a multipart/form-data request.
+// It returns (data, present, error). When the field is missing, present=false and error=nil.
+func readUploadedFile(c *gin.Context, field string) ([]byte, bool, error) {
+	fh, err := c.FormFile(field)
+	if err != nil || fh == nil {
+		return nil, false, nil
+	}
+	f, openErr := fh.Open()
+	if openErr != nil {
+		return nil, true, openErr
+	}
+	defer f.Close()
+	data, readErr := io.ReadAll(f)
+	if readErr != nil {
+		return nil, true, readErr
+	}
+	return data, true, nil
 }

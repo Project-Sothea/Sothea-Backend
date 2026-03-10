@@ -2,28 +2,29 @@ package usecases
 
 import (
 	"context"
-	"github.com/jieqiboh/sothea_backend/controllers/middleware"
-	"github.com/jieqiboh/sothea_backend/entities"
-	"golang.org/x/crypto/bcrypt"
 	"time"
+
+	"sothea-backend/controllers/middleware"
+	"sothea-backend/entities"
+	"sothea-backend/repository/postgres"
 )
 
-type loginUsecase struct {
-	patientRepo    entities.PatientRepository
+type LoginUsecase struct {
+	patientRepo    *postgres.PostgresPatientRepository
 	contextTimeout time.Duration
 	secretKey      []byte
 }
 
-// NewLoginUseCase
-func NewLoginUseCase(p entities.PatientRepository, timeout time.Duration, secretKey []byte) entities.LoginUseCase {
-	return &loginUsecase{
+// NewLoginUseCase builds a login usecase backed by the patient repository.
+func NewLoginUseCase(p *postgres.PostgresPatientRepository, timeout time.Duration, secretKey []byte) *LoginUsecase {
+	return &LoginUsecase{
 		patientRepo:    p,
 		contextTimeout: timeout,
 		secretKey:      secretKey,
 	}
 }
 
-func (l *loginUsecase) Login(ctx context.Context, user entities.User) (string, error) {
+func (l *LoginUsecase) Login(ctx context.Context, user entities.LoginPayload) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, l.contextTimeout)
 	defer cancel()
 
@@ -32,12 +33,7 @@ func (l *loginUsecase) Login(ctx context.Context, user entities.User) (string, e
 		return "", err
 	}
 
-	err = bcrypt.CompareHashAndPassword([]byte(dbUser.PasswordHash), []byte(user.Password))
-	if err != nil {
-		return "", entities.ErrLoginFailed
-	}
-
-	token, err := middleware.CreateToken(user.Username, l.secretKey)
+	token, err := middleware.CreateToken(dbUser.ID, user.Username, l.secretKey)
 	if err != nil {
 		return "", err
 	}

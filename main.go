@@ -1,91 +1,72 @@
 package main
 
 import (
-	"database/sql"
-	"flag"
-	"fmt"
+	"context"
+	"log"
+	"path/filepath"
+	"strings"
+	"time"
+
+	_httpDelivery "sothea-backend/controllers"
+	_postgresRepository "sothea-backend/repository/postgres"
+	_useCase "sothea-backend/usecases"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	_httpDelivery "github.com/jieqiboh/sothea_backend/controllers"
-	_patientPostgresRepository "github.com/jieqiboh/sothea_backend/repository/postgres"
-	_useCase "github.com/jieqiboh/sothea_backend/usecases"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 	"github.com/spf13/viper"
-	"log"
-	"time"
 )
 
 func main() {
-	// Define a flag to determine the mode
-	mode := flag.String("mode", "dev", "Mode of the application: dev or prod")
+	godotenv.Load()
+	viper.AutomaticEnv()
 
-	// Parse the flags
-	flag.Parse()
+	port := viper.GetString("PORT")
+	connStr := viper.GetString("DATABASE_URL")
+	secretKey := []byte(viper.GetString("SECRET_KEY"))
 
-	// Determine the mode and print a message
-	switch *mode {
-	case "dev":
-		gin.SetMode(gin.DebugMode)
-		fmt.Println("Running in development mode")
-		viper.SetConfigFile(`config.json`)
-	case "prod":
-		gin.SetMode(gin.ReleaseMode)
-		fmt.Println("Running in production mode")
-		viper.SetConfigFile(`prod.json`)
-	default:
-		fmt.Println("Unknown mode. Please use 'dev' or 'prod'.")
-	}
-
-	err := viper.ReadInConfig()
-	if err != nil {
-		panic(err)
-	}
-
-	address := viper.GetString(`server.address`)
-	dbHost := viper.GetString(`database.host`)
-	dbPort := viper.GetString(`database.port`)
-	dbUser := viper.GetString(`database.user`)
-	dbName := viper.GetString(`database.name`)
-	dbPassword := viper.GetString(`database.password`)
-	dbSslMode := viper.GetString(`database.sslmode`)
-	secretKey := []byte(viper.GetString(`jwt.secretkey`))
-
-	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s", dbHost, dbPort, dbUser, dbPassword, dbName, dbSslMode)
-
-	// Open a database connection
-	db, err := sql.Open("postgres", connStr)
+	pool, err := pgxpool.New(context.Background(), connStr)
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	// You might want to check the connection here to handle errors
-	err = db.Ping()
-	if err != nil {
-		log.Fatal("Database connection failed:", err)
-	}
-
-	defer func() {
-		err := db.Close()
-		if err != nil {
-			log.Fatal(err)
-		}
-	}()
+	defer pool.Close()
 
 	router := gin.Default()
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173", "*"},
-		AllowHeaders:     []string{"Origin", "Authorization", "Content-Type"},
-		AllowMethods:     []string{"GET", "POST", "DELETE", "PATCH"},
+		AllowOrigins:     []string{"*"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
-	patientRepo := _patientPostgresRepository.NewPostgresPatientRepository(db)
-	// Set up login routes
-	loginUseCase := _useCase.NewLoginUseCase(patientRepo, 5*time.Second, secretKey)
-	_httpDelivery.NewLoginHandler(router, loginUseCase, secretKey)
 
-	// Set up patient routes
-	patientUseCase := _useCase.NewPatientUsecase(patientRepo, 2*time.Second)
-	_httpDelivery.NewPatientHandler(router, patientUseCase, secretKey)
+	const distDir = "./dist"
+	router.StaticFile("/", filepath.Join(distDir, "index.html"))
+	router.Static("/assets", "./dist/assets")
 
-	router.Run(address)
+	api := router.Group("/api")
+
+	patientRepo := _postgresRepository.NewPostgresPatientRepository(pool)
+	loginUseCase := _useCase.NewLoginUseCase(patientRepo, 30*time.Second, secretKey)
+	_httpDelivery.NewLoginHandler(api, loginUseCase, secretKey)
+
+	patientUseCase := _useCase.NewPatientUsecase(patientRepo, 30*time.Second)
+	_httpDelivery.NewPatientHandler(api, patientUseCase, secretKey)
+
+	pharmacyRepo := _postgresRepository.NewPostgresPharmacyRepository(pool)
+	pharmacyUseCase := _useCase.NewPharmacyUsecase(pharmacyRepo, 30*time.Second)
+	_httpDelivery.NewPharmacyHandler(api, pharmacyUseCase, secretKey, pool)
+
+	prescriptionRepo := _postgresRepository.NewPostgresPrescriptionRepository(pool)
+	prescriptionUseCase := _useCase.NewPrescriptionUsecase(prescriptionRepo, pharmacyRepo, 30*time.Second)
+	_httpDelivery.NewPrescriptionHandler(api, prescriptionUseCase, secretKey, pool)
+
+	router.NoRoute(func(c *gin.Context) {
+		if !strings.HasPrefix(c.Request.URL.Path, "/api") {
+			c.File("./dist/index.html")
+		}
+	})
+	router.Run("0.0.0.0:" + port)
 }
