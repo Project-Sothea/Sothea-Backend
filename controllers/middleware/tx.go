@@ -50,11 +50,9 @@ func WithTx(db *pgxpool.Pool) gin.HandlerFunc {
 	}
 }
 
-// Getter (used by repos)
+// GetTx extracts the transaction from context (used by repos and tests).
+// We store pgx.Tx but keep the return type abstract to avoid import cycles; callers cast to pgx.Tx.
 func GetTx(ctx context.Context) (interface{ Rollback(context.Context) error }, bool) {
-	// We store pgx.Tx but keep return type abstract to avoid import cycles; callers cast to pgx.Tx.
 	tx, ok := ctx.Value(txKey).(interface{ Rollback(context.Context) error })
 	return tx, ok
 }
-
-// used for tests

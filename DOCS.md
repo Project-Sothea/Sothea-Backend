@@ -1,6 +1,6 @@
 # Backend Developer Documentation
 
-### Last Updated: 4 Nov, 2024
+### Last Updated: 8 Apr, 2026
 
 For future developers, this document will serve as a guide to understanding the backend and how to work with it, as well
 as the numerous design choices made.
@@ -19,24 +19,28 @@ For basic deployment instructions, refer to the README.md file.
 
 The center of the backend is the patients entity, a representation of a patient's data. A patient comprises the
 following categories, each with their own fields:  
-Patient SQL schema: `/sql/patients_setup.sql`
-Patient Golang struct schema: `/entities`
+Patient SQL schema: `/db/schema/patients.sql`  
+Patient Golang struct schema: `/entities/models.go`
 
-- Admin
+- Patient Details (demographics: name, DOB, gender, village, etc.)
+- Admin (per-visit: reg date, queue number, pregnancy, etc.)
 - Past Medical History
 - Social History
 - Vital Statistics
 - Height and Weight
 - Visual Acuity
 - Fall Risk
+- Dental
+- Physiotherapy
 - Doctor's Consultation
 
 Patients go through the physical health screening stations with the admin station first, and the rest having no
 guaranteed order.
-Hence, if a patient exists, they will have an admin row, but may not have the other categories present yet.  
+Hence, if a patient exists, they will have a patient_details row and an admin row for each visit, but may not have the
+other categories present yet.  
 Additionally, patients may have multiple visits, with multiple rows for each category, representing the previous years
 of visits.  
-Every row in the patient database will have the following structure:
+Every visit row in the patient database will have the following structure:
 
 ```
 +------------+----------+-----------------------+  
@@ -44,22 +48,22 @@ Every row in the patient database will have the following structure:
 +------------+----------+-----------------------+  
 ```
 
-The patient id is used to uniquely identify a patient, while the visit id is used to narrow down which visit the visit
-is associated with.
-The choice to use an visit id to identify the visit an visit is associated with, instead of the date was made to allow
-for easier querying, since the Date data type might be tricker to work with.
+The patient id uniquely identifies a patient, while the visit id narrows down which visit the row is associated with.
+A numeric visit id is used instead of the date to allow for easier querying.
 
 ## Types
 To view the details of the types used in the backend, refer to this [google sheet](https://docs.google.com/spreadsheets/d/1V9VuKGOoyZ5-ul5enuHliImjRJSSkVKatQeDi4MGblU/edit?gid=0#gid=0).
 
 ## Database and Database Schema
 
-The database used is PostgreSQL. To interact with the db, the Golang database driver used
-is [lib/pq](https://github.com/lib/pq),
-with raw SQL statements. We have decided against using an ORM due to the interesting nature of the patient entity, which
-may or may not have all categories filled out, save for the admin category.
-Safer alternatives such as [sqlx](https://github.com/jmoiron/sqlx) or [sqlcl](https://github.com/sqlc-dev/sqlc) could be
-considered in the future, but we decided to stick with raw SQL for now.
+The database used is PostgreSQL. To interact with the db, the Go database driver used is
+[pgx/v5](https://github.com/jackc/pgx) with a connection pool (`pgxpool`).
+Type-safe SQL queries are generated from raw SQL using [sqlc](https://github.com/sqlc-dev/sqlc). The generated code
+lives in `repository/sqlc/` and should not be edited by hand — edit the source SQL in `db/queries/` and re-run
+`sqlc generate` instead.
+
+We have decided against using a full ORM due to the interesting nature of the patient entity, which may or may not have
+all categories filled out, save for the admin category.
 
 Additionally, we've tried to keep the schema simple, choosing not to compute derived fields at the database or backend
 level.
@@ -68,47 +72,62 @@ level.
 
 ```
 .
-├── README.md - Contains basic instructions for setting up the backend.
-├── DOCS.md - Hello future developer! This is the backend documentation file.
-├── go.mod 
-├── go.sum 
-├── .gitignore - Contains files to be ignored by git.
-├── config.json - Contains configuration for backend in development mode.
-├── prod.json - Contains configuration for backend in production mode.
-├── Dockerfile - Contains the Dockerfile for the database.
-├── main.go - Entry point for the backend.
-├── .github - Folder containing github actions.
-├── controllers
-│   ├── middleware 
-│   │   └── auth.go - Middleware for authentication.
-│   ├── patient_handler.go - Handles patient requests.
-│   └── login_handler.go - Handles login requests.
-├── entities - Contains struct definitions for the patient entity and errors.
-│   ├── admin.go 
-│   ├── pastmedicalhistory.go
-│   ├── socialhistory.go
-│   ├── vitalstatistics.go
-│   ├── heightandweight.go
-│   ├── visualacuity.go
-│   ├── doctorsconsultation.go
-│   ├── patient.go - Contains the patient struct definition encompassing all categories, as well as PatientUseCase and PatientRepository interfaces.
-│   ├── patientmeta.go - Contains the patientmeta struct definition.
-│   ├── patientvisitmeta.go - Contains the patientvisitmeta struct definition.
-│   ├── user.go - Contains the user struct definition.
-│   ├── errors.go - Contains custom error definitions.
-│   └── helper.go - Contains helper functions for the entities.
-├── mocks - Folder containing autogenerated mocks and dummy patient data for testing.
-├── repository 
-│   ├── postgres
-│   │   └── postgres_patient.go - Contains the postgres implementation of the PatientRepository interface. 
-│   └── tmp - Contains output.csv files, a temporary file generated when exporting patient data.
-├── sql 
-│   └── patients_setup.sql - Contains the SQL schema for the patients table.
-├── usecases
-│   ├── patient_ucase.go - Contains the PatientUseCase interface and its implementation.
-│   └── login_ucase.go - Contains the LoginUseCase interface and its implementation.
-├── util 
-│   └── helper.go - Contains general helper functions for the backend.
+├── README.md                    - Setup instructions and API documentation.
+├── DOCS.md                      - This file; backend developer documentation.
+├── go.mod
+├── go.sum
+├── .gitignore
+├── .env.example                 - Template for required environment variables.
+├── Dockerfile                   - PostgreSQL image with initialization scripts.
+├── sqlc.yaml                    - sqlc code generation configuration.
+├── main.go                      - Entry point; wires repos, usecases, and handlers.
+├── controllers/
+│   ├── middleware/
+│   │   ├── auth.go              - JWT token creation, verification, and AuthRequired middleware.
+│   │   └── tx.go                - Database transaction middleware (WithTx, GetTx).
+│   ├── login_handler.go         - Handles login and user listing requests.
+│   ├── patient_handler.go       - Handles patient CRUD and visit management.
+│   ├── pharmacy_handler.go      - Handles drug, batch, and location management.
+│   └── prescription_handler.go  - Handles prescription lifecycle (lines, packing, dispensing).
+├── entities/
+│   ├── models.go                - Aggregated view types (Patient, PatientMeta, DrugStock, Prescription, etc.)
+│   └── errors.go                - Custom sentinel error definitions.
+├── usecases/
+│   ├── login_ucase.go           - Login logic and JWT token generation.
+│   ├── patient_ucase.go         - Patient operations with context timeout.
+│   ├── pharmacy_ucase.go        - Drug and batch inventory operations.
+│   └── prescription_ucase.go    - Prescription workflow, FEFO allocation suggestion, dispense logic.
+├── repository/
+│   ├── postgres/
+│   │   ├── postgres_patient.go           - PostgreSQL implementation of patient operations.
+│   │   ├── postgres_pharmacy.go          - PostgreSQL implementation of pharmacy operations.
+│   │   ├── postgres_prescriptions.go     - PostgreSQL implementation of prescription operations.
+│   │   ├── postgres_user.go              - PostgreSQL implementation of user/auth operations.
+│   │   ├── postgres_util.go              - Shared repository utilities.
+│   │   ├── postgres_pharmacy_errors.go   - Custom pharmacy error types (e.g. DuplicateBatchNumberError).
+│   │   └── postgres_prescription_errors.go - Custom prescription error types (e.g. InsufficientStockError).
+│   └── sqlc/                    - Auto-generated type-safe SQL code. Do NOT edit manually.
+│       ├── db.go
+│       ├── models.go
+│       ├── patient.sql.go
+│       ├── pharmacy.sql.go
+│       ├── prescriptions.sql.go
+│       └── users.sql.go
+├── db/
+│   ├── schema/                  - Source SQL schema definitions.
+│   │   ├── users.sql
+│   │   ├── patients.sql
+│   │   ├── pharmacy.sql
+│   │   └── prescription.sql
+│   └── queries/                 - Source SQL queries used by sqlc to generate repository/sqlc/.
+│       ├── users.sql
+│       ├── patient.sql
+│       ├── pharmacy.sql
+│       └── prescriptions.sql
+├── util/
+│   ├── helper.go                - Git root path helpers (GetGitRoot, MustGitPath).
+│   └── media.go                 - Patient photo upload, validation, and filesystem storage.
+└── uploads/                     - Patient photo storage root (uploads/patient/<id>).
 ```
 
 Test files have been excluded from the directory structure for brevity.
@@ -124,20 +143,28 @@ HTTP Error Codes Used:
 - 400: Bad Request
 - 401: Unauthorized
 - 404: Not Found
+- 409: Conflict (e.g. duplicate drug name or batch number)
 - 500: Internal Server Error
 
 ## Middleware
 
-The backend uses a simple authentication middleware to check if the user is authenticated in the
-`controllers/middleware/auth.go` file.
-The middleware checks for the presence of a JWT token in the Authorization header, and verifies it using the secret key
-in the config file.
+The backend uses two middleware components in `controllers/middleware/`:
+
+- **auth.go**: Checks for a valid JWT Bearer token in the Authorization header and stashes the `userID` and `username`
+  in the Gin context for downstream handlers.
+- **tx.go**: Wraps a handler in a database transaction, sets the `sothea.user_id` session variable for audit triggers,
+  and commits on success or rolls back on any error or abort.
 
 ## Configuration
 
-The backend uses a `config.json` or `prod.json` file to store configuration settings, and extracts the values on startup
-using Viper.
-The configuration file helps to keep sensitive information such as the database URL and JWT secret key secure.
+The backend reads configuration from environment variables at startup using Viper and godotenv.
+Copy `.env.example` to `.env` and fill in the required values:
+
+| Variable       | Description                                      |
+|----------------|--------------------------------------------------|
+| `PORT`         | Port the HTTP server listens on (e.g. `9090`)    |
+| `DATABASE_URL` | PostgreSQL connection string                     |
+| `SECRET_KEY`   | Secret key used to sign and verify JWT tokens    |
 
 ## Testing
 
@@ -146,7 +173,6 @@ Testing is done at the controller and repository levels, with the use of mocks t
 
 For testing at the controller level, we used [vektra/mockery](https://github.com/vektra/mockery) to generate mocks for
 the usecases and repositories.
-The mocks are stored in the `mocks` folder, and are used in the controller tests.  
 For testing at the repository level, we opted for using [Dockertest](https://github.com/ory/dockertest) to spin up a
 temporary PostgreSQL container for testing, and to run the tests against it.
 This is to ensure that the data access layer, which is far more complex to mock, performs exactly as expected.
@@ -161,86 +187,32 @@ e.g. `consultation_notes`
 Golang Struct Fields: CamelCase with first letter capitalised  
 e.g. `RegDate`
 
-JSON Fields: camelCase  
-e.g. `pastSmokingHistory`
+JSON Fields: snake_case  
+e.g. `past_medical_history`, `reg_date`
 
 ## Miscellaneous Design Choices
 
 ### Using Pointers instead of Defined Null Types
 
-We have chosen to use pointers for fields that can be null in the database, such as `dob`, `age`, `sent_to_id`, `photo`,
-etc.  
-While null types exist in the [lib/pq](https://github.com/lib/pq) library, we have chosen to use pointers instead.
-For example, instead of using `sql.NullString`, we use `*string` for fields that can be null.
-This works at the data access layer, but fails at the controller layer where JSON marshalling happens.
+We have chosen to use pointers for fields that can be null in the database, such as `dob`, `drug_allergies`,
+`last_menstrual_period`, etc.  
+This allows a field to represent three states: explicitly set to a value, explicitly set to null (`nil` pointer in JSON),
+or omitted.
 
-For primitive types like bool, they can only take on 2 values: true, false. When I marshal JSON into a struct, null
-fields get converted into the false value for booleans. For `binding: required` gotags, this gets treated as the field
-being null.
-For both optional and not null fields, this means the validator cannot tell if a value is false because it is explicitly
-assigned to be false, or because it was null, and got marshalled into the false value.
+For primitive types like bool, they can only take on 2 values: true, false. When JSON is unmarshalled into a struct, a
+missing field gets set to the zero value (false for booleans). With `binding: required`, the validator cannot
+distinguish between an explicitly-set false and a missing field.
 
-The only workaround is to use a pointer, which allows it to take on a third value, nil.
+The workaround is to use a pointer (`*bool`), which can be `nil` when absent, `&false` when explicitly false, and
+`&true` when explicitly true.
 
-Additionally, I updated String() methods to use SafeDeref, a helper method, to dereference pointers to their respective
-null types if needed instead of just nil, which cannot be printed.
+### Pharmacy and Prescription Modules
 
-### Export to DB Feature
+Beyond the patient module, the backend also manages a pharmacy inventory and prescription lifecycle:
 
-An important feature of the backend is for users to be able to easily export the patient data to a CSV file.
-Due to the lack of support for CSV exports in the lib/pq database drivers, we had to implement the feature manually.  
-~~One of the approaches used was to execute the `COPY` command in the PostgresQL server to generate a csv file,
-leveraging the in-built feature. However, due to storage being isolated in the Docker container, an additional volume
-mount is needed to access the generated file.
-While it is a little messy, this method doesn't require us to use an external client such as psql, and doesn't us to
-handle the messy typecasting of data to strings.~~
-We have since moved to using a simple existing golang library, [sqltocsv](https://github.com/joho/sqltocsv), which
-writes the rows to a csv file easily.
-
-### Import to DB Feature
-
-This feature allows importing existing CSV files to the database. The CSV file must be in the correct format, with the
-correct headers, and the correct order of columns.  
-Note: This feature is not accessible to users since it should be rarely invoked, only to reset the database to a known
-state in the event of system failures :O
-
-Some desired properties of the import to DB feature include:
-
-- Ability to use exported csv files from /export-db as a backup
-- Easy to use and debug (If I ever have to use this feature, I need it to be quick to minimise downtime)
-
-## Appendix
-
-### Fall Risk Questions
-**Total Score >= 8 is a 'High Risk' for fall** 
-
-History of fall within past 12 months  
-a. No fall (Score 0)  
-b. 1 fall prior to admission (Score 1)  
-c. 2 or more falls prior to admission (Score 5)  
-d. 1 or more falls during current admission (Score 5)  
-
-Cognitive status  
-a. Intact (Score 0)  
-b. Minimally impaired (Score 1)  
-c. Moderately impaired (Score 2)  
-d. Severely impaired (Score 3)  
-
-Continence problems  
-a. No continence problems or IDC in-situ (Score 0)  
-b. Incontinence of urine and/or faeces (Score 1)  
-c. Frequency (empties bladder > 6 times daily)/ Diarrhoea (Score 1)  
-d. Urgency (Score 1)  
-e. Needing nocturnal toileting more than 2 times daily (Score 1)  
-
-Safety Awareness  
-a. Good awareness and requests appropriate assistance (Score 0)  
-b. Occasional risk taking behaviours (Score 1)  
-c. Inappropriate fear for activities (Score 2)  
-d. Frequent risk-taking behaviours (Score 3)  
-
-Unsteadiness when standing, transferring and/or walking  
-a. Steady gait or complete dependent or on traction (Score 0)  
-b. Minimally unsteadiness which needs supervision (Score 1)  
-c. Moderately unsteadiness which require hands on assist at times (Score 4)  
-d. Severely unsteadiness and need constant hands on assist (Score 5)  
+- **Pharmacy**: Tracks drugs, batches, and batch locations. Stock quantities are maintained per batch location.
+- **Prescriptions**: Each prescription belongs to a patient visit. A prescription has one or more lines (one drug per
+  line). Lines have allocations that reserve stock from specific batch locations. A line must be fully allocated and then
+  packed before the prescription can be dispensed.
+- **DB Triggers**: Stock reservation/release is handled by database triggers on the `prescription_batch_items` table,
+  keeping stock accurate without manual bookkeeping in Go code.
