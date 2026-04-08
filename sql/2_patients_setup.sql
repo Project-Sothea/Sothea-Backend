@@ -238,12 +238,12 @@ EXECUTE FUNCTION set_entry_id();
     Seed patients
  */
 
-INSERT INTO patient_details (id, name, family_group, khmer_name, dob, gender, village, contact_no, drug_allergies)
-VALUES (1, 'John Doe', 'S001', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1994-01-10', 'M', 'SO', '12345678', 'panadol'),
-       (2, 'Jane Smith', 'S002A', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1999-01-10', 'F', 'SO', '12345679', NULL),
-       (3, 'Bob Smith', 'S002B', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1999-01-10', 'M', 'R1', '99999999', 'aspirin'),
-       (4, 'Bob Johnson', 'S003', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1989-01-10', 'M', 'R1', '11111111', NULL),
-       (5, 'Alice Brown', 'S004', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1996-01-10', 'F', 'R1', '17283948', NULL);
+INSERT INTO patient_details (name, family_group, khmer_name, dob, gender, village, contact_no, drug_allergies)
+VALUES ('John Doe', 'S001', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1994-01-10', 'M', 'SO', '12345678', 'panadol'),
+       ('Jane Smith', 'S002A', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1999-01-10', 'F', 'SO', '12345679', NULL),
+       ('Bob Smith', 'S002B', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1999-01-10', 'M', 'R1', '99999999', 'aspirin'),
+       ('Bob Johnson', 'S003', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1989-01-10', 'M', 'R1', '11111111', NULL),
+       ('Alice Brown', 'S004', '១២៣៤ ៥៦៧៨៩០ឥឲ', '1996-01-10', 'F', 'R1', '17283948', NULL);
 
 /*******************
     Seed visits (admin)
@@ -398,3 +398,4 @@ INSERT INTO doctors_consultation (id, vid, well, msk, cvs, respi, gu, git, eye, 
 VALUES (2, 2, TRUE, FALSE, FALSE, TRUE, TRUE, FALSE, TRUE, FALSE, 'LEUKAEMIA',
         'CHEST PAIN, SHORTNESS OF BREATH, COUGH', 'ACUTE BRONCHITIS',
         'REST, HYDRATION, COUGH SYRUP', FALSE, NULL, 'MONITOR FOR RESOLUTION');
+
