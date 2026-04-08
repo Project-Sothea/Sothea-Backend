@@ -7,18 +7,19 @@ import (
 	"sothea-backend/controllers/middleware"
 	"sothea-backend/entities"
 	"sothea-backend/repository/postgres"
+	db "sothea-backend/repository/sqlc"
 )
 
 type LoginUsecase struct {
-	patientRepo    *postgres.PostgresPatientRepository
+	userRepo       *postgres.PostgresUserRepository
 	contextTimeout time.Duration
 	secretKey      []byte
 }
 
-// NewLoginUseCase builds a login usecase backed by the patient repository.
-func NewLoginUseCase(p *postgres.PostgresPatientRepository, timeout time.Duration, secretKey []byte) *LoginUsecase {
+// NewLoginUseCase
+func NewLoginUseCase(userRepo *postgres.PostgresUserRepository, timeout time.Duration, secretKey []byte) *LoginUsecase {
 	return &LoginUsecase{
-		patientRepo:    p,
+		userRepo:       userRepo,
 		contextTimeout: timeout,
 		secretKey:      secretKey,
 	}
@@ -28,7 +29,7 @@ func (l *LoginUsecase) Login(ctx context.Context, user entities.LoginPayload) (s
 	ctx, cancel := context.WithTimeout(ctx, l.contextTimeout)
 	defer cancel()
 
-	dbUser, err := l.patientRepo.GetDBUser(ctx, user.Username)
+	dbUser, err := l.userRepo.GetUserByUsername(ctx, user.Username)
 	if err != nil {
 		return "", err
 	}
@@ -38,4 +39,11 @@ func (l *LoginUsecase) Login(ctx context.Context, user entities.LoginPayload) (s
 		return "", err
 	}
 	return token, err
+}
+
+func (l *LoginUsecase) ListUsers(ctx context.Context) ([]db.User, error) {
+	ctx, cancel := context.WithTimeout(ctx, l.contextTimeout)
+	defer cancel()
+
+	return l.userRepo.ListUsers(ctx)
 }
