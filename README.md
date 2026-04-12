@@ -1,5 +1,5 @@
 # Project Sothea Backend
-### Last Updated: 4 Nov, 2024
+### Last Updated: 8 Apr, 2026
 ## Overview
 
 This is the backend for the patient management system for Project Sothea, and is to be set up in conjunction with the frontend.  
@@ -21,13 +21,15 @@ Before you begin, ensure you have the following installed:
 
 3. Set up the required docker containers for the database (see below).
 
-4. Run the Go binary with `./sothea-backend --mode=dev`, starting it up in development mode.
- 
-5. The server should now be accessible on `http://localhost:9090`
+4. Copy `.env.example` to `.env` and fill in the required values (`PORT`, `DATABASE_URL`, `SECRET_KEY`).
 
-6. You can now make requests to the server using a tool like Postman or curl.
+5. Run the Go binary with `./sothea-backend`, starting up the server.
  
-7. To stop the server, enter `Ctrl + C` in the terminal, then run `docker stop sothea-db` to stop the database container.
+6. The server should now be accessible on `http://localhost:9090` (or whichever port you configured).
+
+7. You can now make requests to the server using a tool like Postman or curl.
+ 
+8. To stop the server, enter `Ctrl + C` in the terminal, then run `docker stop sothea-db` to stop the database container.
 
 ### Setting Up Docker
 To facilitate easy setup of the patients database with preloaded data, we've opted to use Docker with a PostgreSQL image. To set up the database, follow the steps below:
@@ -43,25 +45,19 @@ Running with a volume:
 In this project's root directory, run the Postgres database container with `docker run --name sothea-db -d -p 5432:5432 -v $(pwd)/data:/var/lib/postgresql/data sothea-db`
 For Windows Powershell: `docker run --name sothea-db -d -p 5432:5432 -v ${PWD}/data:/var/lib/postgresql/data sothea-db`
 
-### Modes of Operation
-When running the Go binary, you can specify the mode of operation using the `--mode` flag. The available modes are:  
-- `dev` - Development mode, using config.json for configuration. This mode will run the server on port 9090.
-- `prod` - Production mode, using prod.json for configuration. This mode will run the server on "192.168.0.100:9090", a static IP address that we use on our production server on the deployed network.   
-Do ensure that the frontend is appropriately configured to make requests to the correct backend address.
-
 ### Common Issues
 - Database role not found / Authentication Failed
 This usually happens if there are already pre-existing Postgres instances running on port 5432. To resolve this, stop check the processes running on port 5432, and stop the existing Postgres processes.
 If on Windows, do `Win` + `R`, then type `services.msc`, search for the Postgres service and stop it.
 
 ### API Endpoints
-API endpoints are detailed below:
+All endpoints are prefixed with `/api`. API endpoints are detailed below:
 
 #### Login
 Authenticate a user and return an access token.
 
 ```plaintext
-POST /login
+POST /api/login
 ```
 
 If successful, returns `200` and the following response attributes:
@@ -77,7 +73,7 @@ Unsuccessful responses include:
 Example request:
 
 ```shell
-curl --url 'http://localhost:9090/login' \
+curl --url 'http://localhost:9090/api/login' \
 --header 'Content-Type: application/json' \
 --data '{
     "username": "admin",
@@ -85,26 +81,66 @@ curl --url 'http://localhost:9090/login' \
 }'
 ```
 
+#### IsValidToken
+Check if the authorization token in a request is valid.
+
+```plaintext
+GET /api/login/is-valid-token
+```
+
+If successful, returns `200`.
+
+Unsuccessful responses include:  
+`401` - Unauthorized.
+
+Example request:
+
+```shell
+curl --url 'http://localhost:9090/api/login/is-valid-token' \
+--header 'Authorization: Bearer <your_access_token>'
+```
+
+#### ListUsers
+List all registered users.
+
+```plaintext
+GET /api/users
+```
+
+If successful, returns `200` and an array of user objects.
+
+Unsuccessful responses include:  
+`500` - Internal server error.
+
+Example request:
+
+```shell
+curl --url 'http://localhost:9090/api/users' \
+--header 'Authorization: Bearer <your_access_token>'
+```
+
 #### GetPatientVisit
 Get an existing patient's visit by their ID and Visit ID.
 
 ```plaintext
-GET /patient/:id/:vid
+GET /api/patient/:id/:vid
 ```
 
 If successful, returns `200` and the following response attributes:
 
 | Attribute             | Type   | Description          |
 |-----------------------|--------|----------------------|
+| `patient_details`     | object | Guaranteed to exist. |
 | `admin`               | object | Guaranteed to exist. |
-| `pastmedicalhistory`  | object | May not exist.       |
-| `socialhistory`       | object | May not exist.       |
-| `vitalstatistics`     | object | May not exist.       |
-| `heightandweight`     | object | May not exist.       |
-| `visualacuity`        | object | May not exist.       |
-| `fallrisk`            | object | May not exist.       |
+| `past_medical_history`| object | May not exist.       |
+| `social_history`      | object | May not exist.       |
+| `vital_statistics`    | object | May not exist.       |
+| `height_and_weight`   | object | May not exist.       |
+| `visual_acuity`       | object | May not exist.       |
+| `fall_risk`           | object | May not exist.       |
 | `dental`              | object | May not exist.       |
-| `doctorsconsultation` | object | May not exist.       |
+| `physiotherapy`       | object | May not exist.       |
+| `doctors_consultation`| object | May not exist.       |
 
 Unsuccessful responses include:  
 `404` - Patient not found.  
@@ -114,7 +150,7 @@ Unsuccessful responses include:
 Example request:
 
 ```shell
-curl --url 'http://localhost:9090/patient/1/1' \
+curl --url 'http://localhost:9090/api/patient/1/1' \
 --header 'Authorization: Bearer <your_access_token>'
 ```
 
@@ -122,200 +158,96 @@ Example response:
 
 ```json
 {
+  "patient_details": {
+    "id": 1,
+    "name": "John Doe",
+    "family_group": "S001",
+    "khmer_name": "១២៣៤ ៥៦៧៨៩០ឥឲ",
+    "dob": "1994-01-10T00:00:00Z",
+    "gender": "M",
+    "village": "SO",
+    "contact_no": "12345678",
+    "drug_allergies": "panadol"
+  },
   "admin": {
     "id": 1,
     "vid": 1,
-    "familyGroup": "S001",
-    "regDate": "2024-01-10T00:00:00Z",
-    "queueNo": "1A",
-    "name": "John Doe",
-    "khmerName": "១២៣៤ ៥៦៧៨៩០ឥឲ",
-    "dob": "1994-01-10T00:00:00Z",
-    "age": 30,
-    "gender": "M",
-    "village": "SO",
-    "contactNo": "12345678",
+    "reg_date": "2024-01-10T00:00:00Z",
+    "queue_no": "1A",
     "pregnant": false,
-    "lastMenstrualPeriod": null,
-    "drugAllergies": "panadol",
-    "sentToId": false,
-    "photo": ""
+    "last_menstrual_period": null,
+    "sent_to_id": false
   },
-  "pastmedicalhistory": {
-    "id": 1,
-    "vid": 1,
-    "tuberculosis": true,
-    "diabetes": false,
-    "hypertension": true,
-    "hyperlipidemia": false,
-    "chronicJointPains": false,
-    "chronicMuscleAches": true,
-    "sexuallyTransmittedDisease": true,
-    "specifiedSTDs": "TRICHOMONAS",
-    "others": "None"
-  },
-  "socialhistory": {
-    "id": 1,
-    "vid": 1,
-    "pastSmokingHistory": true,
-    "numberOfYears": 15,
-    "currentSmokingHistory": false,
-    "cigarettesPerDay": null,
-    "alcoholHistory": true,
-    "howRegular": "A"
-  },
-  "vitalstatistics": {
-    "id": 1,
-    "vid": 1,
-    "temperature": 36.5,
-    "spO2": 98,
-    "systolicBP1": 120,
-    "diastolicBP1": 80,
-    "systolicBP2": 122,
-    "diastolicBP2": 78,
-    "averageSystolicBP": 121,
-    "averageDiastolicBP": 79,
-    "hr1": 72,
-    "hr2": 71,
-    "averageHR": 71.5,
-    "randomBloodGlucoseMmolL": 5.4
-  },
-  "heightandweight": {
-    "id": 1,
-    "vid": 1,
-    "height": 170,
-    "weight": 70,
-    "bmi": 24.2,
-    "bmiAnalysis": "normal weight",
-    "paedsHeight": 90,
-    "paedsWeight": 80
-  },
-  "visualacuity": {
-    "id": 1,
-    "vid": 1,
-    "lEyeVision": 20,
-    "rEyeVision": 20,
-    "additionalIntervention": "VISUAL FIELD TEST REQUIRED"
-  },
-  "fallrisk": {
-    "id": 1,
-    "vid": 1,
-    "fallHistory": "a",
-    "cognitiveStatus": "b",
-    "continenceProblems": "e",
-    "safetyAwareness": "d",
-    "unsteadiness": "c"
-  },
-  "dental": {
-    "id": 1,
-    "vid": 1,
-    "cleanTeethFreq": 2,
-    "sugarConsumeFreq": 3,
-    "pastYearDecay": true,
-    "brushTeethPain": true,
-    "drinkOtherWater": false,
-    "dentalNotes": "None",
-    "referralNeeded": true,
-    "referralLoc": "Dentist",
-    "tooth11": true,
-    "tooth12": false,
-    "tooth13": true,
-    "tooth14": false,
-    "tooth15": true,
-    "tooth16": false,
-    "tooth17": true,
-    "tooth18": false,
-    "tooth21": true,
-    "tooth22": false,
-    "tooth23": true,
-    "tooth24": false,
-    "tooth25": true,
-    "tooth26": false,
-    "tooth27": true,
-    "tooth28": false,
-    "tooth31": true,
-    "tooth32": true,
-    "tooth33": false,
-    "tooth34": true,
-    "tooth35": false,
-    "tooth36": true,
-    "tooth37": false,
-    "tooth38": true,
-    "tooth41": false,
-    "tooth42": true,
-    "tooth43": false,
-    "tooth44": true,
-    "tooth45": false,
-    "tooth46": true,
-    "tooth47": false,
-    "tooth48": true
-  },
-  "doctorsconsultation": {
-    "id": 1,
-    "vid": 1,
-    "well": true,
-    "msk": false,
-    "cvs": false,
-    "respi": true,
-    "gu": true,
-    "git": false,
-    "eye": true,
-    "derm": false,
-    "others": "LEUKAEMIA",
-    "consultationNotes": "CHEST PAIN, SHORTNESS OF BREATH, COUGH",
-    "diagnosis": "ACUTE BRONCHITIS",
-    "treatment": "REST, HYDRATION, COUGH SYRUP",
-    "referralNeeded": false,
-    "referralLoc": null,
-    "remarks": "MONITOR FOR RESOLUTION"
-  }
+  "past_medical_history": { "id": 1, "vid": 1, "tuberculosis": true, "diabetes": false, "..." : "..." },
+  "social_history": null,
+  "vital_statistics": null,
+  "height_and_weight": null,
+  "visual_acuity": null,
+  "fall_risk": null,
+  "dental": null,
+  "physiotherapy": null,
+  "doctors_consultation": null
 }
 ```
 
-#### CreatePatient
-Create a new patient.
+#### GetPatientPhoto
+Get the photo for a patient.
 
 ```plaintext
-POST /patient
+GET /api/patient/:id/photo
 ```
 
-If successful, returns `200` and the following
-response attributes:
-
-| Attribute | Type    | Description                       |
-|-----------|---------|-----------------------------------|
-| `id`      | integer | Integer id of new patient created |
+If successful, returns `200` with the raw image bytes and the detected MIME type (`image/jpeg`, `image/png`, etc.).
 
 Unsuccessful responses include:  
-`400` - Missing Admin Category  
-`400` - Json Marshalling Error (Attempts to marshal the JSON request body into a struct failed)  
-`400` - Invalid Parameters (e.g. A required field is not present)  
+`404` - Photo not found.  
 `401` - Unauthorized.  
 `500` - Internal server error.
 
 Example request:
 
 ```shell
-curl --url 'http://localhost:9090/patient/' \
+curl --url 'http://localhost:9090/api/patient/1/photo' \
+--header 'Authorization: Bearer <your_access_token>' \
+--output photo.jpg
+```
+
+#### CreatePatient
+Create a new patient (demographics only, no visit).
+
+```plaintext
+POST /api/patient
+```
+
+Accepts either `application/json` or `multipart/form-data` (with `patient_details` JSON field and an optional `photo` file).
+
+If successful, returns `200` and the following response attributes:
+
+| Attribute | Type    | Description                       |
+|-----------|---------|-----------------------------------|
+| `id`      | integer | Integer id of new patient created |
+
+Unsuccessful responses include:  
+`400` - Missing or invalid patient data  
+`401` - Unauthorized.  
+`413` - Photo too large (max 5 MiB).  
+`500` - Internal server error.
+
+Example request:
+
+```shell
+curl --url 'http://localhost:9090/api/patient' \
 --header 'Authorization: Bearer <your_access_token>'\
 --header 'Content-Type: application/json' \
---data '
-{
-    "familyGroup": "S001",
-    "regDate": "2024-01-10T00:00:00Z",
-    "queueNo": "1A",
-    "name": "Patient's Name Here",
-    "khmerName": "តតតតតតត",
+--data '{
+    "name": "John Doe",
+    "family_group": "S001",
+    "khmer_name": "តតតតតតត",
     "dob": "1994-01-10T00:00:00Z",
-    "age": 30,
     "gender": "M",
     "village": "SO",
-    "contactNo": "12345678",
-    "pregnant": false,
-    "lastMenstrualPeriod": null,
-    "drugAllergies": "panadol",
-    "sentToID": false,
-    "photo": "<photo_encoded_as_base64_string>"
+    "contact_no": "12345678",
+    "drug_allergies": "panadol"
 }'
 ```
 
@@ -326,11 +258,129 @@ Example response:
 }
 ```
 
+#### CreatePatientWithVisit
+Create a new patient and their first visit atomically.
+
+```plaintext
+POST /api/patient-with-visit
+```
+
+Accepts either `application/json` (with `patient_details` and `admin` top-level keys) or `multipart/form-data`
+(with `patient_details` JSON field, `admin` JSON field, and an optional `photo` file).
+
+If successful, returns `200` and the following response attributes:
+
+| Attribute | Type    | Description                             |
+|-----------|---------|-----------------------------------------|
+| `id`      | integer | Integer id of the new patient created   |
+| `vid`     | integer | Integer visit id of the new visit       |
+
+Unsuccessful responses include:  
+`400` - Missing or invalid patient/admin data  
+`401` - Unauthorized.  
+`413` - Photo too large (max 5 MiB).  
+`500` - Internal server error.
+
+Example request:
+
+```shell
+curl --url 'http://localhost:9090/api/patient-with-visit' \
+--header 'Authorization: Bearer <your_access_token>'\
+--header 'Content-Type: application/json' \
+--data '{
+    "patient_details": {
+        "name": "John Doe",
+        "family_group": "S001",
+        "khmer_name": "តតតតតតត",
+        "dob": "1994-01-10T00:00:00Z",
+        "gender": "M",
+        "village": "SO",
+        "contact_no": "12345678",
+        "drug_allergies": "panadol"
+    },
+    "admin": {
+        "reg_date": "2024-01-10T00:00:00Z",
+        "queue_no": "1A",
+        "pregnant": false,
+        "last_menstrual_period": null,
+        "sent_to_id": false
+    }
+}'
+```
+
+Example response:
+```json
+{
+ "id": 7,
+ "vid": 1
+}
+```
+
+#### UpdatePatient
+Update demographic data for an existing patient (not visit-specific fields).
+
+```plaintext
+PUT /api/patient/:id
+```
+
+Accepts either `application/json` or `multipart/form-data` (with `patient_details` JSON field and an optional `photo` file).
+
+If successful, returns `200`.
+
+Unsuccessful responses include:  
+`404` - Patient not found.  
+`400` - Missing or invalid patient data  
+`401` - Unauthorized.  
+`413` - Photo too large (max 5 MiB).  
+`500` - Internal server error.
+
+Example request:
+
+```shell
+curl --url 'http://localhost:9090/api/patient/1' \
+--request PUT \
+--header 'Authorization: Bearer <your_access_token>'\
+--header 'Content-Type: application/json' \
+--data '{
+    "name": "John Doe Updated",
+    "family_group": "S001",
+    "khmer_name": "តតតតតតត",
+    "dob": "1994-01-10T00:00:00Z",
+    "gender": "M",
+    "village": "SO",
+    "contact_no": "12345678",
+    "drug_allergies": "panadol"
+}'
+```
+
+#### DeletePatient
+Delete a patient and all of their associated visits and data.
+
+```plaintext
+DELETE /api/patient/:id
+```
+
+If successful, returns `200`.
+
+Unsuccessful responses include:  
+`404` - Patient not found.  
+`400` - Bad Request URL  
+`401` - Unauthorized.  
+`500` - Internal server error.
+
+Example request:
+
+```shell
+curl --url 'http://localhost:9090/api/patient/1' \
+--request DELETE \
+--header 'Authorization: Bearer <your_access_token>'
+```
+
 #### CreatePatientVisit
 Create a new visit for an existing patient.
 
 ```plaintext
-POST /patient/:id
+POST /api/patient/:id
 ```
 
 If successful, returns `200` and the following
@@ -352,25 +402,15 @@ Unsuccessful responses include:
 Example request:
 
 ```shell
-curl --url 'http://localhost:9090/patient/1' \
+curl --url 'http://localhost:9090/api/patient/1' \
 --header 'Authorization: Bearer <your_access_token>'\
 --header 'Content-Type: application/json' \
 --data '{
-    "familyGroup": "S001",
-    "regDate": "2024-01-10T00:00:00Z",
-    "queueNo": "1A",
-    "name": "Patient's Name Here",
-    "khmerName": "តតតតតតត",
-    "dob": "1994-01-10T00:00:00Z",
-    "age": 30,
-    "gender": "M",
-    "village": "SO",
-    "contactNo": "12345678",
+    "reg_date": "2024-01-10T00:00:00Z",
+    "queue_no": "1A",
     "pregnant": false,
-    "lastMenstrualPeriod": null,
-    "drugAllergies": "panadol",
-    "sentToID": false,
-    "photo": "<photo_encoded_as_base64_string>"
+    "last_menstrual_period": null,
+    "sent_to_id": false
 }'
 ```
 
@@ -386,7 +426,7 @@ Deletes a specified visit of an existing patient.
 To avoid accidentally deleting entire patients, only deleting visits one at a time is allowed.
 
 ```plaintext
-DELETE /patient/:id/:vid
+DELETE /api/patient/:id/:vid
 ```
 
 If successful, returns `200`
@@ -400,15 +440,15 @@ Unsuccessful responses include:
 Example request:
 
 ```shell
-curl --url --request DELETE 'http://localhost:9090/patient/1/1' \
+curl --url --request DELETE 'http://localhost:9090/api/patient/1/1' \
 --header 'Authorization: Bearer <your_access_token>'
 ```
 
 #### UpdatePatientVisit
-Update a visit of an existing patient.
+Update a visit of an existing patient. Only fields included in the request body are updated.
 
 ```plaintext
-PATCH /patient/:id/:vid
+PATCH /api/patient/:id/:vid
 ```
 
 If successful, returns `200`
@@ -425,95 +465,36 @@ Unsuccessful responses include:
 Example request:
 
 ```shell
-curl --location --request PATCH 'http://localhost:9090/patient/1/1' \
---header 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MjI4MTAzNzIsInVzZXJuYW1lIjoiYWRtaW4ifQ.ap0GiJ3fnlxHFYlRDQ2Bk21KVhZyTTH4500tZoWA4rc' \
+curl --location --request PATCH 'http://localhost:9090/api/patient/1/1' \
+--header 'Authorization: Bearer <your_access_token>' \
 --header 'Content-Type: application/json' \
 --data '{
     "admin": {
-        "familyGroup": "S001",
-        "regDate": "2024-01-10T00:00:00Z",
-        "queueNo": "3B",
-        "name": "Patient'\''s Name Here",
-        "khmerName": "តតតតតតត",
-        "dob": "1994-01-10T00:00:00Z",
-        "age": 30,
-        "gender": "M",
-        "village": "SO",
-        "contactNo": "12345678",
+        "reg_date": "2024-01-10T00:00:00Z",
+        "queue_no": "3B",
         "pregnant": false,
-        "lastMenstrualPeriod": null,
-        "drugAllergies": "panadol",
-        "sentToID": false,
-        "photo": "<photo_encoded_as_base64_string>"
+        "last_menstrual_period": null,
+        "sent_to_id": false
     },
-    "pastMedicalHistory": {
+    "past_medical_history": {
         "tuberculosis": true,
         "diabetes": false,
         "hypertension": true,
         "hyperlipidemia": false,
-        "chronicJointPains": false,
-        "chronicMuscleAches": true,
-        "sexuallyTransmittedDisease": true,
-        "specifiedSTDs": "TRICHOMONAS",
+        "chronic_joint_pains": false,
+        "chronic_muscle_aches": true,
+        "sexually_transmitted_disease": true,
+        "specified_stds": "TRICHOMONAS",
         "others": "None"
     },
-    "socialHistory": {
-        "pastSmokingHistory": true,
-        "numberOfYears": 15,
-        "currentSmokingHistory": false,
-        "cigarettesPerDay": null,
-        "alcoholHistory": true,
-        "howRegular": "A"
-    },
-    "vitalStatistics": {
-        "temperature": 36.5,
-        "spO2": 98,
-        "systolicBP1": 120,
-        "diastolicBP1": 80,
-        "systolicBP2": 122,
-        "diastolicBP2": 78,
-        "averageSystolicBP": 121,
-        "averageDiastolicBP": 79,
-        "hr1": 72,
-        "hr2": 71,
-        "averageHR": 71.5,
-        "randomBloodGlucoseMmolL": 5.4
-    },
-    "heightAndWeight": {
-        "height": 170,
-        "weight": 70,
-        "bmi": 24.2,
-        "bmiAnalysis": "normal weight",
-        "paedsHeight": 90,
-        "paedsWeight": 80
-    },
-    "visualAcuity": {
-        "lEyeVision": 20,
-        "rEyeVision": 20,
-        "additionalIntervention": "VISUAL FIELD TEST REQUIRED"
-    },
-    "fallrisk": {
-        "fallHistory": "c",
-        "cognitiveStatus": "b",
-        "continenceProblems": "e",
-        "safetyAwareness": "d",
-        "unsteadiness": "c"
-    },
-    "doctorsConsultation": {
+    "doctors_consultation": {
         "well": true,
         "msk": false,
-        "cvs": false,
-        "respi": true,
-        "gu": true,
-        "git": false,
-        "eye": true,
-        "derm": false,
-        "others": "TRICHOMONAS VAGINALIS",
-        "consultationNotes": "CHEST PAIN, SHORTNESS OF BREATH, COUGH",
+        "consultation_notes": "CHEST PAIN",
         "diagnosis": "ACUTE BRONCHITIS",
         "treatment": "REST, HYDRATION, COUGH SYRUP",
-        "referralNeeded": false,
-        "referralLoc": null,
+        "referral_needed": false,
+        "referral_loc": null,
         "remarks": "MONITOR FOR RESOLUTION"
     }
 }'
@@ -523,24 +504,24 @@ curl --location --request PATCH 'http://localhost:9090/patient/1/1' \
 Retrieve metadata for a specific patient, allowing further requests to be made to retrieve individual patient visit data.
 
 ```plaintext
-GET /patient-meta/:id
+GET /api/patient-meta/:id
 ```
 
 If successful, returns `200`
 
-| Attribute     | Type    | Description                           |
-|---------------|---------|---------------------------------------|
-| `id`          | integer | Integer id of patient                 |
-| `vid`         | integer | Integer visit id                      |
-| `familyGroup` | string  | Integer visit id of new visit created |
-| `regDate`     | string  | Registration date of visit            |
-| `queueNo`     | string  | Queue number given for visit          |
-| `name`        | string  | Name of patient                       |
-| `khmerName`   | string  | Khmer name of patient                 |
-| `visits`      | object  | Mapping of visit ids to regDate       |
+| Attribute      | Type    | Description                              |
+|----------------|---------|------------------------------------------|
+| `id`           | integer | Integer id of patient                    |
+| `vid`          | integer | Integer visit id of the latest visit     |
+| `family_group` | string  | Family group identifier                  |
+| `reg_date`     | string  | Registration date of the latest visit    |
+| `queue_no`     | string  | Queue number of the latest visit         |
+| `name`         | string  | Name of patient                          |
+| `khmer_name`   | string  | Khmer name of patient                    |
+| `visits`       | object  | Mapping of visit ids to registration dates |
 
 Unsuccessful responses include:
-`404` - Patient visit not found.  
+`404` - Patient not found.  
 `400` - Bad Request URL
 `401` - Unauthorized.  
 `500` - Internal server error.
@@ -548,7 +529,7 @@ Unsuccessful responses include:
 Example request:
 
 ```shell
-curl --location 'http://localhost:9090/patient-meta/1' \
+curl --location 'http://localhost:9090/api/patient-meta/1' \
 --header 'Authorization: Bearer <your_access_token>'
 ```
 
@@ -557,11 +538,11 @@ Example response:
 {
     "id": 1,
     "vid": 1,
-    "familyGroup": "S001",
-    "regDate": "2024-01-10T00:00:00Z",
-    "queueNo": "1A",
+    "family_group": "S001",
+    "reg_date": "2024-01-10T00:00:00Z",
+    "queue_no": "1A",
     "name": "John Doe",
-    "khmerName": "១២៣៤ ៥៦៧៨៩០ឥឲ",
+    "khmer_name": "១២៣៤ ៥៦៧៨៩០ឥឲ",
     "visits": {
         "1": "2024-01-10T00:00:00Z",
         "2": "2023-07-01T00:00:00Z",
@@ -572,11 +553,14 @@ Example response:
 ```
 
 #### GetAllPatientVisitMeta
-Retrieve and return patient visit metadata for all patients on a specific date
+Retrieve and return patient visit metadata for all patients on a specific date.
+Pass `default` as the date to get the latest visit for each patient.
 
 ```plaintext
-GET /all-patient-visit-meta/:date
+GET /api/all-patient-visit-meta/:date
 ```
+
+The `:date` parameter accepts either `default` (latest visits) or a date in `YYYY-MM-DD` format.
 
 If successful, returns `200`, and an array of patient visit metadata objects.
 
@@ -588,7 +572,7 @@ Unsuccessful responses include:
 Example request:
 
 ```shell
-curl --location 'http://localhost:9090/all-patient-visit-meta/default' \
+curl --location 'http://localhost:9090/api/all-patient-visit-meta/default' \
 --header 'Authorization: Bearer <your_access_token>'
 ```
 
@@ -598,106 +582,86 @@ Example response:
  {
   "id": 1,
   "vid": 2,
-  "familyGroup": "Family 1",
-  "regDate": "2025-07-01T00:00:00Z",
-  "queueNo": "Q123",
+  "family_group": "Family 1",
+  "reg_date": "2025-07-01T00:00:00Z",
+  "queue_no": "Q123",
   "name": "John Doe",
-  "khmerName": "ខេមរ",
+  "khmer_name": "ខេមរ",
   "gender": "M",
   "village": "Village 1",
-  "contactNo": "123456789",
-  "drugAllergies": "None",
-  "sentToId": false,
-  "referralNeeded": false
+  "contact_no": "123456789",
+  "drug_allergies": "None",
+  "sent_to_id": false,
+  "referral_needed": false,
+  "has_prescription_with_drug": false,
+  "all_prescription_drugs_packed": false,
+  "prescription_dispensed": false
  },
  {
   "id": 2,
   "vid": 2,
-  "familyGroup": "B009",
-  "regDate": "2024-12-03T00:00:00Z",
-  "queueNo": "Q125",
+  "family_group": "B009",
+  "reg_date": "2024-12-03T00:00:00Z",
+  "queue_no": "Q125",
   "name": "Walter White",
-  "khmerName": "អាលីស ស្ម៊ីត",
+  "khmer_name": "អាលីស ស្ម៊ីត",
   "gender": "M",
   "village": "ABQ",
-  "contactNo": "555666777",
-  "drugAllergies": "None",
-  "sentToId": false,
-  "referralNeeded": false
- },
- {
-  "id": 3,
-  "vid": 1,
-  "familyGroup": "S002B",
-  "regDate": "2024-01-10T00:00:00Z",
-  "queueNo": "2B",
-  "name": "Bob Smith",
-  "khmerName": "១២៣៤ ៥៦៧៨៩០ឥឲ",
-  "gender": "M",
-  "village": "R1",
-  "contactNo": "99999999",
-  "drugAllergies": "aspirin",
-  "sentToId": false,
-  "referralNeeded": null
- },
- {
-  "id": 4,
-  "vid": 1,
-  "familyGroup": "S003",
-  "regDate": "2024-01-10T00:00:00Z",
-  "queueNo": "3A",
-  "name": "Bob Johnson",
-  "khmerName": "១២៣៤ ៥៦៧៨៩០ឥឲ",
-  "gender": "M",
-  "village": "R1",
-  "contactNo": "11111111",
-  "drugAllergies": null,
-  "sentToId": false,
-  "referralNeeded": null
- },
- {
-  "id": 5,
-  "vid": 1,
-  "familyGroup": "S004",
-  "regDate": "2024-01-10T00:00:00Z",
-  "queueNo": "4B",
-  "name": "Alice Brown",
-  "khmerName": "១២៣៤ ៥៦៧៨៩០ឥឲ",
-  "gender": "F",
-  "village": "R1",
-  "contactNo": "17283948",
-  "drugAllergies": null,
-  "sentToId": false,
-  "referralNeeded": null
- },
- {
-  "id": 6,
-  "vid": 1,
-  "familyGroup": "S005A",
-  "regDate": "2024-01-10T00:00:00Z",
-  "queueNo": "5C",
-  "name": "Charlie Davis",
-  "khmerName": "១២៣៤ ៥៦៧៨៩០ឥឲ",
-  "gender": "M",
-  "village": "R1",
-  "contactNo": "09876543",
-  "drugAllergies": null,
-  "sentToId": false,
-  "referralNeeded": null
+  "contact_no": "555666777",
+  "drug_allergies": "None",
+  "sent_to_id": false,
+  "referral_needed": false,
+  "has_prescription_with_drug": false,
+  "all_prescription_drugs_packed": false,
+  "prescription_dispensed": false
  }
 ]
 ```
 
-#### Export Patients
-Export all patient data to a CSV file.
+#### Pharmacy Endpoints
+Manage drug inventory, batches, and batch locations. All pharmacy routes require authentication.
 
 ```plaintext
-GET /export-db
+GET    /api/pharmacy/drugs               - List drugs (optional ?q=<search> query param)
+POST   /api/pharmacy/drugs               - Create a drug
+GET    /api/pharmacy/drugs/:drugId       - Get a drug with its total stock
+PATCH  /api/pharmacy/drugs/:drugId       - Update a drug
+DELETE /api/pharmacy/drugs/:drugId       - Delete a drug
+
+GET    /api/pharmacy/drugs/:drugId/batches       - List batches for a drug
+POST   /api/pharmacy/drugs/:drugId/batches       - Create a batch (with optional locations)
+
+GET    /api/pharmacy/batches             - List all batches across all drugs
+GET    /api/pharmacy/batches/:batchId    - Get a specific batch
+PATCH  /api/pharmacy/batches/:batchId    - Update a batch
+DELETE /api/pharmacy/batches/:batchId    - Delete a batch
+
+GET    /api/pharmacy/batches/:batchId/locations  - List locations for a batch
+POST   /api/pharmacy/batches/:batchId/locations  - Add a location to a batch
+
+PATCH  /api/pharmacy/locations/:locationId       - Update a batch location
+DELETE /api/pharmacy/locations/:locationId       - Delete a batch location
 ```
 
-#### Is Valid Token
-Check if the authorization token in a request is valid.
+#### Prescription Endpoints
+Manage the full prescription lifecycle. All prescription routes require authentication.
 
 ```plaintext
-GET /isValidToken
+GET    /api/prescriptions                          - List prescriptions (optional ?patient_id= and ?vid= filters)
+POST   /api/prescriptions                          - Create a prescription
+GET    /api/prescriptions/:id                      - Get a prescription with all its lines
+PATCH  /api/prescriptions/:id                      - Update a prescription header
+DELETE /api/prescriptions/:id                      - Delete a prescription
+
+POST   /api/prescriptions/:id/lines                - Add a line (drug) to a prescription
+PATCH  /api/prescriptions/lines/:lineId            - Update a prescription line
+DELETE /api/prescriptions/lines/:lineId            - Remove a line
+
+GET    /api/prescriptions/lines/:lineId/allocations - List batch allocations for a line
+PUT    /api/prescriptions/lines/:lineId/allocations - Replace all allocations for a line
+
+POST   /api/prescriptions/lines/:lineId/pack       - Mark a line as packed
+POST   /api/prescriptions/lines/:lineId/unpack     - Unpack a line
+
+POST   /api/prescriptions/:id/dispense             - Dispense a prescription (finalise)
 ```
