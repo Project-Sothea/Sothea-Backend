@@ -212,6 +212,10 @@ For primitive types like bool, they can only take on 2 values: true, false. When
 
 The workaround is to use a pointer (`*bool`), which can be `nil` when absent, `&false` when explicitly false, and `&true` when explicitly true.
 
+### Patient Photo Storage
+
+Patient photos are stored on disk rather than in the database. Photos are saved to `uploads/patient/<id>` (no file extension) under the repo root. The MIME type is detected at read time from the file's magic bytes rather than from a stored extension. Files are written atomically via a `.tmp` intermediate file to prevent partial writes. The maximum allowed photo size is 5 MiB. Supported formats are JPEG, PNG, WebP, GIF, and BMP.
+
 ### Pharmacy and Prescription Modules
 
 Beyond the patient module, the backend also manages a pharmacy inventory and prescription lifecycle:
