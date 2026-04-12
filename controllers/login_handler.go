@@ -11,7 +11,7 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-// LoginHandler represent the httphandler for patient
+// LoginHandler represent the httphandler for auth
 type LoginHandler struct {
 	Usecase   *usecases.LoginUsecase
 	secretKey []byte
@@ -20,10 +20,12 @@ type LoginHandler struct {
 // NewLoginHandler will initialize the resources endpoint
 func NewLoginHandler(r gin.IRouter, us *usecases.LoginUsecase, secretKey []byte) {
 	handler := &LoginHandler{
-		Usecase: us,
+		Usecase:   us,
+		secretKey: secretKey,
 	}
 	r.POST("/login", handler.Login)
 	r.GET("/login/is-valid-token", middleware.AuthRequired(secretKey), handler.IsValidToken)
+	r.GET("/users", handler.ListUsers)
 }
 
 func (l *LoginHandler) Login(c *gin.Context) {
@@ -58,4 +60,14 @@ func (l *LoginHandler) Login(c *gin.Context) {
 
 func (l *LoginHandler) IsValidToken(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Valid Token"})
+}
+
+func (l *LoginHandler) ListUsers(c *gin.Context) {
+	ctx := c.Request.Context()
+	users, err := l.Usecase.ListUsers(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, users)
 }

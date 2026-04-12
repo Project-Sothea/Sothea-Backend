@@ -10,37 +10,71 @@ import (
 )
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username
+SELECT id, username, name
 FROM users
 WHERE id = $1
 `
 
 type GetUserByIDRow struct {
-	ID       int64  `json:"id"`
-	Username string `json:"username"`
+	ID       int64   `json:"id"`
+	Username string  `json:"username"`
+	Name     *string `json:"name"`
 }
 
 func (q *Queries) GetUserByID(ctx context.Context, id int64) (GetUserByIDRow, error) {
 	row := q.db.QueryRow(ctx, getUserByID, id)
 	var i GetUserByIDRow
-	err := row.Scan(&i.ID, &i.Username)
+	err := row.Scan(&i.ID, &i.Username, &i.Name)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, username
+SELECT id, username, name
 FROM users
 WHERE username = $1
 `
 
 type GetUserByUsernameRow struct {
-	ID       int64  `json:"id"`
-	Username string `json:"username"`
+	ID       int64   `json:"id"`
+	Username string  `json:"username"`
+	Name     *string `json:"name"`
 }
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUserByUsernameRow, error) {
 	row := q.db.QueryRow(ctx, getUserByUsername, username)
 	var i GetUserByUsernameRow
-	err := row.Scan(&i.ID, &i.Username)
+	err := row.Scan(&i.ID, &i.Username, &i.Name)
 	return i, err
+}
+
+const listUsers = `-- name: ListUsers :many
+SELECT id, username, name
+FROM users
+ORDER BY username
+`
+
+type ListUsersRow struct {
+	ID       int64   `json:"id"`
+	Username string  `json:"username"`
+	Name     *string `json:"name"`
+}
+
+func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
+	rows, err := q.db.Query(ctx, listUsers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUsersRow
+	for rows.Next() {
+		var i ListUsersRow
+		if err := rows.Scan(&i.ID, &i.Username, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

@@ -507,17 +507,6 @@ func (p *PostgresPatientRepository) GetAllPatientVisitMeta(ctx context.Context, 
 	return result, nil
 }
 
-func (p *PostgresPatientRepository) GetDBUser(ctx context.Context, username string) (*db.User, error) {
-	row, err := p.queries.GetUserByUsername(ctx, username)
-	if err != nil {
-		return nil, err
-	}
-	return &db.User{
-		ID:       row.ID,
-		Username: row.Username,
-	}, nil
-}
-
 // Helpers --------------------------------------------------------------------
 
 func checkPatientExists(ctx context.Context, q *db.Queries, id int32) (bool, error) {

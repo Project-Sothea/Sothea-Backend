@@ -48,8 +48,10 @@ func main() {
 
 	api := router.Group("/api")
 
+	userRepo := _postgresRepository.NewPostgresUserRepository(pool)
 	patientRepo := _postgresRepository.NewPostgresPatientRepository(pool)
-	loginUseCase := _useCase.NewLoginUseCase(patientRepo, 30*time.Second, secretKey)
+
+	loginUseCase := _useCase.NewLoginUseCase(userRepo, 30*time.Second, secretKey)
 	_httpDelivery.NewLoginHandler(api, loginUseCase, secretKey)
 
 	patientUseCase := _useCase.NewPatientUsecase(patientRepo, 30*time.Second)
