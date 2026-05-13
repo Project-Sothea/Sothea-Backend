@@ -49,7 +49,16 @@ func main() {
 	api := router.Group("/api")
 
 	userRepo := _postgresRepository.NewPostgresUserRepository(pool)
-	patientRepo := _postgresRepository.NewPostgresPatientRepository(pool)
+
+	timezone := viper.GetString("TIMEZONE")
+	if timezone == "" {
+		timezone = "Asia/Phnom_Penh"
+	}
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		log.Fatal(err)
+	}
+	patientRepo := _postgresRepository.NewPostgresPatientRepository(pool, loc)
 
 	loginUseCase := _useCase.NewLoginUseCase(userRepo, 30*time.Second, secretKey)
 	_httpDelivery.NewLoginHandler(api, loginUseCase, secretKey)

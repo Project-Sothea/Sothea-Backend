@@ -13,15 +13,17 @@ import (
 )
 
 type PostgresPatientRepository struct {
-	Conn    *pgxpool.Pool
-	queries *db.Queries
+	Conn     *pgxpool.Pool
+	queries  *db.Queries
+	timezone *time.Location
 }
 
 // NewPostgresPatientRepository will create an object that represent the patient.Repository interface
-func NewPostgresPatientRepository(conn *pgxpool.Pool) *PostgresPatientRepository {
+func NewPostgresPatientRepository(conn *pgxpool.Pool, timezone *time.Location) *PostgresPatientRepository {
 	return &PostgresPatientRepository{
-		Conn:    conn,
-		queries: db.New(conn),
+		Conn:     conn,
+		queries:  db.New(conn),
+		timezone: timezone,
 	}
 }
 
@@ -153,6 +155,7 @@ func (p *PostgresPatientRepository) CreatePatient(ctx context.Context, patient *
 	if err != nil {
 		return -1, err
 	}
+	patientParams.Dob = patientParams.Dob.In(p.timezone)
 
 	patientID, err := q.InsertPatient(ctx, patientParams)
 	if err != nil {
@@ -186,6 +189,8 @@ func (p *PostgresPatientRepository) CreatePatientWithVisit(ctx context.Context, 
 	if err != nil {
 		return -1, -1, err
 	}
+	patientParams.Dob = patientParams.Dob.In(p.timezone)
+
 	patientID, err := q.InsertPatient(ctx, patientParams)
 	if err != nil {
 		return -1, -1, err
@@ -195,6 +200,8 @@ func (p *PostgresPatientRepository) CreatePatientWithVisit(ctx context.Context, 
 	if err != nil {
 		return -1, -1, err
 	}
+	adminParams.RegDate = adminParams.RegDate.In(p.timezone)
+
 	row, err := q.InsertPatientVisit(ctx, adminParams)
 	if err != nil {
 		return -1, -1, err
@@ -285,6 +292,8 @@ func (p *PostgresPatientRepository) CreatePatientVisit(ctx context.Context, id i
 	if err != nil {
 		return -1, err
 	}
+
+	params.RegDate = params.RegDate.In(p.timezone)
 
 	row, err := q.InsertPatientVisit(ctx, params)
 	if err != nil {
