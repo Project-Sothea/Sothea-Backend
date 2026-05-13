@@ -12,23 +12,17 @@ ARG GO_VERSION=1.26.0
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION} AS build
 WORKDIR /src
 
-RUN --mount=type=cache,id=go-mod-cache,target=/go/pkg/mod/ \
-    --mount=type=bind,source=go.sum,target=go.sum \
-    --mount=type=bind,source=go.mod,target=go.mod \
-    go mod download -x
+RUN go mod download -x
 
 ARG TARGETARCH
 
 # Build the application.
-RUN --mount=type=cache,id=go-mod-cache,target=/go/pkg/mod/ \
-    --mount=type=bind,target=. \
-    CGO_ENABLED=0 GOARCH=$TARGETARCH go build -o /bin/server .
+RUN CGO_ENABLED=0 GOARCH=$TARGETARCH go build -o /bin/server .
 
 FROM alpine:latest AS final
 
 # Install any runtime dependencies that are needed to run your application.
-RUN --mount=type=cache,id=apk-cache,target=/var/cache/apk \
-    apk --update add \
+RUN apk --update add \
     ca-certificates \
     tzdata \
     && \
