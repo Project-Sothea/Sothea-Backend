@@ -6,12 +6,18 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+
+	"github.com/spf13/viper"
 )
 
 // MediaRoot returns the absolute path to the media storage root inside the repo
 func MediaRoot() string {
 	// Canonical uploads location at repo root
-	return MustGitPath("uploads")
+	mediaPath := viper.GetString("MEDIA_ROOT")
+	if mediaPath == "" {
+		return MustGitPath("uploads")
+	}
+	return mediaPath
 }
 
 // EnsureDir ensures the directory exists

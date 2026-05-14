@@ -161,7 +161,7 @@ func (p *PatientHandler) CreatePatient(c *gin.Context) {
 	if val, exists := c.Get("uploadedPhoto"); exists {
 		if data, ok := val.([]byte); ok {
 			if err := util.SavePatientPhoto(id, data); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to store photo"})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to store photo", "message": err.Error()})
 				return
 			}
 		}
@@ -246,7 +246,7 @@ func (p *PatientHandler) CreatePatientWithVisit(c *gin.Context) {
 	if val, exists := c.Get("uploadedPhoto"); exists {
 		if data, ok := val.([]byte); ok {
 			if err := util.SavePatientPhoto(id, data); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to store photo"})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to store photo", "message": err.Error()})
 				return
 			}
 		}
@@ -442,7 +442,7 @@ func (p *PatientHandler) UpdatePatient(c *gin.Context) {
 				return
 			}
 			if err := util.SavePatientPhoto(id, photoBytes); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to store photo"})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to store photo", "message": err.Error()})
 				return
 			}
 		}
