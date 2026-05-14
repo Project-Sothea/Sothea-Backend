@@ -180,7 +180,7 @@ type PatientDetail struct {
 	Dob           time.Time `json:"dob"`
 	Gender        string    `json:"gender"`
 	Village       string    `json:"village"`
-	ContactNo     string    `json:"contact_no"`
+	ContactNo     *string   `json:"contact_no"`
 	DrugAllergies *string   `json:"drug_allergies"`
 }
 

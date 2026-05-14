@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS patient_details
   dob            DATE       NOT NULL,
   gender         VARCHAR(1) NOT NULL,
   village        TEXT       NOT NULL,
-  contact_no     TEXT       NOT NULL,
+  contact_no     TEXT,
   drug_allergies TEXT
 );
 

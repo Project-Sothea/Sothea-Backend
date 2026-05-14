@@ -609,7 +609,7 @@ type GetPatientVisitMetaByDateRow struct {
 	KhmerName                  string    `json:"khmer_name"`
 	Gender                     string    `json:"gender"`
 	Village                    string    `json:"village"`
-	ContactNo                  string    `json:"contact_no"`
+	ContactNo                  *string   `json:"contact_no"`
 	DrugAllergies              *string   `json:"drug_allergies"`
 	SentToID                   bool      `json:"sent_to_id"`
 	ReferralNeeded             *bool     `json:"referral_needed"`
@@ -726,7 +726,7 @@ type GetPatientVisitMetaLatestRow struct {
 	KhmerName                  string    `json:"khmer_name"`
 	Gender                     string    `json:"gender"`
 	Village                    string    `json:"village"`
-	ContactNo                  string    `json:"contact_no"`
+	ContactNo                  *string   `json:"contact_no"`
 	DrugAllergies              *string   `json:"drug_allergies"`
 	SentToID                   bool      `json:"sent_to_id"`
 	ReferralNeeded             *bool     `json:"referral_needed"`
@@ -957,7 +957,7 @@ type InsertPatientParams struct {
 	Dob           time.Time `json:"dob"`
 	Gender        string    `json:"gender"`
 	Village       string    `json:"village"`
-	ContactNo     string    `json:"contact_no"`
+	ContactNo     *string   `json:"contact_no"`
 	DrugAllergies *string   `json:"drug_allergies"`
 }
 
@@ -1104,7 +1104,7 @@ type UpdatePatientParams struct {
 	Dob           time.Time `json:"dob"`
 	Gender        string    `json:"gender"`
 	Village       string    `json:"village"`
-	ContactNo     string    `json:"contact_no"`
+	ContactNo     *string   `json:"contact_no"`
 	DrugAllergies *string   `json:"drug_allergies"`
 	ID            int32     `json:"id"`
 }

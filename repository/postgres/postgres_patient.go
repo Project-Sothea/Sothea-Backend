@@ -800,7 +800,7 @@ func buildPatientVisitMeta(
 	khmerName string,
 	gender string,
 	village string,
-	contactNo string,
+	contactNo *string,
 	drugAllergies *string,
 	sentToID bool,
 	referralNeeded *bool,
