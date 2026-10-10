@@ -142,8 +142,6 @@ type HeightAndWeight struct {
 	Vid                       int32          `json:"vid"`
 	Height                    pgtype.Numeric `json:"height"`
 	Weight                    pgtype.Numeric `json:"weight"`
-	PaedsHeight               pgtype.Numeric `json:"paeds_height"`
-	PaedsWeight               pgtype.Numeric `json:"paeds_weight"`
 	IcopeLostWeightPastMonths *bool          `json:"icope_lost_weight_past_months"`
 	IcopeNoDesireToEat        *bool          `json:"icope_no_desire_to_eat"`
 }

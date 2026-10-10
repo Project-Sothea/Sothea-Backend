@@ -655,8 +655,6 @@ func toHeightAndWeightParams(id int32, vid int32, haw *db.HeightAndWeight) (db.U
 		Vid:                       vid,
 		Height:                    haw.Height,
 		Weight:                    haw.Weight,
-		PaedsHeight:               haw.PaedsHeight,
-		PaedsWeight:               haw.PaedsWeight,
 		IcopeLostWeightPastMonths: haw.IcopeLostWeightPastMonths,
 		IcopeNoDesireToEat:        haw.IcopeNoDesireToEat,
 	}, nil

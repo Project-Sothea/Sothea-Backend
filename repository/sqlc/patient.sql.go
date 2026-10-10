@@ -388,8 +388,6 @@ SELECT id,
        vid,
        height,
        weight,
-       paeds_height,
-       paeds_weight,
        icope_lost_weight_past_months,
        icope_no_desire_to_eat
 FROM height_and_weight
@@ -411,8 +409,6 @@ func (q *Queries) GetHeightAndWeight(ctx context.Context, arg GetHeightAndWeight
 		&i.Vid,
 		&i.Height,
 		&i.Weight,
-		&i.PaedsHeight,
-		&i.PaedsWeight,
 		&i.IcopeLostWeightPastMonths,
 		&i.IcopeNoDesireToEat,
 	)
@@ -1311,18 +1307,14 @@ INSERT INTO height_and_weight (
   vid,
   height,
   weight,
-  paeds_height,
-  paeds_weight,
   icope_lost_weight_past_months,
   icope_no_desire_to_eat
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8
+  $1, $2, $3, $4, $5, $6
 )
 ON CONFLICT (id, vid) DO UPDATE SET
   height                     = EXCLUDED.height,
   weight                     = EXCLUDED.weight,
-  paeds_height               = EXCLUDED.paeds_height,
-  paeds_weight               = EXCLUDED.paeds_weight,
   icope_lost_weight_past_months = EXCLUDED.icope_lost_weight_past_months,
   icope_no_desire_to_eat     = EXCLUDED.icope_no_desire_to_eat
 `
@@ -1332,8 +1324,6 @@ type UpsertHeightAndWeightParams struct {
 	Vid                       int32          `json:"vid"`
 	Height                    pgtype.Numeric `json:"height"`
 	Weight                    pgtype.Numeric `json:"weight"`
-	PaedsHeight               pgtype.Numeric `json:"paeds_height"`
-	PaedsWeight               pgtype.Numeric `json:"paeds_weight"`
 	IcopeLostWeightPastMonths *bool          `json:"icope_lost_weight_past_months"`
 	IcopeNoDesireToEat        *bool          `json:"icope_no_desire_to_eat"`
 }
@@ -1344,8 +1334,6 @@ func (q *Queries) UpsertHeightAndWeight(ctx context.Context, arg UpsertHeightAnd
 		arg.Vid,
 		arg.Height,
 		arg.Weight,
-		arg.PaedsHeight,
-		arg.PaedsWeight,
 		arg.IcopeLostWeightPastMonths,
 		arg.IcopeNoDesireToEat,
 	)

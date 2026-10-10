@@ -90,8 +90,6 @@ CREATE TABLE height_and_weight
     vid          INTEGER       NOT NULL,                                 -- Add vid to match the vid type from admin
     height       NUMERIC(5, 1) NOT NULL,
     weight       NUMERIC(5, 1) NOT NULL,
-    paeds_height NUMERIC(5, 1),
-    paeds_weight NUMERIC(5, 1),
 
     icope_lost_weight_past_months BOOLEAN,
     icope_no_desire_to_eat BOOLEAN,
