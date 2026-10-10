@@ -352,7 +352,6 @@ SELECT id,
        tandem_balance,
        gait_speed_test,
        chair_stand_test,
-       fall_risk_score,
        icope_complete_chair_stands,
        icope_chair_stands_time
 FROM fall_risk
@@ -377,7 +376,6 @@ func (q *Queries) GetFallRisk(ctx context.Context, arg GetFallRiskParams) (FallR
 		&i.TandemBalance,
 		&i.GaitSpeedTest,
 		&i.ChairStandTest,
-		&i.FallRiskScore,
 		&i.IcopeCompleteChairStands,
 		&i.IcopeChairStandsTime,
 	)
@@ -390,8 +388,6 @@ SELECT id,
        vid,
        height,
        weight,
-       bmi,
-       bmi_analysis,
        paeds_height,
        paeds_weight,
        icope_lost_weight_past_months,
@@ -415,8 +411,6 @@ func (q *Queries) GetHeightAndWeight(ctx context.Context, arg GetHeightAndWeight
 		&i.Vid,
 		&i.Height,
 		&i.Weight,
-		&i.Bmi,
-		&i.BmiAnalysis,
 		&i.PaedsHeight,
 		&i.PaedsWeight,
 		&i.IcopeLostWeightPastMonths,
@@ -894,11 +888,8 @@ SELECT id,
        diastolic_bp1,
        systolic_bp2,
        diastolic_bp2,
-       avg_systolic_bp,
-       avg_diastolic_bp,
        hr1,
        hr2,
-       avg_hr,
        rand_blood_glucose_mmol_l,
        icope_high_bp
 FROM vital_statistics
@@ -924,11 +915,8 @@ func (q *Queries) GetVitalStatistics(ctx context.Context, arg GetVitalStatistics
 		&i.DiastolicBp1,
 		&i.SystolicBp2,
 		&i.DiastolicBp2,
-		&i.AvgSystolicBp,
-		&i.AvgDiastolicBp,
 		&i.Hr1,
 		&i.Hr2,
-		&i.AvgHr,
 		&i.RandBloodGlucoseMmolL,
 		&i.IcopeHighBp,
 	)
@@ -1275,11 +1263,10 @@ INSERT INTO fall_risk (
   tandem_balance,
   gait_speed_test,
   chair_stand_test,
-  fall_risk_score,
   icope_complete_chair_stands,
   icope_chair_stands_time
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+  $1, $2, $3, $4, $5, $6, $7, $8, $9
 )
 ON CONFLICT (id, vid) DO UPDATE SET
   side_to_side_balance   = EXCLUDED.side_to_side_balance,
@@ -1287,7 +1274,6 @@ ON CONFLICT (id, vid) DO UPDATE SET
   tandem_balance         = EXCLUDED.tandem_balance,
   gait_speed_test        = EXCLUDED.gait_speed_test,
   chair_stand_test       = EXCLUDED.chair_stand_test,
-  fall_risk_score        = EXCLUDED.fall_risk_score,
   icope_complete_chair_stands = EXCLUDED.icope_complete_chair_stands,
   icope_chair_stands_time = EXCLUDED.icope_chair_stands_time
 `
@@ -1300,7 +1286,6 @@ type UpsertFallRiskParams struct {
 	TandemBalance            int32 `json:"tandem_balance"`
 	GaitSpeedTest            int32 `json:"gait_speed_test"`
 	ChairStandTest           int32 `json:"chair_stand_test"`
-	FallRiskScore            int32 `json:"fall_risk_score"`
 	IcopeCompleteChairStands *bool `json:"icope_complete_chair_stands"`
 	IcopeChairStandsTime     *bool `json:"icope_chair_stands_time"`
 }
@@ -1314,7 +1299,6 @@ func (q *Queries) UpsertFallRisk(ctx context.Context, arg UpsertFallRiskParams) 
 		arg.TandemBalance,
 		arg.GaitSpeedTest,
 		arg.ChairStandTest,
-		arg.FallRiskScore,
 		arg.IcopeCompleteChairStands,
 		arg.IcopeChairStandsTime,
 	)
@@ -1327,20 +1311,16 @@ INSERT INTO height_and_weight (
   vid,
   height,
   weight,
-  bmi,
-  bmi_analysis,
   paeds_height,
   paeds_weight,
   icope_lost_weight_past_months,
   icope_no_desire_to_eat
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+  $1, $2, $3, $4, $5, $6, $7, $8
 )
 ON CONFLICT (id, vid) DO UPDATE SET
   height                     = EXCLUDED.height,
   weight                     = EXCLUDED.weight,
-  bmi                        = EXCLUDED.bmi,
-  bmi_analysis               = EXCLUDED.bmi_analysis,
   paeds_height               = EXCLUDED.paeds_height,
   paeds_weight               = EXCLUDED.paeds_weight,
   icope_lost_weight_past_months = EXCLUDED.icope_lost_weight_past_months,
@@ -1352,8 +1332,6 @@ type UpsertHeightAndWeightParams struct {
 	Vid                       int32          `json:"vid"`
 	Height                    pgtype.Numeric `json:"height"`
 	Weight                    pgtype.Numeric `json:"weight"`
-	Bmi                       pgtype.Numeric `json:"bmi"`
-	BmiAnalysis               string         `json:"bmi_analysis"`
 	PaedsHeight               pgtype.Numeric `json:"paeds_height"`
 	PaedsWeight               pgtype.Numeric `json:"paeds_weight"`
 	IcopeLostWeightPastMonths *bool          `json:"icope_lost_weight_past_months"`
@@ -1366,8 +1344,6 @@ func (q *Queries) UpsertHeightAndWeight(ctx context.Context, arg UpsertHeightAnd
 		arg.Vid,
 		arg.Height,
 		arg.Weight,
-		arg.Bmi,
-		arg.BmiAnalysis,
 		arg.PaedsHeight,
 		arg.PaedsWeight,
 		arg.IcopeLostWeightPastMonths,
@@ -1614,15 +1590,12 @@ INSERT INTO vital_statistics (
   diastolic_bp1,
   systolic_bp2,
   diastolic_bp2,
-  avg_systolic_bp,
-  avg_diastolic_bp,
   hr1,
   hr2,
-  avg_hr,
   rand_blood_glucose_mmol_l,
   icope_high_bp
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 )
 ON CONFLICT (id, vid) DO UPDATE SET
   temperature              = EXCLUDED.temperature,
@@ -1631,11 +1604,8 @@ ON CONFLICT (id, vid) DO UPDATE SET
   diastolic_bp1            = EXCLUDED.diastolic_bp1,
   systolic_bp2             = EXCLUDED.systolic_bp2,
   diastolic_bp2            = EXCLUDED.diastolic_bp2,
-  avg_systolic_bp          = EXCLUDED.avg_systolic_bp,
-  avg_diastolic_bp         = EXCLUDED.avg_diastolic_bp,
   hr1                      = EXCLUDED.hr1,
   hr2                      = EXCLUDED.hr2,
-  avg_hr                   = EXCLUDED.avg_hr,
   rand_blood_glucose_mmol_l = EXCLUDED.rand_blood_glucose_mmol_l,
   icope_high_bp            = EXCLUDED.icope_high_bp
 `
@@ -1649,11 +1619,8 @@ type UpsertVitalStatisticsParams struct {
 	DiastolicBp1          pgtype.Numeric `json:"diastolic_bp1"`
 	SystolicBp2           pgtype.Numeric `json:"systolic_bp2"`
 	DiastolicBp2          pgtype.Numeric `json:"diastolic_bp2"`
-	AvgSystolicBp         pgtype.Numeric `json:"avg_systolic_bp"`
-	AvgDiastolicBp        pgtype.Numeric `json:"avg_diastolic_bp"`
 	Hr1                   pgtype.Numeric `json:"hr1"`
 	Hr2                   pgtype.Numeric `json:"hr2"`
-	AvgHr                 pgtype.Numeric `json:"avg_hr"`
 	RandBloodGlucoseMmolL pgtype.Numeric `json:"rand_blood_glucose_mmol_l"`
 	IcopeHighBp           *bool          `json:"icope_high_bp"`
 }
@@ -1668,11 +1635,8 @@ func (q *Queries) UpsertVitalStatistics(ctx context.Context, arg UpsertVitalStat
 		arg.DiastolicBp1,
 		arg.SystolicBp2,
 		arg.DiastolicBp2,
-		arg.AvgSystolicBp,
-		arg.AvgDiastolicBp,
 		arg.Hr1,
 		arg.Hr2,
-		arg.AvgHr,
 		arg.RandBloodGlucoseMmolL,
 		arg.IcopeHighBp,
 	)

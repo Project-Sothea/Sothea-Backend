@@ -91,11 +91,8 @@ CREATE TABLE IF NOT EXISTS vital_statistics
     diastolic_bp1             NUMERIC(5, 1),
     systolic_bp2              NUMERIC(5, 1),
     diastolic_bp2             NUMERIC(5, 1),
-    avg_systolic_bp           NUMERIC(5, 1),
-    avg_diastolic_bp          NUMERIC(5, 1),
     hr1                       NUMERIC(5, 1) NOT NULL,
     hr2                       NUMERIC(5, 1) NOT NULL,
-    avg_hr                    NUMERIC(5, 1) NOT NULL,
     rand_blood_glucose_mmol_l  NUMERIC(5, 1),
     icope_high_bp             BOOLEAN,
 
@@ -109,8 +106,6 @@ CREATE TABLE IF NOT EXISTS height_and_weight
     vid          INTEGER       NOT NULL,                                 -- Add vid to match the vid type from admin
     height       NUMERIC(5, 1) NOT NULL,
     weight       NUMERIC(5, 1) NOT NULL,
-    bmi          NUMERIC(5, 1) NOT NULL,
-    bmi_analysis TEXT          NOT NULL,
     paeds_height NUMERIC(5, 1),
     paeds_weight NUMERIC(5, 1),
 
@@ -165,7 +160,6 @@ CREATE TABLE IF NOT EXISTS fall_risk
     tandem_balance INTEGER NOT NULL,
     gait_speed_test INTEGER NOT NULL,
     chair_stand_test INTEGER NOT NULL,
-    fall_risk_score INTEGER NOT NULL,
     icope_complete_chair_stands BOOLEAN,
     icope_chair_stands_time BOOLEAN,
 

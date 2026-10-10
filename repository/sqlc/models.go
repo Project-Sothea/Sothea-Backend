@@ -125,7 +125,6 @@ type FallRisk struct {
 	TandemBalance            int32 `json:"tandem_balance"`
 	GaitSpeedTest            int32 `json:"gait_speed_test"`
 	ChairStandTest           int32 `json:"chair_stand_test"`
-	FallRiskScore            int32 `json:"fall_risk_score"`
 	IcopeCompleteChairStands *bool `json:"icope_complete_chair_stands"`
 	IcopeChairStandsTime     *bool `json:"icope_chair_stands_time"`
 }
@@ -143,8 +142,6 @@ type HeightAndWeight struct {
 	Vid                       int32          `json:"vid"`
 	Height                    pgtype.Numeric `json:"height"`
 	Weight                    pgtype.Numeric `json:"weight"`
-	Bmi                       pgtype.Numeric `json:"bmi"`
-	BmiAnalysis               string         `json:"bmi_analysis"`
 	PaedsHeight               pgtype.Numeric `json:"paeds_height"`
 	PaedsWeight               pgtype.Numeric `json:"paeds_weight"`
 	IcopeLostWeightPastMonths *bool          `json:"icope_lost_weight_past_months"`
@@ -296,11 +293,8 @@ type VitalStatistic struct {
 	DiastolicBp1          pgtype.Numeric `json:"diastolic_bp1"`
 	SystolicBp2           pgtype.Numeric `json:"systolic_bp2"`
 	DiastolicBp2          pgtype.Numeric `json:"diastolic_bp2"`
-	AvgSystolicBp         pgtype.Numeric `json:"avg_systolic_bp"`
-	AvgDiastolicBp        pgtype.Numeric `json:"avg_diastolic_bp"`
 	Hr1                   pgtype.Numeric `json:"hr1"`
 	Hr2                   pgtype.Numeric `json:"hr2"`
-	AvgHr                 pgtype.Numeric `json:"avg_hr"`
 	RandBloodGlucoseMmolL pgtype.Numeric `json:"rand_blood_glucose_mmol_l"`
 	IcopeHighBp           *bool          `json:"icope_high_bp"`
 }

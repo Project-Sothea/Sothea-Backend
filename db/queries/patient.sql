@@ -232,11 +232,8 @@ SELECT id,
        diastolic_bp1,
        systolic_bp2,
        diastolic_bp2,
-       avg_systolic_bp,
-       avg_diastolic_bp,
        hr1,
        hr2,
-       avg_hr,
        rand_blood_glucose_mmol_l,
        icope_high_bp
 FROM vital_statistics
@@ -253,15 +250,12 @@ INSERT INTO vital_statistics (
   diastolic_bp1,
   systolic_bp2,
   diastolic_bp2,
-  avg_systolic_bp,
-  avg_diastolic_bp,
   hr1,
   hr2,
-  avg_hr,
   rand_blood_glucose_mmol_l,
   icope_high_bp
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 )
 ON CONFLICT (id, vid) DO UPDATE SET
   temperature              = EXCLUDED.temperature,
@@ -270,11 +264,8 @@ ON CONFLICT (id, vid) DO UPDATE SET
   diastolic_bp1            = EXCLUDED.diastolic_bp1,
   systolic_bp2             = EXCLUDED.systolic_bp2,
   diastolic_bp2            = EXCLUDED.diastolic_bp2,
-  avg_systolic_bp          = EXCLUDED.avg_systolic_bp,
-  avg_diastolic_bp         = EXCLUDED.avg_diastolic_bp,
   hr1                      = EXCLUDED.hr1,
   hr2                      = EXCLUDED.hr2,
-  avg_hr                   = EXCLUDED.avg_hr,
   rand_blood_glucose_mmol_l = EXCLUDED.rand_blood_glucose_mmol_l,
   icope_high_bp            = EXCLUDED.icope_high_bp;
 
@@ -290,8 +281,6 @@ SELECT id,
        vid,
        height,
        weight,
-       bmi,
-       bmi_analysis,
        paeds_height,
        paeds_weight,
        icope_lost_weight_past_months,
@@ -306,20 +295,16 @@ INSERT INTO height_and_weight (
   vid,
   height,
   weight,
-  bmi,
-  bmi_analysis,
   paeds_height,
   paeds_weight,
   icope_lost_weight_past_months,
   icope_no_desire_to_eat
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+  $1, $2, $3, $4, $5, $6, $7, $8
 )
 ON CONFLICT (id, vid) DO UPDATE SET
   height                     = EXCLUDED.height,
   weight                     = EXCLUDED.weight,
-  bmi                        = EXCLUDED.bmi,
-  bmi_analysis               = EXCLUDED.bmi_analysis,
   paeds_height               = EXCLUDED.paeds_height,
   paeds_weight               = EXCLUDED.paeds_weight,
   icope_lost_weight_past_months = EXCLUDED.icope_lost_weight_past_months,
@@ -434,7 +419,6 @@ SELECT id,
        tandem_balance,
        gait_speed_test,
        chair_stand_test,
-       fall_risk_score,
        icope_complete_chair_stands,
        icope_chair_stands_time
 FROM fall_risk
@@ -450,11 +434,10 @@ INSERT INTO fall_risk (
   tandem_balance,
   gait_speed_test,
   chair_stand_test,
-  fall_risk_score,
   icope_complete_chair_stands,
   icope_chair_stands_time
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+  $1, $2, $3, $4, $5, $6, $7, $8, $9
 )
 ON CONFLICT (id, vid) DO UPDATE SET
   side_to_side_balance   = EXCLUDED.side_to_side_balance,
@@ -462,7 +445,6 @@ ON CONFLICT (id, vid) DO UPDATE SET
   tandem_balance         = EXCLUDED.tandem_balance,
   gait_speed_test        = EXCLUDED.gait_speed_test,
   chair_stand_test       = EXCLUDED.chair_stand_test,
-  fall_risk_score        = EXCLUDED.fall_risk_score,
   icope_complete_chair_stands = EXCLUDED.icope_complete_chair_stands,
   icope_chair_stands_time = EXCLUDED.icope_chair_stands_time;
 

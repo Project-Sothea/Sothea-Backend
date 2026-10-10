@@ -642,11 +642,8 @@ func toVitalStatisticsParams(id int32, vid int32, vs *db.VitalStatistic) (db.Ups
 		DiastolicBp1:          vs.DiastolicBp1,
 		SystolicBp2:           vs.SystolicBp2,
 		DiastolicBp2:          vs.DiastolicBp2,
-		AvgSystolicBp:         vs.AvgSystolicBp,
-		AvgDiastolicBp:        vs.AvgDiastolicBp,
 		Hr1:                   vs.Hr1,
 		Hr2:                   vs.Hr2,
-		AvgHr:                 vs.AvgHr,
 		RandBloodGlucoseMmolL: vs.RandBloodGlucoseMmolL,
 		IcopeHighBp:           vs.IcopeHighBp,
 	}, nil
@@ -658,8 +655,6 @@ func toHeightAndWeightParams(id int32, vid int32, haw *db.HeightAndWeight) (db.U
 		Vid:                       vid,
 		Height:                    haw.Height,
 		Weight:                    haw.Weight,
-		Bmi:                       haw.Bmi,
-		BmiAnalysis:               haw.BmiAnalysis,
 		PaedsHeight:               haw.PaedsHeight,
 		PaedsWeight:               haw.PaedsWeight,
 		IcopeLostWeightPastMonths: haw.IcopeLostWeightPastMonths,
@@ -690,7 +685,6 @@ func toFallRiskParams(id int32, vid int32, fr *db.FallRisk) (db.UpsertFallRiskPa
 		TandemBalance:            fr.TandemBalance,
 		GaitSpeedTest:            fr.GaitSpeedTest,
 		ChairStandTest:           fr.ChairStandTest,
-		FallRiskScore:            fr.FallRiskScore,
 		IcopeCompleteChairStands: fr.IcopeCompleteChairStands,
 		IcopeChairStandsTime:     fr.IcopeChairStandsTime,
 	}, nil
