@@ -3,6 +3,7 @@
 -- name: InsertPrescription :one
 INSERT INTO prescriptions (patient_id, vid, notes)
 VALUES ($1,$2,$3)
+ON CONFLICT (patient_id, vid) DO NOTHING
 RETURNING id, created_at, updated_at;
 
 -- name: GetPrescriptionHeader :one

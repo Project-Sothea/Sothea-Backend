@@ -67,6 +67,10 @@ func (r *PostgresPrescriptionRepository) CreatePrescription(ctx context.Context,
 		Vid:       p.Vid,
 		Notes:     p.Notes,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Keep the existing header's notes and lines when concurrent clients create it.
+		err = tx.QueryRow(ctx, `SELECT id, created_at, updated_at FROM prescriptions WHERE patient_id=$1 AND vid=$2`, p.PatientID, p.Vid).Scan(&row.ID, &row.CreatedAt, &row.UpdatedAt)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -504,6 +508,9 @@ func (r *PostgresPrescriptionRepository) SetLineAllocations(ctx context.Context,
 	}
 
 	// Replace all; triggers will adjust reservations per-row (delete→return stock, insert→reserve stock)
+	if err := q.UnpackLine(ctx, lineID); err != nil {
+		return nil, err
+	}
 	if err := q.DeleteAllocationsByLine(ctx, lineID); err != nil {
 		return nil, err
 	}
@@ -650,20 +657,18 @@ func (r *PostgresPrescriptionRepository) DispensePrescription(ctx context.Contex
 		return nil, errors.New("all lines must be packed before dispense")
 	}
 
-	/*
-		// Safety: totals vs allocations
-		var mismatch int
-		if err := tx.QueryRowContext(ctx, `
+	// Safety: totals vs allocations
+	var mismatch int
+	if err := tx.QueryRow(ctx, `
 		  SELECT COUNT(*) FROM prescription_lines l
 		  WHERE l.prescription_id=$1 AND
 		        l.total_to_dispense <> COALESCE((SELECT SUM(quantity) FROM prescription_batch_items i WHERE i.line_id=l.id),0)
 		`, prescriptionID).Scan(&mismatch); err != nil {
-			return nil, err
-		}
-		if mismatch > 0 {
-			return nil, errors.New("allocation totals mismatch")
-		}
-	*/
+		return nil, err
+	}
+	if mismatch > 0 {
+		return nil, errors.New("allocation totals mismatch")
+	}
 
 	if err := q.DispensePrescription(ctx, prescriptionID); err != nil {
 		return nil, err

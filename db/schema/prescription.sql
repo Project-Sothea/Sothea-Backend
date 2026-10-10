@@ -12,7 +12,8 @@ CREATE TABLE prescriptions (
   updated_at   TIMESTAMPTZ,
   updated_by   BIGINT REFERENCES users(id),
 
-  CONSTRAINT fk_admin FOREIGN KEY (patient_id, vid) REFERENCES admin(id, vid) ON DELETE CASCADE
+  CONSTRAINT fk_admin FOREIGN KEY (patient_id, vid) REFERENCES admin(id, vid) ON DELETE CASCADE,
+  CONSTRAINT uq_prescription_visit UNIQUE (patient_id, vid)
 );
 
 /*******************

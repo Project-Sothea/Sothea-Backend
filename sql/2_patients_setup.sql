@@ -277,19 +277,19 @@ VALUES (1, 1, TRUE, 15, FALSE, NULL, TRUE, 'A'),
        (5, 1, FALSE, NULL, FALSE, NULL, FALSE, NULL);
 
 INSERT INTO vital_statistics (id, vid, temperature, spo2, systolic_bp1, diastolic_bp1, systolic_bp2, diastolic_bp2,
-                             avg_systolic_bp, avg_diastolic_bp, hr1, hr2, avg_hr, rand_blood_glucose_mmol_l, icope_high_bp)
-VALUES (1, 1, 36.5, 98, 120, 80, 122, 78, 121, 79, 72, 71, 71.5, 5.4, FALSE),
-       (2, 1, 37.0, 97, 130, 85, 128, 82, 129, 83, 68, 70, 69, 5.7, TRUE),
-       (3, 1, 36.8, 99, 118, 78, 120, 76, 119, 77, 75, 76, 75.5, 5.6, TRUE),
-       (4, 1, 36.7, 98, 125, 82, 124, 80, 124.5, 81, 70, 72, 71, 5.3, FALSE);
+                             hr1, hr2, rand_blood_glucose_mmol_l, icope_high_bp)
+VALUES (1, 1, 36.5, 98, 120, 80, 122, 78, 72, 71, 5.4, FALSE),
+       (2, 1, 37.0, 97, 130, 85, 128, 82, 68, 70, 5.7, TRUE),
+       (3, 1, 36.8, 99, 118, 78, 120, 76, 75, 76, 5.6, TRUE),
+       (4, 1, 36.7, 98, 125, 82, 124, 80, 70, 72, 5.3, FALSE);
 
 INSERT INTO height_and_weight
-  (id, vid, height, weight, bmi, bmi_analysis, paeds_height, paeds_weight,
+  (id, vid, height, weight,
    icope_lost_weight_past_months, icope_no_desire_to_eat)
 VALUES
-  (1, 1, 170, 70, 24.2, 'normal weight', 90, 80, FALSE, FALSE),
-  (2, 1, 165, 55, 20.2, 'normal weight', 95, 90, FALSE, FALSE),
-  (3, 1, 180, 85, 26.2, 'overweight',     80, 95, FALSE, FALSE);
+  (1, 1, 170, 70, FALSE, FALSE),
+  (2, 1, 165, 55, FALSE, FALSE),
+  (3, 1, 180, 85, FALSE, FALSE);
 
 INSERT INTO visual_acuity
   (id, vid, l_eye_vision, r_eye_vision, additional_intervention,
@@ -301,11 +301,11 @@ VALUES
 INSERT INTO fall_risk
   (id, vid,
    side_to_side_balance, semi_tandem_balance, tandem_balance,
-   gait_speed_test, chair_stand_test, fall_risk_score,
+   gait_speed_test, chair_stand_test,
    icope_complete_chair_stands, icope_chair_stands_time)
 VALUES
-  (1, 1, 1, 1, 2, 3, 4, 11, TRUE,  TRUE),
-  (2, 1, 0, 1, 1, 2, 0,  4, FALSE, FALSE);
+  (1, 1, 1, 1, 2, 3, 4, TRUE,  TRUE),
+  (2, 1, 0, 1, 1, 2, 0, FALSE, FALSE);
 
 -- First visit rows rewritten
 INSERT INTO dental
@@ -360,16 +360,16 @@ VALUES (1, 2, TRUE, 15, FALSE, NULL, TRUE, 'A'),
        (2, 2, FALSE, NULL, TRUE, 10, TRUE, 'D');
 
 INSERT INTO vital_statistics (id, vid, temperature, spo2, systolic_bp1, diastolic_bp1, systolic_bp2, diastolic_bp2,
-                             avg_systolic_bp, avg_diastolic_bp, hr1, hr2, avg_hr, rand_blood_glucose_mmol_l, icope_high_bp)
-VALUES (1, 2, 36.5, 98, 120, 80, 122, 78, 121, 79, 72, 71, 71.5, 5.4, TRUE),
-       (2, 2, 37.0, 97, 130, 85, 128, 82, 129, 83, 68, 70, 69, 5.7, FALSE);
+                             hr1, hr2, rand_blood_glucose_mmol_l, icope_high_bp)
+VALUES (1, 2, 36.5, 98, 120, 80, 122, 78, 72, 71, 5.4, TRUE),
+       (2, 2, 37.0, 97, 130, 85, 128, 82, 68, 70, 5.7, FALSE);
 
 INSERT INTO height_and_weight
-  (id, vid, height, weight, bmi, bmi_analysis, paeds_height, paeds_weight,
+  (id, vid, height, weight,
    icope_lost_weight_past_months, icope_no_desire_to_eat)
 VALUES
-  (1, 2, 170, 70, 24.2, 'normal weight', 90, 80, FALSE, FALSE),
-  (2, 2, 165, 55, 20.2, 'normal weight', 95, 90, FALSE, FALSE);
+  (1, 2, 170, 70, FALSE, FALSE),
+  (2, 2, 165, 55, FALSE, FALSE);
 
 INSERT INTO visual_acuity
   (id, vid, l_eye_vision, r_eye_vision, additional_intervention,

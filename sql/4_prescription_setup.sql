@@ -12,7 +12,8 @@ CREATE TABLE prescriptions (
   updated_at   TIMESTAMPTZ,
   updated_by   BIGINT REFERENCES users(id),
 
-  CONSTRAINT fk_admin FOREIGN KEY (patient_id, vid) REFERENCES admin(id, vid) ON DELETE CASCADE
+  CONSTRAINT fk_admin FOREIGN KEY (patient_id, vid) REFERENCES admin(id, vid) ON DELETE CASCADE,
+  CONSTRAINT uq_prescription_visit UNIQUE (patient_id, vid)
 );
 
 CREATE INDEX idx_rx_patient_visit ON prescriptions (patient_id, vid);
@@ -416,30 +417,6 @@ CREATE TRIGGER trg_pbi_log
 AFTER INSERT OR UPDATE OR DELETE ON prescription_batch_items
 FOR EACH ROW EXECUTE FUNCTION audit_row();
 
-/*
-CREATE OR REPLACE FUNCTION assert_packed_quantity()
-RETURNS TRIGGER AS $$
-DECLARE
-  need INT; got INT;
-BEGIN
-  IF NEW.is_packed AND (OLD.is_packed IS DISTINCT FROM TRUE) THEN
-    SELECT total_to_dispense INTO need FROM prescription_lines WHERE id = NEW.id;
-    SELECT COALESCE(SUM(quantity),0) INTO got FROM prescription_batch_items WHERE line_id = NEW.id;
-    IF need <> got THEN
-      RAISE EXCEPTION 'Packed line must allocate exactly total_to_dispense (need %, have %)', need, got;
-    END IF;
-  END IF;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS ck_line_packed_alloc ON prescription_lines;
-CREATE CONSTRAINT TRIGGER ck_line_packed_alloc
-AFTER UPDATE OF is_packed ON prescription_lines
-DEFERRABLE INITIALLY DEFERRED
-FOR EACH ROW EXECUTE FUNCTION assert_packed_quantity();
-*/
-
 -- Reserve/return stock when prescription_batch_items change
 CREATE OR REPLACE FUNCTION trg_pbi_adjust_stock()
 RETURNS TRIGGER AS $$
@@ -576,3 +553,148 @@ CREATE CONSTRAINT TRIGGER pbi_ck_drug
 AFTER INSERT OR UPDATE ON prescription_batch_items
 DEFERRABLE INITIALLY DEFERRED
 FOR EACH ROW EXECUTE FUNCTION ck_pbi_drug_match();
+
+-- Every child mutation locks its header, serializing it against dispensing.
+CREATE OR REPLACE FUNCTION guard_prescription_line()
+RETURNS TRIGGER AS $$
+DECLARE
+  rx_id BIGINT;
+  dispensed BOOLEAN;
+BEGIN
+  rx_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.prescription_id ELSE NEW.prescription_id END;
+  SELECT is_dispensed INTO dispensed FROM prescriptions WHERE id = rx_id FOR UPDATE;
+  IF dispensed THEN
+    RAISE EXCEPTION 'Cannot change or delete lines of a dispensed prescription';
+  END IF;
+  IF TG_OP = 'UPDATE' AND NEW.prescription_id IS DISTINCT FROM OLD.prescription_id THEN
+    RAISE EXCEPTION 'Cannot move a prescription line to another prescription';
+  END IF;
+  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+  -- Hold a shared lock so strength changes cannot race a new clinical line.
+  PERFORM 1 FROM drugs WHERE id = NEW.drug_id FOR SHARE;
+  IF TG_OP = 'UPDATE' AND
+    ROW(NEW.drug_id, NEW.dose_amount, NEW.dose_unit, NEW.frequency_code, NEW.duration, NEW.duration_unit)
+    IS DISTINCT FROM
+    ROW(OLD.drug_id, OLD.dose_amount, OLD.dose_unit, OLD.frequency_code, OLD.duration, OLD.duration_unit) THEN
+    NEW.is_packed := FALSE;
+    NEW.packed_by := NULL;
+    NEW.packed_at := NULL;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS a_guard_prescription_line ON prescription_lines;
+CREATE TRIGGER a_guard_prescription_line
+BEFORE INSERT OR UPDATE OR DELETE ON prescription_lines
+FOR EACH ROW EXECUTE FUNCTION guard_prescription_line();
+
+CREATE OR REPLACE FUNCTION guard_prescription_allocation()
+RETURNS TRIGGER AS $$
+DECLARE
+  target_line BIGINT;
+  rx_id BIGINT;
+  dispensed BOOLEAN;
+BEGIN
+  target_line := CASE WHEN TG_OP = 'DELETE' THEN OLD.line_id ELSE NEW.line_id END;
+  SELECT prescription_id INTO rx_id FROM prescription_lines WHERE id = target_line;
+  SELECT is_dispensed INTO dispensed FROM prescriptions WHERE id = rx_id FOR UPDATE;
+  IF dispensed THEN
+    RAISE EXCEPTION 'Cannot change allocations of a dispensed prescription';
+  END IF;
+  IF TG_OP = 'UPDATE' AND NEW.line_id IS DISTINCT FROM OLD.line_id THEN
+    RAISE EXCEPTION 'Cannot move an allocation to another line';
+  END IF;
+  UPDATE prescription_lines SET is_packed = FALSE, packed_by = NULL, packed_at = NULL
+  WHERE id = target_line;
+  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS pbi_00_guard ON prescription_batch_items;
+CREATE TRIGGER pbi_00_guard
+BEFORE INSERT OR UPDATE OR DELETE ON prescription_batch_items
+FOR EACH ROW EXECUTE FUNCTION guard_prescription_allocation();
+
+-- Check current state, including transactions that pack and then change allocations.
+CREATE OR REPLACE FUNCTION assert_packed_quantity()
+RETURNS TRIGGER AS $$
+DECLARE
+  need INT;
+  got BIGINT;
+  packed BOOLEAN;
+BEGIN
+  SELECT total_to_dispense, is_packed INTO need, packed FROM prescription_lines WHERE id = NEW.id;
+  IF packed THEN
+    SELECT COALESCE(SUM(quantity), 0) INTO got FROM prescription_batch_items WHERE line_id = NEW.id;
+    IF need <> got THEN
+      RAISE EXCEPTION 'Packed line must allocate exactly total_to_dispense (need %, have %)', need, got;
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS ck_line_packed_alloc ON prescription_lines;
+CREATE CONSTRAINT TRIGGER ck_line_packed_alloc
+AFTER INSERT OR UPDATE ON prescription_lines
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION assert_packed_quantity();
+
+CREATE OR REPLACE FUNCTION guard_prescription_header()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Runs before cascading deletes, while the complete history still exists.
+  IF OLD.is_dispensed THEN
+    RAISE EXCEPTION 'Cannot change or delete a dispensed prescription; dispensing history must be retained';
+  END IF;
+  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+  IF ROW(NEW.patient_id, NEW.vid) IS DISTINCT FROM ROW(OLD.patient_id, OLD.vid) THEN
+    RAISE EXCEPTION 'Cannot move a prescription to another visit';
+  END IF;
+  IF NEW.is_dispensed THEN
+    IF NOT EXISTS (SELECT 1 FROM prescription_lines WHERE prescription_id = NEW.id) THEN
+      RAISE EXCEPTION 'No lines to dispense';
+    END IF;
+    IF EXISTS (
+      SELECT 1 FROM prescription_lines l WHERE l.prescription_id = NEW.id AND
+        (NOT l.is_packed OR l.total_to_dispense <> COALESCE(
+          (SELECT SUM(i.quantity) FROM prescription_batch_items i WHERE i.line_id = l.id), 0))
+    ) THEN
+      RAISE EXCEPTION 'All lines must be packed with exact allocations before dispensing';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS a_guard_prescription_header ON prescriptions;
+CREATE TRIGGER a_guard_prescription_header
+BEFORE UPDATE OR DELETE ON prescriptions
+FOR EACH ROW EXECUTE FUNCTION guard_prescription_header();
+
+CREATE OR REPLACE FUNCTION guard_drug_prescription_properties()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF ROW(NEW.strength_num, NEW.strength_unit_num, NEW.strength_den, NEW.strength_unit_den,
+         NEW.dispense_unit, NEW.piece_content_amount, NEW.piece_content_unit)
+     IS DISTINCT FROM
+     ROW(OLD.strength_num, OLD.strength_unit_num, OLD.strength_den, OLD.strength_unit_den,
+         OLD.dispense_unit, OLD.piece_content_amount, OLD.piece_content_unit)
+     AND EXISTS (SELECT 1 FROM prescription_lines WHERE drug_id = OLD.id) THEN
+    RAISE EXCEPTION 'Cannot modify strength, dispense unit or container content of a drug used in prescriptions';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS a_guard_drug_prescription_properties ON drugs;
+CREATE TRIGGER a_guard_drug_prescription_properties
+BEFORE UPDATE ON drugs
+FOR EACH ROW EXECUTE FUNCTION guard_drug_prescription_properties();
+
+-- Legacy packed drafts with missing allocations must be packed again.
+UPDATE prescription_lines l SET is_packed = FALSE, packed_by = NULL, packed_at = NULL
+FROM prescriptions p WHERE p.id = l.prescription_id AND NOT p.is_dispensed AND l.is_packed
+  AND l.total_to_dispense <> COALESCE((SELECT SUM(quantity) FROM prescription_batch_items WHERE line_id = l.id), 0);

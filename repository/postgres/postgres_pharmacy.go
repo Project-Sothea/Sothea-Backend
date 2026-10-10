@@ -281,10 +281,17 @@ func (r *PostgresPharmacyRepository) UpdateDrug(ctx context.Context, d *db.Drug)
 		return nil, err
 	}
 	currentDrug := current.Drug
+	var amountsChanged bool
+	if err := tx.QueryRow(ctx, `SELECT strength_num IS DISTINCT FROM $2::numeric
+		OR strength_den IS DISTINCT FROM $3::numeric
+		OR piece_content_amount IS DISTINCT FROM $4::numeric
+		FROM drugs WHERE id=$1`, d.ID, d.StrengthNum, d.StrengthDen, d.PieceContentAmount).Scan(&amountsChanged); err != nil {
+		return nil, err
+	}
 
 	// Check if any risky fields are being changed
 	riskyFieldChanged :=
-		!equalPtrString(currentDrug.StrengthUnitNum, d.StrengthUnitNum) ||
+		amountsChanged || !equalPtrString(currentDrug.StrengthUnitNum, d.StrengthUnitNum) ||
 			!equalPtrString(currentDrug.StrengthUnitDen, d.StrengthUnitDen) ||
 			currentDrug.DispenseUnit != d.DispenseUnit ||
 			!equalPtrString(currentDrug.PieceContentUnit, d.PieceContentUnit)

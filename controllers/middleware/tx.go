@@ -2,11 +2,15 @@
 package middleware
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -41,13 +45,67 @@ func WithTx(db *pgxpool.Pool) gin.HandlerFunc {
 		ctx := context.WithValue(c.Request.Context(), txKey, tx)
 		c.Request = c.Request.WithContext(ctx)
 
-		c.Next()
-
-		if c.IsAborted() || c.Writer.Status() >= 400 {
-			return // deferred rollback
-		}
-		_ = tx.Commit(c.Request.Context())
+		serveTransaction(c, tx)
 	}
+}
+
+// Buffer the response until deferred database constraints have been checked.
+type transactionWriter struct {
+	gin.ResponseWriter
+	header  http.Header
+	body    bytes.Buffer
+	status  int
+	written bool
+}
+
+func (w *transactionWriter) Header() http.Header { return w.header }
+func (w *transactionWriter) WriteHeader(status int) {
+	if !w.written {
+		w.status = status
+	}
+}
+func (w *transactionWriter) WriteHeaderNow() { w.written = true }
+func (w *transactionWriter) Write(data []byte) (int, error) {
+	w.WriteHeaderNow()
+	return w.body.Write(data)
+}
+func (w *transactionWriter) WriteString(data string) (int, error) { return w.Write([]byte(data)) }
+func (w *transactionWriter) Status() int                          { return w.status }
+func (w *transactionWriter) Size() int {
+	if !w.written {
+		return -1
+	}
+	return w.body.Len()
+}
+func (w *transactionWriter) Written() bool { return w.written }
+func (w *transactionWriter) Flush()        { w.WriteHeaderNow() }
+
+func serveTransaction(c *gin.Context, tx pgx.Tx) {
+	original := c.Writer
+	buffer := &transactionWriter{ResponseWriter: original, header: original.Header().Clone(), status: http.StatusOK}
+	c.Writer = buffer
+	defer func() { c.Writer = original }()
+	c.Next()
+	if !c.IsAborted() && buffer.Status() < 400 {
+		if err := tx.Commit(c.Request.Context()); err != nil {
+			c.Writer = original
+			status := http.StatusInternalServerError
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && (pgErr.Code == "23514" || pgErr.Code == "23503" || pgErr.Code == "23505" || pgErr.Code == "P0001") {
+				status = http.StatusConflict
+			}
+			c.AbortWithStatusJSON(status, gin.H{"error": err.Error()})
+			return
+		}
+	}
+	for key := range original.Header() {
+		original.Header().Del(key)
+	}
+	for key, values := range buffer.header {
+		original.Header()[key] = values
+	}
+	original.WriteHeader(buffer.status)
+	_, _ = original.Write(buffer.body.Bytes())
 }
 
 // GetTx extracts the transaction from context (used by repos and tests).
