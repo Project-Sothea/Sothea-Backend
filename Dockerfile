@@ -12,16 +12,15 @@ ARG GO_VERSION=1.26.0
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION} AS build
 WORKDIR /src
 
+COPY go.mod go.sum ./
 RUN --mount=type=cache,id=go-mod-cache,target=/go/pkg/mod/ \
-    --mount=type=bind,source=go.sum,target=go.sum,Z \
-    --mount=type=bind,source=go.mod,target=go.mod,Z \
     go mod download -x
 
 ARG TARGETARCH
 
 # Build the application.
+COPY . .
 RUN --mount=type=cache,id=go-mod-cache,target=/go/pkg/mod/ \
-    --mount=type=bind,target=.,Z \
     CGO_ENABLED=0 GOARCH=$TARGETARCH go build -o /bin/server .
 
 FROM alpine:latest AS final
