@@ -15,6 +15,7 @@ func MediaRoot() string {
 	// Canonical uploads location at repo root
 	mediaPath := viper.GetString("MEDIA_ROOT")
 	if mediaPath == "" {
+		fmt.Printf("MEDIA_ROOT not set, defaulting to uploads/ in git root")
 		return MustGitPath("uploads")
 	}
 	return mediaPath

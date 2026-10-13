@@ -93,5 +93,6 @@ func main() {
 			c.File("./dist/index.html")
 		}
 	})
+	log.Printf("Server is running on port %s", port)
 	router.Run("0.0.0.0:" + port)
 }
