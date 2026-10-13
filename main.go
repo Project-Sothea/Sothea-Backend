@@ -26,7 +26,7 @@ func main() {
 	connStr := viper.GetString("DATABASE_URL")
 	secretKey := []byte(viper.GetString("SECRET_KEY"))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if port == "" {
