@@ -26,6 +26,9 @@ func main() {
 	connStr := viper.GetString("DATABASE_URL")
 	secretKey := []byte(viper.GetString("SECRET_KEY"))
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	if port == "" {
 		log.Fatal("PORT environment variable is not set")
 	}
@@ -36,14 +39,14 @@ func main() {
 		log.Fatal("SECRET_KEY environment variable is not set")
 	}
 
-	pool, err := pgxpool.New(context.Background(), connStr)
+	pool, err := pgxpool.New(ctx, connStr)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	defer pool.Close()
 	// Test postgres connection
-	if _, err := pool.Exec(context.Background(), "SELECT 1"); err != nil {
+	if _, err := pool.Exec(ctx, "SELECT 1"); err != nil {
 		log.Fatal(err)
 	}
 
