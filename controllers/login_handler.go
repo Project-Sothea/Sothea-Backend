@@ -34,10 +34,12 @@ func (l *LoginHandler) Login(c *gin.Context) {
 	if err := c.ShouldBindJSON(&u); err != nil {
 		// Use type assertion to check if err is of type validator.ValidationErrors
 		if _, ok := err.(validator.ValidationErrors); ok {
+			c.Error(err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Username must be a non-empty string!"})
 			return // exit on first error
 		} else {
 			// Handle other types of errors (e.g., JSON binding errors)
+			c.Error(err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -48,9 +50,11 @@ func (l *LoginHandler) Login(c *gin.Context) {
 	tokenString, err := l.Usecase.Login(ctx, u)
 	if err != nil {
 		if err == entities.ErrLoginFailed {
+			c.Error(err)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": entities.ErrLoginFailed.Error()})
 			return
 		} else {
+			c.Error(err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -66,6 +70,7 @@ func (l *LoginHandler) ListUsers(c *gin.Context) {
 	ctx := c.Request.Context()
 	users, err := l.Usecase.ListUsers(ctx)
 	if err != nil {
+		c.Error(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

@@ -8,10 +8,10 @@ import (
 	"time"
 
 	_httpDelivery "sothea-backend/controllers"
+	"sothea-backend/middlewares"
 	_postgresRepository "sothea-backend/repository/postgres"
 	_useCase "sothea-backend/usecases"
 
-	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
@@ -26,21 +26,35 @@ func main() {
 	connStr := viper.GetString("DATABASE_URL")
 	secretKey := []byte(viper.GetString("SECRET_KEY"))
 
+	if port == "" {
+		log.Fatal("PORT environment variable is not set")
+	}
+	if connStr == "" {
+		log.Fatal("DATABASE_URL environment variable is not set")
+	}
+	if len(secretKey) == 0 {
+		log.Fatal("SECRET_KEY environment variable is not set")
+	}
+
 	pool, err := pgxpool.New(context.Background(), connStr)
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	defer pool.Close()
+	// Test postgres connection
+	if _, err := pool.Exec(context.Background(), "SELECT 1"); err != nil {
+		log.Fatal(err)
+	}
 
 	router := gin.Default()
-	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"*"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
-		ExposeHeaders:    []string{"Content-Length"},
-		AllowCredentials: true,
-		MaxAge:           12 * time.Hour,
-	}))
+	router.Use(middlewares.ErrorLogger())
+
+	if viper.GetString("GIN_MODE") == "release" {
+		gin.SetMode(gin.ReleaseMode)
+		// only trust localhost
+		router.SetTrustedProxies([]string{"127.0.0.1"})
+	}
 
 	const distDir = "./dist"
 	router.StaticFile("/", filepath.Join(distDir, "index.html"))

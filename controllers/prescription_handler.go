@@ -61,6 +61,7 @@ func (h *PrescriptionHandler) ListPrescriptions(c *gin.Context) {
 	if q := c.Query("patient_id"); q != "" {
 		val, err := strconv.ParseInt(q, 10, 64)
 		if err != nil {
+			c.Error(err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid patient_id"})
 			return
 		}
@@ -69,6 +70,7 @@ func (h *PrescriptionHandler) ListPrescriptions(c *gin.Context) {
 	if q := c.Query("vid"); q != "" {
 		val, err := strconv.ParseInt(q, 10, 32)
 		if err != nil {
+			c.Error(err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid vid"})
 			return
 		}
@@ -78,6 +80,7 @@ func (h *PrescriptionHandler) ListPrescriptions(c *gin.Context) {
 
 	prescriptions, err := h.Usecase.ListPrescriptions(c.Request.Context(), patientIDPtr, vidPtr)
 	if err != nil {
+		c.Error(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -92,6 +95,7 @@ func (h *PrescriptionHandler) CreatePrescription(c *gin.Context) {
 	}
 	prescription, err := h.Usecase.CreatePrescription(c.Request.Context(), &p)
 	if err != nil {
+		c.Error(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -101,11 +105,13 @@ func (h *PrescriptionHandler) CreatePrescription(c *gin.Context) {
 func (h *PrescriptionHandler) GetPrescription(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
+		c.Error(err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
 	prescription, err := h.Usecase.GetPrescriptionByID(c.Request.Context(), id)
 	if err != nil {
+		c.Error(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -115,6 +121,7 @@ func (h *PrescriptionHandler) GetPrescription(c *gin.Context) {
 func (h *PrescriptionHandler) UpdatePrescription(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
+		c.Error(err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
@@ -127,6 +134,7 @@ func (h *PrescriptionHandler) UpdatePrescription(c *gin.Context) {
 
 	prescription, err := h.Usecase.UpdatePrescription(c.Request.Context(), &p)
 	if err != nil {
+		c.Error(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -136,10 +144,12 @@ func (h *PrescriptionHandler) UpdatePrescription(c *gin.Context) {
 func (h *PrescriptionHandler) DeletePrescription(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
+		c.Error(err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
 	if err := h.Usecase.DeletePrescription(c.Request.Context(), id); err != nil {
+		c.Error(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -153,6 +163,7 @@ func (h *PrescriptionHandler) DeletePrescription(c *gin.Context) {
 func (h *PrescriptionHandler) AddLine(c *gin.Context) {
 	prescriptionID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
+		c.Error(err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid prescription id"})
 		return
 	}
@@ -181,6 +192,7 @@ func (h *PrescriptionHandler) AddLine(c *gin.Context) {
 	created, err := h.Usecase.AddLine(c.Request.Context(), &line)
 	if err != nil {
 		if stockErr, ok := err.(*postgres.InsufficientStockError); ok {
+			c.Error(stockErr)
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error":           stockErr.Error(),
 				"code":            stockErr.Code(),
@@ -190,6 +202,7 @@ func (h *PrescriptionHandler) AddLine(c *gin.Context) {
 			})
 			return
 		}
+		c.Error(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -199,6 +212,7 @@ func (h *PrescriptionHandler) AddLine(c *gin.Context) {
 func (h *PrescriptionHandler) UpdateLine(c *gin.Context) {
 	lineID, err := strconv.ParseInt(c.Param("lineId"), 10, 64)
 	if err != nil {
+		c.Error(err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid line id"})
 		return
 	}
@@ -227,6 +241,7 @@ func (h *PrescriptionHandler) UpdateLine(c *gin.Context) {
 	updated, err := h.Usecase.UpdateLine(c.Request.Context(), &line)
 	if err != nil {
 		if stockErr, ok := err.(*postgres.InsufficientStockError); ok {
+			c.Error(stockErr)
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error":           stockErr.Error(),
 				"code":            stockErr.Code(),
@@ -236,6 +251,7 @@ func (h *PrescriptionHandler) UpdateLine(c *gin.Context) {
 			})
 			return
 		}
+		c.Error(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -245,10 +261,12 @@ func (h *PrescriptionHandler) UpdateLine(c *gin.Context) {
 func (h *PrescriptionHandler) RemoveLine(c *gin.Context) {
 	lineID, err := strconv.ParseInt(c.Param("lineId"), 10, 64)
 	if err != nil {
+		c.Error(err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid line id"})
 		return
 	}
 	if err := h.Usecase.RemoveLine(c.Request.Context(), lineID); err != nil {
+		c.Error(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -262,11 +280,13 @@ func (h *PrescriptionHandler) RemoveLine(c *gin.Context) {
 func (h *PrescriptionHandler) ListLineAllocations(c *gin.Context) {
 	lineID, err := strconv.ParseInt(c.Param("lineId"), 10, 64)
 	if err != nil {
+		c.Error(err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid line id"})
 		return
 	}
 	allocs, err := h.Usecase.ListLineAllocations(c.Request.Context(), lineID)
 	if err != nil {
+		c.Error(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -276,6 +296,7 @@ func (h *PrescriptionHandler) ListLineAllocations(c *gin.Context) {
 func (h *PrescriptionHandler) SetLineAllocations(c *gin.Context) {
 	lineID, err := strconv.ParseInt(c.Param("lineId"), 10, 64)
 	if err != nil {
+		c.Error(err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid line id"})
 		return
 	}
@@ -296,6 +317,7 @@ func (h *PrescriptionHandler) SetLineAllocations(c *gin.Context) {
 	out, err := h.Usecase.SetLineAllocations(c.Request.Context(), lineID, allocs)
 	if err != nil {
 		if stockErr, ok := err.(*postgres.InsufficientStockError); ok {
+			c.Error(stockErr)
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error":           stockErr.Error(),
 				"code":            stockErr.Code(),
@@ -305,6 +327,7 @@ func (h *PrescriptionHandler) SetLineAllocations(c *gin.Context) {
 			})
 			return
 		}
+		c.Error(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -318,11 +341,13 @@ func (h *PrescriptionHandler) SetLineAllocations(c *gin.Context) {
 func (h *PrescriptionHandler) MarkLinePacked(c *gin.Context) {
 	lineID, err := strconv.ParseInt(c.Param("lineId"), 10, 64)
 	if err != nil {
+		c.Error(err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid line id"})
 		return
 	}
 	line, err := h.Usecase.MarkLinePacked(c.Request.Context(), lineID)
 	if err != nil {
+		c.Error(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -332,11 +357,13 @@ func (h *PrescriptionHandler) MarkLinePacked(c *gin.Context) {
 func (h *PrescriptionHandler) UnpackLine(c *gin.Context) {
 	lineID, err := strconv.ParseInt(c.Param("lineId"), 10, 64)
 	if err != nil {
+		c.Error(err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid line id"})
 		return
 	}
 	line, err := h.Usecase.UnpackLine(c.Request.Context(), lineID)
 	if err != nil {
+		c.Error(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -350,11 +377,13 @@ func (h *PrescriptionHandler) UnpackLine(c *gin.Context) {
 func (h *PrescriptionHandler) DispensePrescription(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
+		c.Error(err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
 	p, err := h.Usecase.DispensePrescription(c.Request.Context(), id)
 	if err != nil {
+		c.Error(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

@@ -22,6 +22,7 @@ func WithTx(db *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tx, err := db.Begin(c.Request.Context())
 		if err != nil {
+			c.Error(err)
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to start tx"})
 			return
 		}
@@ -35,6 +36,7 @@ func WithTx(db *pgxpool.Pool) gin.HandlerFunc {
 					`SELECT set_config('sothea.user_id', $1, true)`,
 					strconv.FormatInt(userID, 10),
 				); err != nil {
+					c.Error(err)
 					c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to set user context"})
 					return
 				}
@@ -94,6 +96,7 @@ func serveTransaction(c *gin.Context, tx pgx.Tx) {
 			if errors.As(err, &pgErr) && (pgErr.Code == "23514" || pgErr.Code == "23503" || pgErr.Code == "23505" || pgErr.Code == "P0001") {
 				status = http.StatusConflict
 			}
+			c.Error(err)
 			c.AbortWithStatusJSON(status, gin.H{"error": err.Error()})
 			return
 		}

@@ -59,6 +59,7 @@ func AuthRequired(secretKey []byte) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
+			c.Error(fmt.Errorf("Authorization header required"))
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header required"})
 			c.Abort()
 			return
@@ -66,6 +67,7 @@ func AuthRequired(secretKey []byte) gin.HandlerFunc {
 
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+			c.Error(fmt.Errorf("Invalid Authorization header format"))
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid Authorization header format"})
 			c.Abort()
 			return
@@ -73,6 +75,7 @@ func AuthRequired(secretKey []byte) gin.HandlerFunc {
 
 		claims, err := VerifyToken(parts[1], secretKey)
 		if err != nil {
+			c.Error(fmt.Errorf("Invalid or expired token"))
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
 			c.Abort()
 			return
