@@ -235,6 +235,13 @@ type PrescriptionLine struct {
 	UpdatedBy       *int64     `json:"updated_by"`
 }
 
+type Referral struct {
+	ID                 int32   `json:"id"`
+	Vid                int32   `json:"vid"`
+	WhereToRefer       *string `json:"where_to_refer"`
+	AdditionalComments *string `json:"additional_comments"`
+}
+
 type Route struct {
 	Code  string `json:"code"`
 	Label string `json:"label"`

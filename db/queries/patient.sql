@@ -553,6 +553,23 @@ DELETE FROM doctors_consultation
 WHERE id = $1
   AND vid = $2;
 
+-- Referral -------------------------------------------------------------------
+
+-- name: GetReferral :one
+SELECT id, vid, where_to_refer, additional_comments
+FROM referral
+WHERE id = $1 AND vid = $2;
+
+-- name: UpsertReferral :exec
+INSERT INTO referral (id, vid, where_to_refer, additional_comments)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (id, vid) DO UPDATE SET
+  where_to_refer = EXCLUDED.where_to_refer,
+  additional_comments = EXCLUDED.additional_comments;
+
+-- name: DeleteReferral :exec
+DELETE FROM referral WHERE id = $1 AND vid = $2;
+
 -- Patient Metadata -----------------------------------------------------------
 
 -- name: GetPatientVisitMetaLatest :many
@@ -574,7 +591,7 @@ SELECT DISTINCT ON (a.id)
   p.contact_no,
   p.drug_allergies,
   a.sent_to_id,
-  dc.referral_needed,
+  (COALESCE(dc.referral_needed, FALSE) OR NULLIF(BTRIM(r.where_to_refer), '') IS NOT NULL)::boolean AS referral_needed,
   EXISTS (
     SELECT 1
     FROM prescriptions pr
@@ -610,6 +627,7 @@ FROM admin a
 JOIN patient_details p ON p.id = a.id
 LEFT JOIN doctors_consultation dc
   ON a.id = dc.id AND a.vid = dc.vid
+LEFT JOIN referral r ON a.id = r.id AND a.vid = r.vid
 INNER JOIN LatestDates ld
   ON a.id = ld.id AND a.reg_date = ld.latest_reg_date
 ORDER BY a.id, a.vid DESC;
@@ -628,7 +646,7 @@ SELECT DISTINCT ON (a.id)
   p.contact_no,
   p.drug_allergies,
   a.sent_to_id,
-  dc.referral_needed,
+  (COALESCE(dc.referral_needed, FALSE) OR NULLIF(BTRIM(r.where_to_refer), '') IS NOT NULL)::boolean AS referral_needed,
   EXISTS (
     SELECT 1
     FROM prescriptions pr
@@ -664,5 +682,6 @@ FROM admin a
 JOIN patient_details p ON p.id = a.id
 LEFT JOIN doctors_consultation dc
   ON a.id = dc.id AND a.vid = dc.vid
+LEFT JOIN referral r ON a.id = r.id AND a.vid = r.vid
 WHERE a.reg_date = $1
 ORDER BY a.id, a.vid DESC;

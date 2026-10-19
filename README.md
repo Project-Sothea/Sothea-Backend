@@ -77,6 +77,7 @@ Patient Golang struct schema: `/entities/models.go`
 - Dental
 - Physiotherapy
 - Doctor's Consultation
+- Referral (where to refer and additional comments)
 
 Patients go through the physical health screening stations with the admin station first, and the rest having no guaranteed order. Hence, if a patient exists, they will have a patient_details row and an admin row for each visit, but may not have the other categories present yet.  
 Additionally, patients may have multiple visits, with multiple rows for each category, representing the previous years of visits.  
@@ -89,6 +90,27 @@ Every visit row in the patient database will have the following structure:
 ```
 
 The patient id uniquely identifies a patient, while the visit id narrows down which visit the row is associated with. A numeric visit id is used instead of the date to allow for easier querying.
+
+### Referral storage and API
+
+Referral details are stored per visit in `referral`, with `(id, vid)` referencing
+`admin` and cascading on visit/patient deletion. The fields are `where_to_refer`
+and `additional_comments` (nullable text).
+
+Like other clinical sections, referral uses the authenticated visit routes:
+
+- `GET /patient/:id/:vid` includes `referral` (or `null` when none is recorded).
+- `PATCH /patient/:id/:vid` accepts
+  `{"referral":{"where_to_refer":"Khmer Optics","additional_comments":"Follow up"}}`.
+  Only supplied sections are updated; referral saves do not modify doctor consultation.
+- `DELETE /patient/:id/:vid` also removes its referral via the foreign key.
+
+For an existing database, apply `sql/5_referral_setup.sql` before running the
+updated backend. This additive, transactional script copies existing consultation
+`referral_loc`/`remarks` into referral rows without overwriting existing referrals.
+It leaves the original consultation fields intact. Fresh Docker database setup
+runs it automatically after the other setup scripts. Do not rerun the destructive
+`sql/2_patients_setup.sql` to upgrade an existing database.
 
 ## Database and Database Schema
 

@@ -8,6 +8,7 @@ DROP TABLE IF EXISTS height_and_weight;
 DROP TABLE IF EXISTS visual_acuity;
 DROP TABLE IF EXISTS fall_risk;
 DROP TABLE IF EXISTS doctors_consultation;
+DROP TABLE IF EXISTS referral;
 DROP TABLE IF EXISTS admin;
 DROP TABLE IF EXISTS patient_details;
 
@@ -187,6 +188,17 @@ CREATE TABLE IF NOT EXISTS doctors_consultation
 
     PRIMARY KEY (id, vid),                                               -- Composite primary key
     CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE -- Foreign key referencing the composite key in admin
+);
+
+CREATE TABLE IF NOT EXISTS referral
+(
+    id                  INTEGER NOT NULL,
+    vid                 INTEGER NOT NULL,
+    where_to_refer      TEXT,
+    additional_comments TEXT,
+
+    PRIMARY KEY (id, vid),
+    CONSTRAINT fk_admin FOREIGN KEY (id, vid) REFERENCES admin (id, vid) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS physiotherapy

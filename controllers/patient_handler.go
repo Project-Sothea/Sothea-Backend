@@ -369,6 +369,9 @@ func (p *PatientHandler) UpdatePatientVisit(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fieldErr.Error()})
 			return
 		}
+		c.Error(err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
 	if err := p.Usecase.UpdatePatientVisit(c.Request.Context(), id32, vid32, &patient); err != nil {

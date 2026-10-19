@@ -117,7 +117,15 @@ func (p *PostgresPatientRepository) GetPatientVisit(ctx context.Context, id int3
 		return nil, err
 	}
 
+	var referral *db.Referral
+	if row, err := q.GetReferral(ctx, db.GetReferralParams{ID: id, Vid: vid}); err == nil {
+		referral = &row
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+
 	patient := entities.Patient{
+		Referral:            referral,
 		PatientDetails:      &patientRow,
 		Admin:               admin,
 		PastMedicalHistory:  pastmedicalhistory,
@@ -425,6 +433,13 @@ func (p *PostgresPatientRepository) UpdatePatientVisit(ctx context.Context, id i
 	if patient.Physiotherapy != nil {
 		params := toPhysiotherapyParams(id, vid, patient.Physiotherapy)
 		if err = q.UpsertPhysiotherapy(ctx, params); err != nil {
+			return err
+		}
+	}
+
+	if patient.Referral != nil {
+		params := toReferralParams(id, vid, patient.Referral)
+		if err = q.UpsertReferral(ctx, params); err != nil {
 			return err
 		}
 	}
@@ -754,7 +769,7 @@ func toPatientVisitMetaLatest(row db.GetPatientVisitMetaLatestRow) entities.Pati
 		row.ContactNo,
 		row.DrugAllergies,
 		row.SentToID,
-		row.ReferralNeeded,
+		&row.ReferralNeeded,
 		row.HasPrescriptionWithDrug,
 		row.AllPrescriptionDrugsPacked,
 		row.PrescriptionDispensed,
@@ -775,7 +790,7 @@ func toPatientVisitMetaByDate(row db.GetPatientVisitMetaByDateRow) entities.Pati
 		row.ContactNo,
 		row.DrugAllergies,
 		row.SentToID,
-		row.ReferralNeeded,
+		&row.ReferralNeeded,
 		row.HasPrescriptionWithDrug,
 		row.AllPrescriptionDrugsPacked,
 		row.PrescriptionDispensed,
@@ -817,5 +832,14 @@ func buildPatientVisitMeta(
 		HasPrescriptionWithDrug:    hasPrescription,
 		AllPrescriptionDrugsPacked: allPrescriptionPacked,
 		PrescriptionDispensed:      prescriptionDispensed,
+	}
+}
+
+func toReferralParams(id int32, vid int32, referral *db.Referral) db.UpsertReferralParams {
+	return db.UpsertReferralParams{
+		ID:                 id,
+		Vid:                vid,
+		WhereToRefer:       referral.WhereToRefer,
+		AdditionalComments: referral.AdditionalComments,
 	}
 }

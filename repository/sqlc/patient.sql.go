@@ -163,6 +163,20 @@ func (q *Queries) DeletePhysiotherapy(ctx context.Context, arg DeletePhysiothera
 	return err
 }
 
+const deleteReferral = `-- name: DeleteReferral :exec
+DELETE FROM referral WHERE id = $1 AND vid = $2
+`
+
+type DeleteReferralParams struct {
+	ID  int32 `json:"id"`
+	Vid int32 `json:"vid"`
+}
+
+func (q *Queries) DeleteReferral(ctx context.Context, arg DeleteReferralParams) error {
+	_, err := q.db.Exec(ctx, deleteReferral, arg.ID, arg.Vid)
+	return err
+}
+
 const deleteSocialHistory = `-- name: DeleteSocialHistory :exec
 DELETE FROM social_history
 WHERE id = $1
@@ -550,7 +564,7 @@ SELECT DISTINCT ON (a.id)
   p.contact_no,
   p.drug_allergies,
   a.sent_to_id,
-  dc.referral_needed,
+  (COALESCE(dc.referral_needed, FALSE) OR NULLIF(BTRIM(r.where_to_refer), '') IS NOT NULL)::boolean AS referral_needed,
   EXISTS (
     SELECT 1
     FROM prescriptions pr
@@ -586,6 +600,7 @@ FROM admin a
 JOIN patient_details p ON p.id = a.id
 LEFT JOIN doctors_consultation dc
   ON a.id = dc.id AND a.vid = dc.vid
+LEFT JOIN referral r ON a.id = r.id AND a.vid = r.vid
 WHERE a.reg_date = $1
 ORDER BY a.id, a.vid DESC
 `
@@ -603,7 +618,7 @@ type GetPatientVisitMetaByDateRow struct {
 	ContactNo                  *string   `json:"contact_no"`
 	DrugAllergies              *string   `json:"drug_allergies"`
 	SentToID                   bool      `json:"sent_to_id"`
-	ReferralNeeded             *bool     `json:"referral_needed"`
+	ReferralNeeded             bool      `json:"referral_needed"`
 	HasPrescriptionWithDrug    bool      `json:"has_prescription_with_drug"`
 	AllPrescriptionDrugsPacked bool      `json:"all_prescription_drugs_packed"`
 	PrescriptionDispensed      bool      `json:"prescription_dispensed"`
@@ -666,7 +681,7 @@ SELECT DISTINCT ON (a.id)
   p.contact_no,
   p.drug_allergies,
   a.sent_to_id,
-  dc.referral_needed,
+  (COALESCE(dc.referral_needed, FALSE) OR NULLIF(BTRIM(r.where_to_refer), '') IS NOT NULL)::boolean AS referral_needed,
   EXISTS (
     SELECT 1
     FROM prescriptions pr
@@ -702,6 +717,7 @@ FROM admin a
 JOIN patient_details p ON p.id = a.id
 LEFT JOIN doctors_consultation dc
   ON a.id = dc.id AND a.vid = dc.vid
+LEFT JOIN referral r ON a.id = r.id AND a.vid = r.vid
 INNER JOIN LatestDates ld
   ON a.id = ld.id AND a.reg_date = ld.latest_reg_date
 ORDER BY a.id, a.vid DESC
@@ -720,7 +736,7 @@ type GetPatientVisitMetaLatestRow struct {
 	ContactNo                  *string   `json:"contact_no"`
 	DrugAllergies              *string   `json:"drug_allergies"`
 	SentToID                   bool      `json:"sent_to_id"`
-	ReferralNeeded             *bool     `json:"referral_needed"`
+	ReferralNeeded             bool      `json:"referral_needed"`
 	HasPrescriptionWithDrug    bool      `json:"has_prescription_with_drug"`
 	AllPrescriptionDrugsPacked bool      `json:"all_prescription_drugs_packed"`
 	PrescriptionDispensed      bool      `json:"prescription_dispensed"`
@@ -795,6 +811,31 @@ func (q *Queries) GetPhysiotherapy(ctx context.Context, arg GetPhysiotherapyPara
 		&i.ObjectiveAssessment,
 		&i.Intervention,
 		&i.Evaluation,
+	)
+	return i, err
+}
+
+const getReferral = `-- name: GetReferral :one
+
+SELECT id, vid, where_to_refer, additional_comments
+FROM referral
+WHERE id = $1 AND vid = $2
+`
+
+type GetReferralParams struct {
+	ID  int32 `json:"id"`
+	Vid int32 `json:"vid"`
+}
+
+// Referral -------------------------------------------------------------------
+func (q *Queries) GetReferral(ctx context.Context, arg GetReferralParams) (Referral, error) {
+	row := q.db.QueryRow(ctx, getReferral, arg.ID, arg.Vid)
+	var i Referral
+	err := row.Scan(
+		&i.ID,
+		&i.Vid,
+		&i.WhereToRefer,
+		&i.AdditionalComments,
 	)
 	return i, err
 }
@@ -1467,6 +1508,31 @@ func (q *Queries) UpsertPhysiotherapy(ctx context.Context, arg UpsertPhysiothera
 		arg.ObjectiveAssessment,
 		arg.Intervention,
 		arg.Evaluation,
+	)
+	return err
+}
+
+const upsertReferral = `-- name: UpsertReferral :exec
+INSERT INTO referral (id, vid, where_to_refer, additional_comments)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (id, vid) DO UPDATE SET
+  where_to_refer = EXCLUDED.where_to_refer,
+  additional_comments = EXCLUDED.additional_comments
+`
+
+type UpsertReferralParams struct {
+	ID                 int32   `json:"id"`
+	Vid                int32   `json:"vid"`
+	WhereToRefer       *string `json:"where_to_refer"`
+	AdditionalComments *string `json:"additional_comments"`
+}
+
+func (q *Queries) UpsertReferral(ctx context.Context, arg UpsertReferralParams) error {
+	_, err := q.db.Exec(ctx, upsertReferral,
+		arg.ID,
+		arg.Vid,
+		arg.WhereToRefer,
+		arg.AdditionalComments,
 	)
 	return err
 }
