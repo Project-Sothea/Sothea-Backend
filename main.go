@@ -64,6 +64,11 @@ func main() {
 	router.Static("/assets", "./dist/assets")
 
 	api := router.Group("/api")
+	api.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"status": "ok",
+		})
+	})
 
 	userRepo := _postgresRepository.NewPostgresUserRepository(pool)
 
